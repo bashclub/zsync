@@ -81,7 +81,7 @@ if [[ $source == "" ]]; then
     echo -e "Configuration:\n\ttarget=$target\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n"
 else
     sshport=-p$sshport
-    echo -e "Configuration:\n\ttarget=$target\n\tsource=$source\n\tsshport=22\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n"
+    echo -e "Configuration:\n\ttarget=$target\n\tsource=$source\n\tsshport=$sshport\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n"
 fi
 
 # query source datasets/subvols to replicate
