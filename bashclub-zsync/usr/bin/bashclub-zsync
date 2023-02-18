@@ -53,6 +53,7 @@ shift $((OPTIND-1))
 
 # load config file
 if [ -f $conf ]; then
+    echo "Reading configuration $conf"
     source $conf
 else
     mkdir -p $(dirname $conf)
@@ -65,6 +66,14 @@ snapshot_filter=$snapshot_filter
 EOF
     echo "Initial config file created. Please adjust and restart script. Exiting..."
     usage 0
+fi
+
+if [[ $source == "" ]]; then
+    echo "source is empty, switching to local mode."
+    ssh=
+    echo -e "Configuration:\n\ttarget=$target\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n"
+else
+    echo -e "Configuration:\n\ttarget=$target\n\tsource=$source\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n"
 fi
 
 # query source datasets/subvols to replicate
