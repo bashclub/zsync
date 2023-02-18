@@ -20,13 +20,16 @@ target=pool/dataset
 # ssh address of remote machine
 source=user@host
 
+# ssh port of remote machine
+sshport=22
+
 # zfs user parameter to identify filesystems/volumes to replicate
 tag=bashclub:zsync
 
 # if $tag=subvols, which source to filter: "inherited" or "inherited|received"
 subvol_source="inherited|received"
 
-# 
+# pipe separated list of snapshot name filters
 snapshot_filter="hourly|daily|weekly|monthly"
 
 usage() {
@@ -62,6 +65,7 @@ else
     cat << EOF > $conf
 target=$target
 source=$source
+sshport=22
 tag=$tag
 subvol_source="$subvol_source"
 snapshot_filter="$snapshot_filter"
@@ -73,14 +77,16 @@ fi
 if [[ $source == "" ]]; then
     echo "source is empty, switching to local mode."
     ssh=
+    sshport=
     echo -e "Configuration:\n\ttarget=$target\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n"
 else
-    echo -e "Configuration:\n\ttarget=$target\n\tsource=$source\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n"
+    sshport=-p$sshport
+    echo -e "Configuration:\n\ttarget=$target\n\tsource=$source\n\tsshport=22\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n"
 fi
 
 # query source datasets/subvols to replicate
 IFS=$'\n'
-for zvol in $($ssh $source "zfs get -H -o name,value,source -t filesystem,volume $tag"); do
+for zvol in $($ssh $sshport $source "zfs get -H -o name,value,source -t filesystem,volume $tag"); do
     name=$(echo $zvol | cut -f1)
     if [[ "$(echo $zvol | cut -f2)" == "subvols" ]] && [[ $(echo $zvol | grep -E $subvol_source) ]]; then
         echo "Including $name"
@@ -109,19 +115,19 @@ for name in "${syncvols[@]}"; do
 
         # start initial replication
         IFS=$'\n'
-        for snap in $($ssh $source "zfs list -H -t snapshot -o name -S creation $name | grep -E \"$snapshot_filter\" | tail -1"); do
+        for snap in $($ssh $sshport $source "zfs list -H -t snapshot -o name -S creation $name | grep -E \"$snapshot_filter\" | tail -1"); do
             echo "Start initial replication: $snap => $target/$(echo $name | cut -d'/' -f1)"
-            $ssh $source "zfs send -p $debug $snap" | $zfs receive -x mountpoint -x canmount -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | cut -d'/' -f1)
+            $ssh $sshport $source "zfs send -p $debug $snap" | $zfs receive -x mountpoint -x canmount -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | cut -d'/' -f1)
         done
     fi
 
     # replicate incremental
     guid=$($zfs list -H -o guid -s creation -t snapshot $target/$name | tail -1)
-    last=$($ssh $source "zfs list -H -o name,guid -t snapshot $name | grep $guid | tail -1 | cut -f1")
+    last=$($ssh $sshport $source "zfs list -H -o name,guid -t snapshot $name | grep $guid | tail -1 | cut -f1")
     IFS=$'\n'
-    for snap in $($ssh $source "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E \"$snapshot_filter\" | grep --after-context=200 $guid | grep -v $guid | cut -f1"); do
+    for snap in $($ssh $sshport $source "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E \"$snapshot_filter\" | grep --after-context=200 $guid | grep -v $guid | cut -f1"); do
         echo "Replicating delta of $last <=> $snap to $target/$name"
-        $ssh $source "zfs send $debug -i $last $snap" | zfs receive -x mountpoint -x canmount -x $tag -x com.sun:auto-snapshot -F $debug $target/$name
+        $ssh $sshport $source "zfs send $debug -i $last $snap" | zfs receive -x mountpoint -x canmount -x $tag -x com.sun:auto-snapshot -F $debug $target/$name
         last=$snap
     done
 
@@ -129,7 +135,7 @@ for name in "${syncvols[@]}"; do
     filter=$(echo -e $snapshot_filter | sed "s/|/ /g")
     IFS=$' '
     for interval in $filter ; do
-        guid=$($ssh $source "zfs list -H -o guid,name -S creation -t snapshot $name | grep $interval | cut -f1 | tail -1")
+        guid=$($ssh $sshport $source "zfs list -H -o guid,name -S creation -t snapshot $name | grep $interval | cut -f1 | tail -1")
         if [[ "$(echo -e "$guid" | sed 's/\n//g')" != "" ]]; then
             for snap in $($zfs list -H -o name,guid -S creation -t snapshot $target/$name | grep $interval | grep --after-context=200 $guid | grep -v $guid | cut -f1); do
                 echo "Deleting $snap"
