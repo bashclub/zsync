@@ -126,7 +126,7 @@ for name in "${syncvols[@]}"; do
     done
 
     # cleanup old snapshots
-    for interval in $(echo -e $snapshot_filter) ; do
+    for interval in $(echo -e $snapshot_filter | sed "s/|/ /g") ; do
         guid=$($ssh $source "zfs list -H -o guid,name -S creation -t snapshot $name | grep $interval | cut -f1 | tail -1")
         if [[ "$(echo -e "$guid" | sed 's/\n//g')" != "" ]]; then
             for snap in $($zfs list -H -o name,guid -S creation -t snapshot $target/$name | grep $interval | grep --after-context=200 $guid | grep -v $guid | cut -f1); do
