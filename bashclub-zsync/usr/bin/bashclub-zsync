@@ -109,7 +109,7 @@ for name in "${syncvols[@]}"; do
 
         # start initial replication
         IFS=$'\n'
-        for snap in $($ssh $source "zfs list -H -t snapshot -o name -S creation $name | grep -E \"$snapshot_filter\" | tail -1"); do
+        for snap in $($ssh $source "zfs list -H -t snapshot -o name -S creation $name | grep -E "$snapshot_filter" | tail -1"); do
             echo "Start initial replication: $snap => $target/$(echo $name | cut -d'/' -f1)"
             $ssh $source "zfs send -p $debug $snap" | $zfs receive -x mountpoint -x canmount -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | cut -d'/' -f1)
         done
@@ -119,7 +119,7 @@ for name in "${syncvols[@]}"; do
     guid=$($zfs list -H -o guid -s creation -t snapshot $target/$name | tail -1)
     last=$($ssh $source "zfs list -H -o name,guid -t snapshot $name | grep $guid | tail -1 | cut -f1")
     IFS=$'\n'
-    for snap in $($ssh $source "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E \"$snapshot_filter\" | grep --after-context=200 $guid | grep -v $guid | cut -f1"); do
+    for snap in $($ssh $source "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E "$snapshot_filter" | grep --after-context=200 $guid | grep -v $guid | cut -f1"); do
         echo "Replicating delta of $last <=> $snap to $target/$name"
         $ssh $source "zfs send $debug -i $last $snap" | zfs receive -x mountpoint -x canmount -x $tag -x com.sun:auto-snapshot -F $debug $target/$name
         last=$snap
