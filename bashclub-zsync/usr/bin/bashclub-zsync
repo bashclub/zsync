@@ -63,8 +63,8 @@ else
 target=$target
 source=$source
 tag=$tag
-subvol_source=$subvol_source
-snapshot_filter=$snapshot_filter
+subvol_source="$subvol_source"
+snapshot_filter="$snapshot_filter"
 EOF
     echo "Initial config file created. Please adjust and restart script. Exiting..."
     usage 0
