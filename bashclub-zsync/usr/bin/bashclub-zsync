@@ -1,0 +1,119 @@
+#!/bin/bash
+#
+# bashclub zfs replication script
+# Author: (C) 2023 Thorsten Spille <thorsten@spille-edv.de>
+
+PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
+
+prog="$(basename $0)"
+zfs=$(which zfs)
+ssh=$(which ssh)
+
+#### default config file, can be changed with parameter -c
+conf=/etc/bashclub/zsync.conf
+
+#### default values in config file
+# replication target on local machine 
+target=pool/dataset
+
+# ssh address of remote machine
+source=user@host
+
+# zfs user parameter to identify filesystems/volumes to replicate
+tag=bashclub:zsync
+
+# if $tag=subvols, which source to filter: "inherited" or "inherited|received"
+subvol_source="inherited|received"
+
+# 
+snapshot_filter="hourly|daily|weekly|monthly"
+
+usage() {
+	cat >&2 <<-EOF
+	usage: $prog [-h] [-c CONFIG]
+	  creates a mirrored replication of configured zfs filesystems / volumes
+    -c CONFIG    Configuration file for this script
+    -d           Debug mode
+  ---------------------------------------------------------------------------
+    (C) 2023     by Spille IT Solutions for bashclub (github.com/bashclub)
+                 Author: Thorsten Spille <thorsten@spille-edv.de>
+  ---------------------------------------------------------------------------
+	EOF
+	exit $1
+}
+
+while getopts "hc:" opt; do
+  case $opt in
+    h) usage 0 ;;
+    c) conf=$OPTARG ;;
+    *) usage 1 ;;
+  esac
+done
+shift $((OPTIND-1))
+
+# load config file
+if [ -f $conf ]; then
+    source $conf
+else
+    mkdir -p $(dirname $conf)
+    cat << EOF > $conf
+target=$target
+source=$source
+tag=$tag
+subvol_source=$subvol_source
+snapshot_filter=$snapshot_filter
+EOF
+    echo "Initial config file created. Please adjust and restart script. Exiting..."
+    usage 0
+fi
+
+# query source datasets/subvols to replicate
+IFS=$'\n'
+for zvol in $($ssh $source "zfs get -H -o name,value,source -t filesystem,volume $tag"); do
+    if [[ "$(echo $zvol | cut -f2)" == "subvols" ]] && [[ $(echo $zvol | grep -E $subvol_source) ]]; then
+        name=$(echo $zvol | cut -f1)
+        syncvols=("${syncvols[@]}" "$name")
+    elif [[ "$(echo $zvol | cut -f2)" == "all" ]];then
+        name=$(echo $zvol | cut -f1)
+        syncvols=("${syncvols[@]}" "$name")
+    fi
+done
+
+
+for name in "${syncvols[@]}"; do
+    IFS=$' '
+    if [ $($zfs list -H -s creation -t snapshot $target/$name > /dev/null 2>&1 ; echo $?) -gt 0 ]; then
+
+        prefix=""
+        for part in $(echo $target/$(echo $name | cut -d'/' -f1) | sed "s/\// /g"); do
+            if [ $($zfs list $prefix$part > /dev/null 2>&1 ; echo $?) -gt 0 ]; then
+                $zfs create $prefix$part
+            fi
+            prefix="$prefix$part/"
+        done
+
+        IFS=$'\n'
+        for snap in $($ssh $source "zfs list -H -t snapshot -o name -S creation $name | grep -E \"$snapshot_filter\" | tail -1"); do
+            $ssh $source "zfs send -pv $snap" | $zfs receive -x mountpoint -x canmount -x $tag -x com.sun:auto-snapshot -dvF $target/$(echo $name | cut -d'/' -f1)
+        done
+    fi
+
+    # replicate incremental
+    guid=$($zfs list -H -o guid -s creation -t snapshot $target/$name | tail -1)
+    last=$($ssh $source "zfs list -H -o name,guid -t snapshot $name | grep $guid | tail -1 | cut -f1")
+    IFS=$'\n'
+    for snap in $($ssh $source "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E \"$snapshot_filter\" | grep --after-context=200 $guid | grep -v $guid | cut -f1"); do
+        $ssh $source "zfs send -v -i $last $snap" | zfs receive -x mountpoint -x canmount -x $tag -x com.sun:auto-snapshot -Fv $target/$name
+        last=$snap
+    done
+
+    # cleanup old snapshots
+    for interval in $(echo -e $snapshot_filter) ; do
+        guid=$($ssh $source "zfs list -H -o guid,name -S creation -t snapshot $name | grep $interval | cut -f1 | tail -1")
+        if [[ "$(echo -e "$guid" | sed 's/\n//g')" != "" ]]; then
+            for snap in $($zfs list -H -o name,guid -S creation -t snapshot $target/$name | grep $interval | grep --after-context=200 $guid | grep -v $guid | cut -f1); do
+                $zfs destroy $snap
+            done
+        fi
+    done
+done
