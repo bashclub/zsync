@@ -31,7 +31,7 @@ snapshot_filter="hourly|daily|weekly|monthly"
 
 usage() {
 	cat >&2 <<-EOF
-	usage: $prog [-h] [-c CONFIG]
+	usage: $prog [-h] [-d] [-c CONFIG]
 	  creates a mirrored replication of configured zfs filesystems / volumes
     -c CONFIG    Configuration file for this script
     -d           Debug mode
@@ -43,7 +43,7 @@ usage() {
 	exit $1
 }
 
-while getopts "hc:" opt; do
+while getopts "hdc:" opt; do
   case $opt in
     h) usage 0 ;;
     c) conf=$OPTARG ;;
@@ -126,7 +126,9 @@ for name in "${syncvols[@]}"; do
     done
 
     # cleanup old snapshots
-    for interval in $(echo -e $snapshot_filter | sed "s/|/ /g") ; do
+    filter=$(echo -e $snapshot_filter | sed "s/|/ /g")
+    IFS=$' '
+    for interval in $filter ; do
         guid=$($ssh $source "zfs list -H -o guid,name -S creation -t snapshot $name | grep $interval | cut -f1 | tail -1")
         if [[ "$(echo -e "$guid" | sed 's/\n//g')" != "" ]]; then
             for snap in $($zfs list -H -o name,guid -S creation -t snapshot $target/$name | grep $interval | grep --after-context=200 $guid | grep -v $guid | cut -f1); do
