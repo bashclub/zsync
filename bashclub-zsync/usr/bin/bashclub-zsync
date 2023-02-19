@@ -57,7 +57,7 @@ done
 shift $((OPTIND-1))
 
 function log() {
-    echo "$(date +'%b %d %T') $1"
+    echo -e "$(date +'%b %d %T') $1"
 }
 
 # load config file
@@ -82,10 +82,10 @@ if [[ $source == "" ]]; then
     log "source is empty, switching to local mode."
     ssh=
     sshport=
-    log -e "Configuration:\n\ttarget=$target\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n"
+    log "Configuration:\n\ttarget=$target\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n"
 else
     sshport=-p$sshport
-    log -e "Configuration:\n\ttarget=$target\n\tsource=$source\n\tsshport=$sshport\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n"
+    log "Configuration:\n\ttarget=$target\n\tsource=$source\n\tsshport=$sshport\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n"
 fi
 
 # query source datasets/subvols to replicate
