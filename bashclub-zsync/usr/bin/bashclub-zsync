@@ -89,8 +89,8 @@ else
 fi
 
 
-local_aes=$(/usr/bin/grep -m1 -o aes /proc/cpuinfo)
-remote_aes=$($ssh $source $sshport "/usr/bin/grep -m1 -o aes /proc/cpuinfo")
+local_aes=$(/usr/bin/grep -m1 -o aes /proc/cpuinfo | uniq)
+remote_aes=$($ssh $source $sshport "/usr/bin/grep -m1 -o aes /proc/cpuinfo | uniq")
 
 
 if [[ $local_aes == "aes" ]] && [[ $remote_aes == "aes" ]]; then
