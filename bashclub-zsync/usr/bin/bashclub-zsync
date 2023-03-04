@@ -122,7 +122,14 @@ for name in "${syncvols[@]}"; do
         for part in $(echo $target/$(echo $name | cut -d'/' -f1) | sed "s/\// /g"); do
             if [ $($zfs list $prefix$part > /dev/null 2>&1 ; echo $?) -gt 0 ]; then
                 log "Creating $prefix$part"
-                $zfs create -o com.sun:auto-snapshot=false -p $prefix$part
+                if [[ $prefix/$part == $target ]]; then
+                    autosnap=-ocom.sun:auto-snapshot=false
+                fi
+                $zfs create $autosnap -p $prefix$part
+            else
+                if [[ $prefix/$part == $target ]] && [[ $(zfs get -H -o value,source com.sun:auto-snapshot $prefix/$part) != "false local" ]]; then
+                    $zfs set com.sun:auto-snapshot=false $prefix/$part
+                fi
             fi
             prefix="$prefix$part/"
         done
