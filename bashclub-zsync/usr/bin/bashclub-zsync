@@ -112,7 +112,7 @@ for name in "${syncvols[@]}"; do
         for part in $(echo $target/$(echo $name | cut -d'/' -f1) | sed "s/\// /g"); do
             if [ $($zfs list $prefix$part > /dev/null 2>&1 ; echo $?) -gt 0 ]; then
                 log "Creating $prefix$part"
-                $zfs create -p $prefix$part
+                $zfs create -o com.sun:auto-snapshot=false -p $prefix$part
             fi
             prefix="$prefix$part/"
         done
