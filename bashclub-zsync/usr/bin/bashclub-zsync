@@ -94,7 +94,7 @@ remote_aes=$($ssh root@192.168.200.241 "/usr/bin/grep -m1 -o aes /proc/cpuinfo")
 
 
 if [[ $local_aes == "aes" ]] && [[ $remote_aes == "aes" ]]; then
-    sshcipher=-Caes256-gcm@openssh.com
+    sshcipher=-caes256-gcm@openssh.com
 fi
 
 
