@@ -179,7 +179,7 @@ for name in "${syncvols[@]}"; do
             for snap in $snaps_to_delete; do
                 if [[ $snap_count -gt $min_keep ]]; then
                     log "Deleting $snap"
-                    if [[ $debug == "-v" ]]; then log "[DEBUG] delete_count=$delete_count, min_keep=$min_keep"; fi
+                    if [[ $debug == "-v" ]]; then log "[DEBUG] snap_count=$snap_count, min_keep=$min_keep"; fi
                     $zfs destroy $debug $snap
                     snap_count=$(expr $snap_count - 1)
                 else
