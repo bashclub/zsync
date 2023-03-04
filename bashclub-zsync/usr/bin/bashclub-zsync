@@ -125,7 +125,7 @@ log "$exclude_list"
 
 
 for name in "${syncvols[@]}"; do
-    if [[ $debug == "-v" ]]; then log "[DEBUG] Checking $name"; fi
+    if [[ $debug == "-v" ]]; then log "Replicate $name"; fi
     if [[ $($ssh $sshcipher $sshport $source "zfs list -H -t snapshot -o name -S creation $name 2>/dev/null | grep -E \"$snapshot_filter\" | wc -l") -gt 0 ]]; then
         IFS=$' '
         if [ $($zfs list -H $target/$name > /dev/null 2>&1 ; echo $?) -gt 0 ]; then
@@ -149,7 +149,7 @@ for name in "${syncvols[@]}"; do
                 prefix="$prefix$part/"
             done
 
-            if [[ $debug == "-v" ]]; then log "[DEBUG] Start initial replication"; fi
+            if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Start initial replication"; fi
             IFS=$'\n'
             for snap in $($ssh $sshcipher $sshport $source "zfs list -H -t snapshot -o name -S creation $name | grep -E \"$snapshot_filter\" | tail -1"); do
                 log "Start initial replication: $snap => $target/$(echo $name | cut -d'/' -f1)"
@@ -157,7 +157,7 @@ for name in "${syncvols[@]}"; do
             done
         fi
 
-        if [[ $debug == "-v" ]]; then log "[DEBUG] Start incremental replication"; fi
+        if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Start incremental replication"; fi
         guid=$($zfs list -H -o guid -s creation -t snapshot $target/$name | tail -1)
         last=$($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -t snapshot $name | grep $guid | tail -1 | cut -f1")
         IFS=$'\n'
@@ -167,11 +167,11 @@ for name in "${syncvols[@]}"; do
             last=$snap
         done
 
-        if [[ $debug == "-v" ]]; then log "[DEBUG] Start deletion of old snapshots"; fi
+        if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Start deletion of old snapshots"; fi
         filter=$(echo -e $snapshot_filter | sed "s/|/\n/g")
         IFS=$'\n'
         for interval in $filter ; do
-            if [[ $debug == "-v" ]]; then log "[DEBUG] Checking interval $interval"; fi
+            if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Checking interval $interval"; fi
             guid=$($ssh $sshcipher $sshport $source "zfs list -H -o guid,name -S creation -t snapshot $name | grep $interval | cut -f1 | tail -1")
             if [[ "$(echo -e "$guid" | sed 's/\n//g')" != "" ]]; then
                 snaps_to_delete=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | grep $interval | grep --after-context=200 $guid | grep -v $guid | cut -f1)
@@ -180,16 +180,16 @@ for name in "${syncvols[@]}"; do
                 for snap in $snaps_to_delete; do
                     if [[ $snap_count -gt $min_keep ]]; then
                         log "Deleting $snap"
-                        if [[ $debug == "-v" ]]; then log "[DEBUG] snap_count=$snap_count, min_keep=$min_keep"; fi
+                        if [[ $debug == "-v" ]]; then log "[DEBUG] $name - snap_count=$snap_count, min_keep=$min_keep"; fi
                         $zfs destroy $debug $snap
                         snap_count=$(expr $snap_count - 1)
                     else
-                        if [[ $debug == "-v" ]]; then log "[DEBUG] Skipping deletion of $snap. snap_count=$snap_count, min_keep=$min_keep"; fi
+                        if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Skipping deletion of $snap. snap_count=$snap_count, min_keep=$min_keep"; fi
                     fi
                 done
             fi
         done
     else
-        if [[ $debug == "-v" ]]; then log "[DEBUG] No snapshots found for $name with filter $snapshot_filter"; fi
+        if [[ $debug == "-v" ]]; then log "[DEBUG] $name - No snapshots found with filter $snapshot_filter"; fi
     fi
 done
