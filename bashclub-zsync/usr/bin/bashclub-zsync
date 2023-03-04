@@ -86,10 +86,10 @@ if [[ $source == "" ]]; then
     log "source is empty, switching to local mode."
     ssh=
     sshport=
-    log "Configuration:\n\ttarget=$target\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\nmin_keep=$min_keep\n"
+    log "Configuration:\n\ttarget=$target\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n\tmin_keep=$min_keep\n"
 else
     sshport=-p$sshport
-    log "Configuration:\n\ttarget=$target\n\tsource=$source\n\tsshport=$sshport\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\nmin_keep=$min_keep\n"
+    log "Configuration:\n\ttarget=$target\n\tsource=$source\n\tsshport=$sshport\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n\tmin_keep=$min_keep\n"
 fi
 
 
@@ -111,17 +111,17 @@ IFS=$'\n'
 for zvol in $($ssh $sshcipher $sshport $source "zfs get -H -o name,value,source -t filesystem,volume $tag"); do
     name=$(echo $zvol | cut -f1)
     if [[ "$(echo $zvol | cut -f2)" == "subvols" ]] && [[ $(echo $zvol | grep -E $subvol_source) ]]; then
-        include_list="${include_list}${name}\n"
+        include_list="${include_list}\t${name}\n"
         syncvols=("${syncvols[@]}" "$name")
     elif [[ "$(echo $zvol | cut -f2)" == "all" ]];then
-        include_list="${include_list}${name}\n"
+        include_list="${include_list}\t${name}\n"
         syncvols=("${syncvols[@]}" "$name")
     else
-        exclude_list="${exclude_list}${name}\n"
+        exclude_list="${exclude_list}\t${name}\n"
     fi
 done
-log "$include_list\n"
-log "$exclude_list\n"
+log "$include_list"
+log "$exclude_list"
 
 
 for name in "${syncvols[@]}"; do
