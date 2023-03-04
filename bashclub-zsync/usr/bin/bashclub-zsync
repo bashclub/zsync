@@ -163,7 +163,7 @@ for name in "${syncvols[@]}"; do
         guid=$($ssh $sshcipher $sshport $source "zfs list -H -o guid,name -S creation -t snapshot $name | grep $interval | cut -f1 | tail -1")
         if [[ "$(echo -e "$guid" | sed 's/\n//g')" != "" ]]; then
             snaps_to_delete=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | grep $interval | grep --after-context=200 $guid | grep -v $guid | cut -f1)
-            delete_count=$(echo $snaps_to_delete | wc -l)
+            delete_count=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | grep $interval | wc -l)
             for snap in $snaps_to_delete; do
                 if [[ $delete_count -gt $min_keep ]]; then
                     log "Deleting $snap"
