@@ -1,10 +1,14 @@
 # zsync
 
 ZFS replication script by Thorsten Spille <thorsten@spille-edv.de>
-- replicates ZFS filesystems/volumes with user parameter bashclub:zsync configured
-- mirrored replication with existing snapshots
-- pull replication only
-- creates full path on target pool
+- replicates ZFS filesystems/volumes with user parameter bashclub:zsync (or custom name) configured
+- parameter setting uses zfs hierarchy on source
+- mirrored replication with existing snapshots (filtered by snapshot_filter)
+- pull/local replication only
+- auto creates full path on target pool, enforce com.sun:auto-snapshot=false
+- raw replication
+- tested on Proxmox VE 7.x
+- ssh cipher auto selection
 
 ## Installation
 
@@ -36,6 +40,9 @@ subvol_source="inherited|received"
 
 # snapshot name filter
 snapshot_filter="hourly|daily|weekly|monthly"
+
+# number of minimum snapshots to keep (per snapshot filter)
+min_keep=3
 ~~~
 
 ### Define a cronjob
