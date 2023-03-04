@@ -86,10 +86,10 @@ if [[ $source == "" ]]; then
     log "source is empty, switching to local mode."
     ssh=
     sshport=
-    log "Configuration:\n\ttarget=$target\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n"
+    log "Configuration:\n\ttarget=$target\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\nmin_keep=$min_keep\n"
 else
     sshport=-p$sshport
-    log "Configuration:\n\ttarget=$target\n\tsource=$source\n\tsshport=$sshport\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n"
+    log "Configuration:\n\ttarget=$target\n\tsource=$source\n\tsshport=$sshport\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\nmin_keep=$min_keep\n"
 fi
 
 
@@ -98,11 +98,14 @@ remote_aes=$($ssh $source $sshport "/usr/bin/grep -m1 -o aes /proc/cpuinfo | uni
 
 
 if [[ $local_aes == "aes" ]] && [[ $remote_aes == "aes" ]]; then
+    if [[ $debug == "-v" ]]; then log "[DEBUG] Switching to cipher aes256-gcm@openssh.com"; fi
     sshcipher=-caes256-gcm@openssh.com
+else
+    if [[ $debug == "-v" ]]; then log "[DEBUG] Using default cipher chacha20-poly1305@openssh.com"; fi
+    sshcipher=-cchacha20-poly1305@openssh.com
 fi
 
 
-# query source datasets/subvols to replicate
 IFS=$'\n'
 for zvol in $($ssh $sshcipher $sshport $source "zfs get -H -o name,value,source -t filesystem,volume $tag"); do
     name=$(echo $zvol | cut -f1)
