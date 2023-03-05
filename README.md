@@ -35,9 +35,6 @@ sshport=22
 # tag to mark source filesystem
 tag=bashclub:zsync
 
-# if set to bashclub:zsync=subvol, use inherited only or inherited and received
-subvol_source="inherited|received"
-
 # snapshot name filter
 snapshot_filter="hourly|daily|weekly|monthly"
 
