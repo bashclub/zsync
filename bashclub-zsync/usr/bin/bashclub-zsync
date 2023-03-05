@@ -8,6 +8,7 @@ PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
 prog="$(basename $0)"
 zfs=$(which zfs)
 ssh=$(which ssh)
+grep=$(which grep)
 debug=
 
 #### default config file, can be changed with parameter -c
@@ -25,9 +26,6 @@ sshport=22
 
 # zfs user parameter to identify filesystems/volumes to replicate
 tag=bashclub:zsync
-
-# if $tag=subvols, which source to filter: "inherited" or "inherited|received"
-subvol_source="inherited|received"
 
 # pipe separated list of snapshot name filters
 snapshot_filter="hourly|daily|weekly|monthly"
@@ -74,7 +72,6 @@ target=$target
 source=$source
 sshport=$sshport
 tag=$tag
-subvol_source="$subvol_source"
 snapshot_filter="$snapshot_filter"
 min_keep=$min_keep
 EOF
@@ -86,16 +83,26 @@ if [[ $source == "" ]]; then
     log "source is empty, switching to local mode."
     ssh=
     sshport=
-    log "Configuration:\n\ttarget=$target\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n\tmin_keep=$min_keep\n"
+    log "Configuration:\n\ttarget=$target\n\ttag=$tag\n\tsnapshot_filter=$snapshot_filter\n\tmin_keep=$min_keep\n"
 else
     sshport=-p$sshport
-    log "Configuration:\n\ttarget=$target\n\tsource=$source\n\tsshport=$sshport\n\ttag=$tag\n\tsubvol_source=$subvol_source\n\tsnapshot_filter=$snapshot_filter\n\tmin_keep=$min_keep\n"
+    log "Configuration:\n\ttarget=$target\n\tsource=$source\n\tsshport=$sshport\n\ttag=$tag\n\tsnapshot_filter=$snapshot_filter\n\tmin_keep=$min_keep\n"
 fi
 
+local_os_id=$($grep -E "^ID=" /etc/os-release | cut -d'=' -f2)
+remote_os_id=$($ssh $source $sshport "grep -E \"^ID=\" /etc/os-release | cut -d'=' -f2")
 
-local_aes=$(/usr/bin/grep -m1 -o aes /proc/cpuinfo | uniq)
-remote_aes=$($ssh $source $sshport "/usr/bin/grep -m1 -o aes /proc/cpuinfo | uniq")
+if [[ $local_os_id == "freebsd" ]]; then
+    local_aes=$($grep -o AES /var/run/dmesg.boot | uniq)
+else
+    local_aes=$($grep -m1 -o aes /proc/cpuinfo | uniq)
+fi
 
+if [[ $remote_os_id == "freebsd" ]]; then
+    remote_aes=$($ssh $source $sshport "grep -o AES /var/run/dmesg.boot | uniq")
+else
+    remote_aes=$($ssh $source $sshport "grep -m1 -o aes /proc/cpuinfo | uniq")
+fi
 
 if [[ $local_aes == "aes" ]] && [[ $remote_aes == "aes" ]]; then
     if [[ $debug == "-v" ]]; then log "[DEBUG] Switching to cipher aes256-gcm@openssh.com"; fi
@@ -110,10 +117,10 @@ exclude_list="Excluded datasets:\n"
 IFS=$'\n'
 for zvol in $($ssh $sshcipher $sshport $source "zfs get -H -o name,value,source -t filesystem,volume $tag"); do
     name=$(echo $zvol | cut -f1)
-    if [[ "$(echo $zvol | cut -f2)" == "subvols" ]] && [[ $(echo $zvol | grep -E $subvol_source) ]]; then
+    if [[ "$(echo $zvol | cut -f2)" == "subvols" ]] && [[ $(echo $zvol | $grep -vE "local|received") ]]; then
         include_list="${include_list}\t${name}\n"
         syncvols=("${syncvols[@]}" "$name")
-    elif [[ "$(echo $zvol | cut -f2)" == "all" ]];then
+    elif [[ "$(echo $zvol | cut -f2)" == "all" ]] && [[ $(echo $zvol | $grep -v received) ]];then
         include_list="${include_list}\t${name}\n"
         syncvols=("${syncvols[@]}" "$name")
     else
@@ -174,8 +181,8 @@ for name in "${syncvols[@]}"; do
             if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Checking interval $interval"; fi
             guid=$($ssh $sshcipher $sshport $source "zfs list -H -o guid,name -S creation -t snapshot $name | grep $interval | cut -f1 | tail -1")
             if [[ "$(echo -e "$guid" | sed 's/\n//g')" != "" ]]; then
-                snaps_to_delete=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | grep $interval | grep --after-context=200 $guid | grep -v $guid | cut -f1)
-                snap_count=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | grep $interval | wc -l)
+                snaps_to_delete=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | $grep $interval | $grep --after-context=200 $guid | $grep -v $guid | cut -f1)
+                snap_count=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | $grep $interval | wc -l)
 
                 for snap in $snaps_to_delete; do
                     if [[ $snap_count -gt $min_keep ]]; then
