@@ -133,7 +133,7 @@ log "$exclude_list"
 
 for name in "${syncvols[@]}"; do
     log "Replicate $name"
-    if [[ $($ssh $sshcipher $sshport $source "zfs list -H -t snapshot -o name -S creation $name 2>/dev/null | grep -E \"$snapshot_filter\" | wc -l") -gt 0 ]]; then
+    if [[ $($ssh $sshcipher $sshport $source "zfs list -H -t snapshot -o name -S creation $name 2>/dev/null | grep -E \"$snapshot_filter\" | wc -l | tr -d ' '") -gt 0 ]]; then
         IFS=$' '
         if [ $($zfs list -H $target/$name > /dev/null 2>&1 ; echo $?) -gt 0 ]; then
             if [[ $debug == "-v" ]]; then log "[DEBUG] $target/$name does not exist"; fi
@@ -182,7 +182,7 @@ for name in "${syncvols[@]}"; do
             guid=$($ssh $sshcipher $sshport $source "zfs list -H -o guid,name -S creation -t snapshot $name | grep $interval | cut -f1 | tail -1")
             if [[ "$(echo -e "$guid" | sed 's/\n//g')" != "" ]]; then
                 snaps_to_delete=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | $grep $interval | $grep --after-context=200 $guid | $grep -v $guid | cut -f1)
-                snap_count=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | $grep $interval | wc -l)
+                snap_count=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | $grep $interval | wc -l | tr -d ' ')
 
                 for snap in $snaps_to_delete; do
                     if [[ $snap_count -gt $min_keep ]]; then
