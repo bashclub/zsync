@@ -55,3 +55,7 @@ File: /etc/cron.hourly/bashclub-zsync
 /usr/bin/bashclub-zsync -c /etc/bashclub/zsync.conf > /var/log/bashclub-zsync.log
 ~~~
 
+# Author
+
+### Thorsten Spille
+[<img src="https://storage.ko-fi.com/cdn/brandasset/kofi_s_tag_dark.png" rel="Support me on Ko-Fi">](https://ko-fi.com/thorakel)
