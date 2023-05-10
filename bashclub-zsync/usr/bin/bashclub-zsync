@@ -173,7 +173,7 @@ for name in "${syncvols[@]}"; do
         guid=$($zfs list -H -o guid -s creation -t snapshot $target/$name | tail -1)
         last=$($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -t snapshot $name | grep $guid | tail -1 | cut -f1")
         IFS=$'\n'
-        for snap in $($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E \"$snapshot_filter\" | grep --after-context=200 $guid | grep -v $guid | cut -f1-2"); do
+        for snap in $($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E \"$snapshot_filter\" | grep --after-context=200 $guid | grep -v $guid | cut -f1"); do
             log "Replicating delta of $last => $snap to $target/$name"
             $ssh $sshcipher $sshport $source "zfs send -w $debug -i $last $snap" | zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot -F $debug $target/$name
             last=$snap
