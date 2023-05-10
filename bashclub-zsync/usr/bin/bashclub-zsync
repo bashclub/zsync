@@ -133,6 +133,11 @@ log "$exclude_list"
 
 for name in "${syncvols[@]}"; do
     log "Replicate $name"
+    if [[ $($ssh $sshcipher $sshport $source zfs get type -o value -H $name) == "filesystem" ]]; then
+        mp=-xmountpoint
+        cm=-xcanmount
+    fi
+
     if [[ $($ssh $sshcipher $sshport $source "zfs list -H -t snapshot -o name -S creation $name 2>/dev/null | grep -E \"$snapshot_filter\" | wc -l | tr -d ' '") -gt 0 ]]; then
         IFS=$' '
         if [ $($zfs list -H $target/$name > /dev/null 2>&1 ; echo $?) -gt 0 ]; then
