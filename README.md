@@ -46,13 +46,13 @@ min_keep=3
 #### cron.d example
 File: /etc/cron.d/bashclub-zsync
 ~~~
-00 23 * * * root /usr/bin/bashclub-zsync -c /etc/bashclub/zsync.conf > /var/log/bashclub-zsync.log
+00 23 * * * root /usr/bin/bashclub-zsync -c /etc/bashclub/zsync.conf > /var/log/bashclub-zsync/zsync.log
 ~~~
 
 #### cron.{hourly|daily|weekly|monthly}
 File: /etc/cron.hourly/bashclub-zsync
 ~~~
-/usr/bin/bashclub-zsync -c /etc/bashclub/zsync.conf > /var/log/bashclub-zsync.log
+/usr/bin/bashclub-zsync -c /etc/bashclub/zsync.conf > /var/log/bashclub-zsync/zsync.log
 ~~~
 
 # Author
