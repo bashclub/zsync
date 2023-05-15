@@ -21,8 +21,6 @@
 
 6. Überprüfen Sie, ob der Zielserver die erforderlichen ZFS-Datasets oder Volumes enthält, auf die die Daten repliziert werden sollen. Stellen Sie sicher, dass die Namen der Datasets/Volumes dem ZFS-Tag entsprechen, den Sie in den Konfigurationsdateien festgelegt haben.
 
-Entschuldigung für das Missverständnis. Hier ist die korrigierte Version von Punkt 7 gemäß Ihren Anforderungen:
-
 7. Um das Script automatisch auszuführen, erstellen Sie eine Cronjob-Konfigurationsdatei im Verzeichnis `/etc/cron.d/`. Öffnen Sie eine neue Datei mit einem Texteditor und geben Sie die gewünschte Ausführungszeit und den Befehl ein. Beispiel:
 
    a) Erstellen Sie das Verzeichnis `/var/log/bashclub-zsync`, falls es noch nicht existiert. Verwenden Sie den Befehl: 
