@@ -171,12 +171,6 @@ for name in "${syncvols[@]}"; do
                 log "Start initial replication: $snap => $target/$(echo $name | cut -d'/' -f1)"
                 $ssh $ssh_ipher $sshport $source "zfs send -w -p $debug $snap" | $zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | cut -d'/' -f1)
             done
-	else
-	    log "[DEBUG] $target already exists, check if com.sun:auto-snapshot is disabled"
-	    if [[ $($zfs get -H -o value,source com.sun:auto-snapshot $target) != "false	local" ]]; then
-		log "[DEBUG] com.sun:auto-snapshot is enabled on $target - disabling..."
-	        $zfs set com.sun:auto-snapshot=false $target
-	    fi
         fi
 
         if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Start incremental replication"; fi
