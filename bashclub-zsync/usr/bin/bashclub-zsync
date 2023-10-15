@@ -144,8 +144,8 @@ fi
 for name in "${syncvols[@]}"; do
     log "Replicate $name"
     if [[ $($ssh $sshcipher $sshport $source zfs get type -o value -H $name) == "filesystem" ]]; then
-        mp=-xmountpoint
-        cm=-xcanmount
+        mp=-x\ mountpoint
+        cm=-x\ canmount
     else
         mp=
         cm=
@@ -176,6 +176,10 @@ for name in "${syncvols[@]}"; do
         if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Start incremental replication"; fi
         guid=$($zfs list -H -o guid -s creation -t snapshot $target/$name | tail -1)
         last=$($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -t snapshot $name | grep $guid | tail -1 | cut -f1")
+        refquota_source=$($ssh $sshcipher $zfs get -H -o value refquota $source)
+        if [[ $refquota_source != $($zfs get -H -o value refquota $target/$name) ]]; then
+            $zfs set refquota=$refquota_source $target/$name
+        fi
         IFS=$'\n'
         for snap in $($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E \"$snapshot_filter\" | grep --after-context=200 $guid | grep -v $guid | cut -f1"); do
             log "Replicating delta of $last => $snap to $target/$name"
