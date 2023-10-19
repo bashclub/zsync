@@ -160,7 +160,7 @@ for name in "${syncvols[@]}"; do
                 if [ $($zfs list $prefix$part > /dev/null 2>&1 ; echo $?) -gt 0 ]; then
                     if [[ $debug == "-v" ]]; then log "[DEBUG] $prefix$part does not exist"; fi
                     log "Creating $prefix$part"
-                    $zfs create $autosnap -p $prefix$part
+                    $zfs create -o canmount=noauto $autosnap -p $prefix$part
                 fi
                 prefix="$prefix$part/"
             done
@@ -177,12 +177,12 @@ for name in "${syncvols[@]}"; do
         guid=$($zfs list -H -o guid -s creation -t snapshot $target/$name | tail -1)
         last=$($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -t snapshot $name | grep $guid | tail -1 | cut -f1")
         IFS=$'\n'
-        if [[ $(zfs get -H -o value canmount $name) != "noauto" ]]; then
-            zfs set canmount=noauto $name
+        if [[ $(zfs get -H -o value canmount $target/$name) != "noauto" ]]; then
+            zfs set canmount=noauto $target/$name
         fi
         for snap in $($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E \"$snapshot_filter\" | grep --after-context=200 $guid | grep -v $guid | cut -f1"); do
             log "Replicating delta of $last => $snap to $target/$name"
-            $ssh $sshcipher $sshport $source "zfs send -w $debug -i $last $snap" | zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot -F $debug $target/$name
+            $ssh $sshcipher $sshport $source "zfs send -w $debug -i $last $snap" | zfs receive -x $tag -x com.sun:auto-snapshot -F $debug $target/$name
             last=$snap
         done
 
