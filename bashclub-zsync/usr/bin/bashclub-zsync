@@ -132,7 +132,7 @@ log "$exclude_list"
 
 if ! $zfs list $target > /dev/null 2>&1 ; then
     log "[DEBUG] $target does not exist. Creating..."
-    $zfs create -o com.sun:auto-snapshot=false $target
+    $zfs create -o canmount=noauto -o com.sun:auto-snapshot=false $target
 else
     log "[DEBUG] $target exists, check auto-snapshot..."
     if [[ $($zfs get -H -o value,source com.sun:auto-snapshot $target) != "false	local" ]]; then
@@ -145,7 +145,7 @@ for name in "${syncvols[@]}"; do
     log "Replicate $name"
     if [[ $($ssh $sshcipher $sshport $source zfs get type -o value -H $name) == "filesystem" ]]; then
         mp=-x\ mountpoint
-        cm=-x\ canmount
+        cm=-o\ canmount=noauto
     else
         mp=
         cm=
@@ -176,11 +176,10 @@ for name in "${syncvols[@]}"; do
         if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Start incremental replication"; fi
         guid=$($zfs list -H -o guid -s creation -t snapshot $target/$name | tail -1)
         last=$($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -t snapshot $name | grep $guid | tail -1 | cut -f1")
-        refquota_source=$($ssh $sshcipher $zfs get -H -o value refquota $source)
-        if [[ $refquota_source != $($zfs get -H -o value refquota $target/$name) ]]; then
-            $zfs set refquota=$refquota_source $target/$name
-        fi
         IFS=$'\n'
+        if [[ $(zfs get -H -o value canmount $name) != "noauto" ]]; then
+            zfs set canmount=noauto $name
+        fi
         for snap in $($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E \"$snapshot_filter\" | grep --after-context=200 $guid | grep -v $guid | cut -f1"); do
             log "Replicating delta of $last => $snap to $target/$name"
             $ssh $sshcipher $sshport $source "zfs send -w $debug -i $last $snap" | zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot -F $debug $target/$name
