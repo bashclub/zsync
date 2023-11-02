@@ -8,12 +8,14 @@
 
 4. Öffnen Sie die Konfigurationsdatei mit einem Texteditor und passen Sie die folgenden Einstellungen an:
 
-   - `source`: Geben Sie den Pfad des Quell-ZFS-Dateisystems auf dem Quellserver an, von dem die Daten repliziert werden sollen. Beispiel: `source=pool/dataset`
-   - `target`: Geben Sie die SSH-Adresse des Quellservers an, von dem die Daten repliziert werden sollen. Beispiel: `target=user@host`
+   - `source`: Geben Sie den SSH-Adresse des Quellservers an, von dem die Daten repliziert werden sollen. Beispiel: `source=user@host`
+   - `target`: Geben Sie die Pfad des Ziel-ZFS-Dateisystems auf dem Zielserver an, zu dem die Daten repliziert werden sollen. Beispiel: `target=pool/dataset`
    - `sshport`: Geben Sie den SSH-Port des Quellservers an. Standardmäßig ist dies `22`, aber Sie können ihn entsprechend anpassen.
    - `tag`: Geben Sie den ZFS-Tag an, der verwendet werden soll, um die zu replizierenden Dateisysteme oder Volumes zu identifizieren. Beispiel: `tag=bashclub:zsync`
    - `snapshot_filter`: Geben Sie eine Pipe-separierte Liste von Snapshot-Namenfiltern an, die bestimmen, welche Snapshots repliziert werden sollen. Beispiel: `snapshot_filter="hourly|daily|weekly|monthly"`
    - `min_keep`: Geben Sie die Mindestanzahl von Snapshots pro Filter an, die beibehalten werden sollen. Beispiel: `min_keep=3`
+   - `zfs_auto_snapshot_keep`: Aktiviert das erzeugen eines Snapshots auf der Quelle vor der Replikation, gibt die Anzahl der Snapshots an, die behalten werden sollen. Beispiel: `zfs_auto_snapshot_keep=0` => Deaktiviert die Funktion, `zfs_auto_snapshot_keep=7` behält 7 Snapshots. 
+   - `zfs_auto_snapshot_label`: Definniert das Label des Snapshots, Default-Wert ist `backup` (ergibt: zfs-auto-snap_backup-YYYY-MM-dd-hhmm). Beispiel: `zfs_auto_snapshot_label=backup`
 
    Wiederholen Sie diese Schritte für jede zusätzliche Konfigurationsdatei, um unterschiedliche Replikationen einzurichten.
 
