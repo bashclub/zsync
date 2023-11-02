@@ -15,6 +15,7 @@ tail=$(which tail)
 wc=$(which wc)
 tr=$(which tr)
 sed=$(which sed)
+zfs_auto_snapshot=$(which zfs-auto-snapshot)
 debug=
 
 #### default config file, can be changed with parameter -c
@@ -156,7 +157,7 @@ fi
 
 if [ $zfs_auto_snapshot_keep -gt 0 ]; then
     log "[DEBUG] Running zfs-auto-snapshot"
-    $ssh $sshcipher $sshport $source "which zfs-auto-snapshot > /dev/null || exit 0 ; zfs-auto-snapshot --quiet --syslog --label=$zfs_auto_snapshot_label --keep=$zfs_auto_snapshot_keep"
+    $ssh $sshcipher $sshport $source "which zfs-auto-snapshot > /dev/null || exit 0 ; zfs-auto-snapshot --quiet --syslog --label=$zfs_auto_snapshot_label --keep=$zfs_auto_snapshot_keep //"
     if [[ $snapshot_filter == "" ]]; then
         snapshot_filter="$zfs_auto_snapshot_label"
     else
@@ -166,9 +167,9 @@ fi
 
 for name in "${syncvols[@]}"; do
     log "Replicate $name"
-    if [[ $($ssh $sshcipher $sshport $source zfs get type -o value -H $name) == "filesystem" ]]; then
-        mp=-x\ mountpoint
-        cm=-o\ canmount=noauto
+    if [[ $($ssh $sshcipher $sshport $source zfs -H -o value type $name) == "filesystem" ]]; then
+        mp=-xmountpoint
+        cm=-ocanmount=noauto
     else
         mp=
         cm=
