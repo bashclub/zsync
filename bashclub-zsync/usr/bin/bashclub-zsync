@@ -167,7 +167,7 @@ fi
 
 for name in "${syncvols[@]}"; do
     log "Replicate $name"
-    if [[ $($ssh $sshcipher $sshport $source zfs -H -o value type $name) == "filesystem" ]]; then
+    if [[ $($ssh $sshcipher $sshport $source zfs get -H -o value type $name) == "filesystem" ]]; then
         mp=-xmountpoint
         cm=-ocanmount=noauto
     else
@@ -215,10 +215,10 @@ for name in "${syncvols[@]}"; do
         IFS=$'\n'
         for interval in $filter ; do
             if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Checking interval $interval"; fi
-            guid=$($ssh $sshcipher $sshport $source "zfs list -H -o guid,name -S creation -t snapshot $name | grep $interval | cut -f1 | tail -1")
+            guid=$($ssh $sshcipher $sshport $source 'zfs list -H -o guid,name -S creation -t snapshot $name | grep -E "(.*)@(.*)$interval" | cut -f1 | tail -1')
             if [[ "$(echo -e "$guid" | sed 's/\n//g')" != "" ]]; then
-                snaps_to_delete=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | $grep $interval | $grep --after-context=200 $guid | $grep -v $guid | $cut -f1)
-                snap_count=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | $grep $interval | $wc -l | $tr -d ' ')
+                snaps_to_delete=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | $grep -E "(.*)@(.*)$interval" | $grep --after-context=200 $guid | $grep -v $guid | $cut -f1)
+                snap_count=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | $grep -E "(.*)@(.*)$interval" | $wc -l | $tr -d ' ')
 
                 for snap in $snaps_to_delete; do
                     if [[ $snap_count -gt $min_keep ]]; then
