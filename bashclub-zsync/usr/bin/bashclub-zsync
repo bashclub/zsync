@@ -33,6 +33,12 @@ snapshot_filter="hourly|daily|weekly|monthly"
 # minimum count of snapshots per filter to keep
 min_keep=3
 
+# number of zfs snapshots to keep on source (0 = snapshot function disabled)
+zfs_auto_snapshot_keep=0
+
+# make snapshot via zfs-auto-snapshot before replication
+zfs_auto_snapshot_label="backup"
+
 usage() {
 	cat >&2 <<-EOF
 	usage: $prog [-h] [-d] [-c CONFIG]
@@ -74,6 +80,8 @@ sshport=$sshport
 tag=$tag
 snapshot_filter="$snapshot_filter"
 min_keep=$min_keep
+zfs_auto_snapshot_keep=$zfs_auto_snapshot_keep
+zfs_auto_snapshot_label=$zfs_auto_snapshot_label
 EOF
     log "Initial config file created. Please adjust and restart script. Exiting..."
     usage 0
@@ -140,6 +148,15 @@ else
     fi
 fi
 
+if [ $zfs_auto_snapshot_keep -gt 0 ]; then
+    log "[DEBUG] Running zfs-auto-snapshot"
+    $ssh $sshcipher $sshport $source "which zfs-auto-snapshot > /dev/null || exit 0 ; zfs-auto-snapshot --quiet --syslog --label=$zfs_auto_snapshot_label --keep=$zfs_auto_snapshot_keep"
+    if [[ $snapshot_filter == "" ]]; then
+        snapshot_filter="$zfs_auto_snapshot_label"
+    else
+        snapshot_filter="$snapshot_filter|$zfs_auto_snapshot_label"
+    fi
+fi
 
 for name in "${syncvols[@]}"; do
     log "Replicate $name"
