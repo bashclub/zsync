@@ -16,6 +16,7 @@ wc=$(which wc)
 tr=$(which tr)
 sed=$(which sed)
 zfs_auto_snapshot=$(which zfs-auto-snapshot)
+rc=0
 debug=
 
 #### default config file, can be changed with parameter -c
@@ -213,6 +214,7 @@ for name in "${syncvols[@]}"; do
             done
         else
             log "[ERROR] No snapshot found on $target/$name to add incremental snapshots to. The target dataset (with all children) needs to be deleted and recreated via replication."
+            if [ $rc -eq 0 ]; then rc=1; fi
         fi
 
         if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Start deletion of old snapshots"; fi
@@ -241,3 +243,4 @@ for name in "${syncvols[@]}"; do
         if [[ $debug == "-v" ]]; then log "[DEBUG] $name - No snapshots found with filter $snapshot_filter"; fi
     fi
 done
+exit $rc
