@@ -181,7 +181,7 @@ for name in "${syncvols[@]}"; do
         if ! $zfs list -H $target/$name > /dev/null 2>&1 ; then
             if [[ $debug == "-v" ]]; then log "[DEBUG] $target/$name does not exist"; fi
             prefix=""
-            for part in $(echo $target/$(echo $name | rev | $cut -d'/' -f1 | rev) | $sed "s/\// /g"); do
+            for part in $(echo $target/$(echo $name | $cut -d'/' -f1) | $sed "s/\// /g"); do
                 if [ $($zfs list $prefix$part > /dev/null 2>&1 ; echo $?) -gt 0 ]; then
                     if [[ $debug == "-v" ]]; then log "[DEBUG] $prefix$part does not exist"; fi
                     log "Creating $prefix$part"
@@ -193,8 +193,8 @@ for name in "${syncvols[@]}"; do
             if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Start initial replication"; fi
             IFS=$'\n'
             for snap in $($ssh $sshcipher $sshport $source "zfs list -H -t snapshot -o name -S creation $name | grep -E \"$snapshot_filter\" | tail -1"); do
-                log "Start initial replication: $snap => $target/$(echo $name | rev | $cut -d'/' -f1 | rev)"
-                $ssh $sshcipher $sshport $source "zfs send -w -p $debug $snap" | $zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | rev | $cut -d'/' -f1 | rev)
+                log "Start initial replication: $snap => $target/$(echo $name | $cut -d'/' -f1)"
+                $ssh $sshcipher $sshport $source "zfs send -w -p $debug $snap" | $zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | $cut -d'/' -f1)
             done
         fi
 
