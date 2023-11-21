@@ -196,7 +196,7 @@ for name in "${syncvols[@]}"; do
             for snap in $($ssh $sshcipher $sshport $source "zfs list -H -t snapshot -o name -S creation $name | grep -E \"@.*($snapshot_filter)\" | tail -1"); do
                 log "[INFO] Start initial replication: $snap => $target/$(echo $name | $cut -d'/' -f1)"
                 $ssh $sshcipher $sshport $source "zfs send -w -p $debug $snap" | $zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | $cut -d'/' -f1)
-                if [ $? -gt $rc ]; then rc=1; fi
+                if [ $? -gt $rc ]; then rc=1; log "[ERROR] initial replication to $target/$name failed."; fi
             done
         fi
 
@@ -212,7 +212,7 @@ for name in "${syncvols[@]}"; do
                 for snap in $($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E \"@.*($snapshot_filter)\" | grep --after-context=200 $guid | grep -v $guid | cut -f1"); do
                     log "[INFO] Replicating delta of $last => $snap to $target/$name"
                     $ssh $sshcipher $sshport $source "zfs send -w $debug -i $last $snap" | zfs receive -x $tag -x com.sun:auto-snapshot -F $debug $target/$name
-                    if [ $? -gt $rc ]; then rc=1; fi
+                    if [ $? -gt $rc ]; then rc=1; log "[ERROR] incremental replication to $target/$name failed."; fi
                     last=$snap
                 done
             else
