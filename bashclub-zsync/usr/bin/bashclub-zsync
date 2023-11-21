@@ -181,7 +181,7 @@ for name in "${syncvols[@]}"; do
         if ! $zfs list -H $target/$name > /dev/null 2>&1 ; then
             if [[ $debug == "-v" ]]; then log "[DEBUG] $target/$name does not exist"; fi
             prefix=""
-            for part in $(echo $target/$(echo $name | $cut -d'/' -f1) | $sed "s/\// /g"); do
+            for part in $(echo $target/$(echo $name | rev | $cut -d'/' -f1 | rev) | $sed "s/\// /g"); do
                 if [ $($zfs list $prefix$part > /dev/null 2>&1 ; echo $?) -gt 0 ]; then
                     if [[ $debug == "-v" ]]; then log "[DEBUG] $prefix$part does not exist"; fi
                     log "Creating $prefix$part"
