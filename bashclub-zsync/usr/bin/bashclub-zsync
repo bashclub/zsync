@@ -196,6 +196,7 @@ for name in "${syncvols[@]}"; do
             for snap in $($ssh $sshcipher $sshport $source "zfs list -H -t snapshot -o name -S creation $name | grep -E \"$snapshot_filter\" | tail -1"); do
                 log "[INFO] Start initial replication: $snap => $target/$(echo $name | $cut -d'/' -f1)"
                 $ssh $sshcipher $sshport $source "zfs send -w -p $debug $snap" | $zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | $cut -d'/' -f1)
+                if [ $? -gt $rc ]; then rc=1; fi
             done
         fi
 
@@ -203,15 +204,21 @@ for name in "${syncvols[@]}"; do
         guid=$($zfs list -H -o guid -s creation -t snapshot $target/$name | $tail -1)
         if [[ $guid != "" ]]; then
             last=$($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -t snapshot $name | grep $guid | tail -1 | cut -f1")
-            IFS=$'\n'
-            if [[ $fstype == "filesystem" ]] && [[ $($zfs get -H -o value canmount $target/$name) != "noauto" ]]; then
-                $zfs set canmount=noauto $target/$name
+            if [[ $last != "" ]]; then
+                IFS=$'\n'
+                if [[ $fstype == "filesystem" ]] && [[ $($zfs get -H -o value canmount $target/$name) != "noauto" ]]; then
+                    $zfs set canmount=noauto $target/$name
+                fi
+                for snap in $($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E \"$snapshot_filter\" | grep --after-context=200 $guid | grep -v $guid | cut -f1"); do
+                    log "[INFO] Replicating delta of $last => $snap to $target/$name"
+                    $ssh $sshcipher $sshport $source "zfs send -w $debug -i $last $snap" | zfs receive -x $tag -x com.sun:auto-snapshot -F $debug $target/$name
+                    if [ $? -gt $rc ]; then rc=1; fi
+                    last=$snap
+                done
+            else
+                log "[ERROR] No matching snapshot (guid: $guid) found on source filesystem. This can be outdated snapshots on target or a previously deleted and new created dataset $name on the source filesystem."
+                if [ $rc -eq 0 ]; then rc=1; fi
             fi
-            for snap in $($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E \"$snapshot_filter\" | grep --after-context=200 $guid | grep -v $guid | cut -f1"); do
-                log "[INFO] Replicating delta of $last => $snap to $target/$name"
-                $ssh $sshcipher $sshport $source "zfs send -w $debug -i $last $snap" | zfs receive -x $tag -x com.sun:auto-snapshot -F $debug $target/$name
-                last=$snap
-            done
         else
             log "[ERROR] No snapshot found on $target/$name to add incremental snapshots to. The target dataset (with all children) needs to be deleted and recreated via replication."
             if [ $rc -eq 0 ]; then rc=1; fi
