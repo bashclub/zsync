@@ -98,10 +98,10 @@ if [[ $source == "" ]]; then
     log "source is empty, switching to local mode."
     ssh=
     sshport=
-    log "Configuration:\n\ttarget=$target\n\ttag=$tag\n\tsnapshot_filter=$snapshot_filter\n\tmin_keep=$min_keep\n"
+    log "Configuration:\n\ttarget=$target\n\ttag=$tag\n\tsnapshot_filter=$snapshot_filter\n\tmin_keep=$min_keep\nzfs_auto_snapshot_keep=$zfs_auto_snapshot_keep\nzfs_auto_snapshot_label=$zfs_auto_snapshot_label\n"
 else
     sshport=-p$sshport
-    log "Configuration:\n\ttarget=$target\n\tsource=$source\n\tsshport=$sshport\n\ttag=$tag\n\tsnapshot_filter=$snapshot_filter\n\tmin_keep=$min_keep\n"
+    log "Configuration:\n\ttarget=$target\n\tsource=$source\n\tsshport=$sshport\n\ttag=$tag\n\tsnapshot_filter=$snapshot_filter\n\tmin_keep=$min_keep\nzfs_auto_snapshot_keep=$zfs_auto_snapshot_keep\nzfs_auto_snapshot_label=$zfs_auto_snapshot_label\n"
 fi
 
 local_os_id=$($grep -E "^ID=" /etc/os-release | $cut -d'=' -f2)
@@ -167,7 +167,8 @@ fi
 
 for name in "${syncvols[@]}"; do
     log "Replicate $name"
-    if [[ $($ssh $sshcipher $sshport $source zfs get -H -o value type $name) == "filesystem" ]]; then
+    fstype=$($ssh $sshcipher $sshport $source zfs get -H -o value type $name)
+    if [[ $fstype == "filesystem" ]]; then
         mp=-xmountpoint
         cm=-ocanmount=noauto
     else
@@ -192,8 +193,8 @@ for name in "${syncvols[@]}"; do
             if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Start initial replication"; fi
             IFS=$'\n'
             for snap in $($ssh $sshcipher $sshport $source "zfs list -H -t snapshot -o name -S creation $name | grep -E \"$snapshot_filter\" | tail -1"); do
-                log "Start initial replication: $snap => $target/$(echo $name | $cut -d'/' -f1)"
-                $ssh $sshcipher $sshport $source "zfs send -w -p $debug $snap" | $zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | $cut -d'/' -f1)
+                log "Start initial replication: $snap => $target/$(echo $name | rev | $cut -d'/' -f1 | rev)"
+                $ssh $sshcipher $sshport $source "zfs send -w -p $debug $snap" | $zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | rev | $cut -d'/' -f1 | rev)
             done
         fi
 
@@ -201,7 +202,7 @@ for name in "${syncvols[@]}"; do
         guid=$($zfs list -H -o guid -s creation -t snapshot $target/$name | $tail -1)
         last=$($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -t snapshot $name | grep $guid | tail -1 | cut -f1")
         IFS=$'\n'
-        if [[ $($zfs get -H -o value canmount $target/$name) != "noauto" ]]; then
+        if [[ $fstype == "filesystem" ]] && [[ $($zfs get -H -o value canmount $target/$name) != "noauto" ]]; then
             $zfs set canmount=noauto $target/$name
         fi
         for snap in $($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E \"$snapshot_filter\" | grep --after-context=200 $guid | grep -v $guid | cut -f1"); do
