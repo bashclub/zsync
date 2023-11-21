@@ -76,7 +76,7 @@ function log() {
 
 # load config file
 if [ -f $conf ]; then
-    log "Reading configuration $conf"
+    log "[INFO] Reading configuration $conf"
     source $conf
 else
     mkdir -p $(dirname $conf)
@@ -90,18 +90,18 @@ min_keep=$min_keep
 zfs_auto_snapshot_keep=$zfs_auto_snapshot_keep
 zfs_auto_snapshot_label=$zfs_auto_snapshot_label
 EOF
-    log "Initial config file created. Please adjust and restart script. Exiting..."
+    log "[INFO] Initial config file created. Please adjust and restart script. Exiting..."
     usage 0
 fi
 
 if [[ $source == "" ]]; then
-    log "source is empty, switching to local mode."
+    log "[INFO] source is empty, switching to local mode."
     ssh=
     sshport=
-    log "Configuration:\n\ttarget=$target\n\ttag=$tag\n\tsnapshot_filter=$snapshot_filter\n\tmin_keep=$min_keep\nzfs_auto_snapshot_keep=$zfs_auto_snapshot_keep\nzfs_auto_snapshot_label=$zfs_auto_snapshot_label\n"
+    log "[INFO] Configuration:\n\ttarget=$target\n\ttag=$tag\n\tsnapshot_filter=$snapshot_filter\n\tmin_keep=$min_keep\nzfs_auto_snapshot_keep=$zfs_auto_snapshot_keep\nzfs_auto_snapshot_label=$zfs_auto_snapshot_label\n"
 else
     sshport=-p$sshport
-    log "Configuration:\n\ttarget=$target\n\tsource=$source\n\tsshport=$sshport\n\ttag=$tag\n\tsnapshot_filter=$snapshot_filter\n\tmin_keep=$min_keep\nzfs_auto_snapshot_keep=$zfs_auto_snapshot_keep\nzfs_auto_snapshot_label=$zfs_auto_snapshot_label\n"
+    log "[INFO] Configuration:\n\ttarget=$target\n\tsource=$source\n\tsshport=$sshport\n\ttag=$tag\n\tsnapshot_filter=$snapshot_filter\n\tmin_keep=$min_keep\nzfs_auto_snapshot_keep=$zfs_auto_snapshot_keep\nzfs_auto_snapshot_label=$zfs_auto_snapshot_label\n"
 fi
 
 local_os_id=$($grep -E "^ID=" /etc/os-release | $cut -d'=' -f2)
@@ -127,8 +127,8 @@ else
     sshcipher=-cchacha20-poly1305@openssh.com
 fi
 
-include_list="Included datasets:\n"
-exclude_list="Excluded datasets:\n"
+include_list="[INFO] Included datasets:\n"
+exclude_list="[INFO] Excluded datasets:\n"
 IFS=$'\n'
 for zvol in $($ssh $sshcipher $sshport $source "zfs get -H -o name,value,source -t filesystem,volume $tag"); do
     name=$(echo $zvol | $cut -f1)
@@ -166,7 +166,7 @@ if [ $zfs_auto_snapshot_keep -gt 0 ]; then
 fi
 
 for name in "${syncvols[@]}"; do
-    log "Replicate $name"
+    log "[INFO] Replicate $name"
     fstype=$($ssh $sshcipher $sshport $source zfs get -H -o value type $name)
     if [[ $fstype == "filesystem" ]]; then
         mp=-xmountpoint
@@ -184,7 +184,7 @@ for name in "${syncvols[@]}"; do
             for part in $(echo $target/$(echo $name | $cut -d'/' -f1) | $sed "s/\// /g"); do
                 if [ $($zfs list $prefix$part > /dev/null 2>&1 ; echo $?) -gt 0 ]; then
                     if [[ $debug == "-v" ]]; then log "[DEBUG] $prefix$part does not exist"; fi
-                    log "Creating $prefix$part"
+                    log "[INFO] Creating $prefix$part"
                     $zfs create -o canmount=noauto $autosnap -p $prefix$part
                 fi
                 prefix="$prefix$part/"
@@ -193,23 +193,27 @@ for name in "${syncvols[@]}"; do
             if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Start initial replication"; fi
             IFS=$'\n'
             for snap in $($ssh $sshcipher $sshport $source "zfs list -H -t snapshot -o name -S creation $name | grep -E \"$snapshot_filter\" | tail -1"); do
-                log "Start initial replication: $snap => $target/$(echo $name | $cut -d'/' -f1)"
+                log "[INFO] Start initial replication: $snap => $target/$(echo $name | $cut -d'/' -f1)"
                 $ssh $sshcipher $sshport $source "zfs send -w -p $debug $snap" | $zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | $cut -d'/' -f1)
             done
         fi
 
         if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Start incremental replication"; fi
         guid=$($zfs list -H -o guid -s creation -t snapshot $target/$name | $tail -1)
-        last=$($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -t snapshot $name | grep $guid | tail -1 | cut -f1")
-        IFS=$'\n'
-        if [[ $fstype == "filesystem" ]] && [[ $($zfs get -H -o value canmount $target/$name) != "noauto" ]]; then
-            $zfs set canmount=noauto $target/$name
+        if [[ $guid != "" ]]; then
+            last=$($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -t snapshot $name | grep $guid | tail -1 | cut -f1")
+            IFS=$'\n'
+            if [[ $fstype == "filesystem" ]] && [[ $($zfs get -H -o value canmount $target/$name) != "noauto" ]]; then
+                $zfs set canmount=noauto $target/$name
+            fi
+            for snap in $($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E \"$snapshot_filter\" | grep --after-context=200 $guid | grep -v $guid | cut -f1"); do
+                log "[INFO] Replicating delta of $last => $snap to $target/$name"
+                $ssh $sshcipher $sshport $source "zfs send -w $debug -i $last $snap" | zfs receive -x $tag -x com.sun:auto-snapshot -F $debug $target/$name
+                last=$snap
+            done
+        else
+            log "[ERROR] No snapshot found on $target/$name to add incremental snapshots to. The target dataset (with all children) needs to be deleted and recreated via replication."
         fi
-        for snap in $($ssh $sshcipher $sshport $source "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E \"$snapshot_filter\" | grep --after-context=200 $guid | grep -v $guid | cut -f1"); do
-            log "Replicating delta of $last => $snap to $target/$name"
-            $ssh $sshcipher $sshport $source "zfs send -w $debug -i $last $snap" | zfs receive -x $tag -x com.sun:auto-snapshot -F $debug $target/$name
-            last=$snap
-        done
 
         if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Start deletion of old snapshots"; fi
         filter=$(echo -e $snapshot_filter | sed "s/|/\n/g")
@@ -223,7 +227,7 @@ for name in "${syncvols[@]}"; do
 
                 for snap in $snaps_to_delete; do
                     if [[ $snap_count -gt $min_keep ]]; then
-                        log "Deleting $snap"
+                        log "[INFO] Deleting $snap"
                         if [[ $debug == "-v" ]]; then log "[DEBUG] $name - snap_count=$snap_count, min_keep=$min_keep"; fi
                         $zfs destroy $debug $snap
                         snap_count=$(expr $snap_count - 1)
