@@ -17,7 +17,7 @@ ZFS replication script by Thorsten Spille <thorsten@spille-edv.de>
 
 #### Download and make executable
 ~~~
-wget -q --no-cache -O /usr/bin/bashclub-zsync https://git.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/bashclub-zsync
+wget -q --no-cache -O /usr/bin/bashclub-zsync https://git.bashclub.org/bashclub/zsync/raw/branch/dev/bashclub-zsync/usr/bin/bashclub-zsync
 chmod +x /usr/bin/bashclub-zsync
 bashclub-zsync
 ~~~
