@@ -231,7 +231,7 @@ for name in "${syncvols[@]}"; do
             if [[ $debug == "-v" ]]; then log "[DEBUG] $name - Checking interval $interval"; fi
             guid=$($ssh $sshcipher $sshport $source "zfs list -H -o guid,name -S creation -t snapshot $name | grep -E \"@.*$interval\" | cut -f1 | tail -1")
             if [[ "$(echo -e "$guid" | sed 's/\n//g')" != "" ]]; then
-                snaps_to_delete=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | $grep -E "@.*$interval" | $grep --after-context=200 $guid | $grep -v $guid | $cut -f1)
+                snaps_to_delete=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | $grep -E "@.*$interval" | $grep --after-context=200 $guid | $grep -v $guid | $cut -f1 | tac)
                 snap_count=$($zfs list -H -o name,guid -S creation -t snapshot $target/$name | $grep -E "@.*$interval" | $wc -l | $tr -d ' ')
 
                 for snap in $snaps_to_delete; do
