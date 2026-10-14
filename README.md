@@ -10,7 +10,7 @@ ZFS replication script by Thorsten Spille <thorsten@spille-edv.de>
 - pull replication only
 - auto creates full path on target pool, enforce com.sun:auto-snapshot=false, inherits mountpoint and sets canmount=noauto
 - raw replication
-- tested on Proxmox VE 7.x/8.x
+- tested on Proxmox VE 9.x
 - ssh cipher auto selection
 
 ## Installation
