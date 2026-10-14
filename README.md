@@ -1,5 +1,7 @@
 # zsync
 
+> Development takes place at https://code.bashclub.org/bashclub/zsync
+
 ZFS replication script by Thorsten Spille <thorsten@spille-edv.de>
 - replicates ZFS filesystems/volumes with user parameter bashclub:zsync (or custom name) configured
 - creates optional snapshot before replication (via zfs-auto-snapshot or included remote-snapshot-manager)
@@ -14,20 +16,45 @@ ZFS replication script by Thorsten Spille <thorsten@spille-edv.de>
 ## Installation
 
 #### Install via Repository (Debian / Ubuntu / Proxmox)
+Replace `<codename>` with your release codename (e.g. `bookworm`, `trixie`).
+The `zfsutils-linux` and `zfs-auto-snapshot` dependencies are in the Debian `contrib` component, so it must be enabled (already the case on Proxmox).
+
+Debian 13 (trixie) / Proxmox VE 9 and newer (deb822 format):
 ~~~
-echo "deb [signed-by=/usr/share/keyrings/bashclub-archive-keyring.gpg] https://apt.bashclub.org/release bookworm main" > /etc/apt/sources.list.d/bashclub.list
 wget -O- https://apt.bashclub.org/gpg/bashclub.pub | gpg --dearmor > /usr/share/keyrings/bashclub-archive-keyring.gpg
+cat > /etc/apt/sources.list.d/bashclub.sources << EOF
+Types: deb
+URIs: https://apt.bashclub.org/release
+Suites: <codename>
+Components: main
+Signed-By: /usr/share/keyrings/bashclub-archive-keyring.gpg
+EOF
 apt update
 apt install bashclub-zsync
 ~~~
 
+Debian 12 (bookworm) / Proxmox VE 8 and older:
+~~~
+wget -O- https://apt.bashclub.org/gpg/bashclub.pub | gpg --dearmor > /usr/share/keyrings/bashclub-archive-keyring.gpg
+echo "deb [signed-by=/usr/share/keyrings/bashclub-archive-keyring.gpg] https://apt.bashclub.org/release <codename> main" > /etc/apt/sources.list.d/bashclub.list
+apt update
+apt install bashclub-zsync
+~~~
+
+#### Install via Repository (RHEL / Rocky / Alma 9)
+Requires OpenZFS (`zfs` package) from the [OpenZFS repository](https://openzfs.github.io/openzfs-docs/Getting%20Started/RHEL-based%20distro/index.html).
+~~~
+dnf config-manager addrepo --from-repofile=https://rpm.bashclub.org/release/el9/config.repo
+dnf install bashclub-zsync
+~~~
+
 #### Download and make executable
 ~~~
-wget -q --no-cache -O /usr/bin/bashclub-zsync https://gitlab.bashclub.org/bashclub/zsync/-/raw/main/bashclub-zsync/usr/bin/bashclub-zsync
+wget -q --no-cache -O /usr/bin/bashclub-zsync https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/bashclub-zsync
 chmod +x /usr/bin/bashclub-zsync
 
 # optional: download remote-snapshot-manager
-wget -q --no-cache -O /usr/bin/remote-snapshot-manager https://gitlab.bashclub.org/bashclub/zsync/-/raw/main/bashclub-zsync/usr/bin/remote-snapshot-manager
+wget -q --no-cache -O /usr/bin/remote-snapshot-manager https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/remote-snapshot-manager
 chmod +x /usr/bin/remote-snapshot-manager
 ~~~
 
