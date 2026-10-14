@@ -3,7 +3,7 @@
 PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
 
 # check if script is installed manually on system and rename an remove execute flag
-if ! dpkg -l bashclub-zsync > /dev/null 2>&1 && ! rpm -q bashclub-zsync > /dev/null 2>&1; then
+if ! dpkg -l bashclub-zsync  > /dev/null 2>&1; then
     if which bashclub-zsync > /dev/null 2>&1; then
         zsync=$(which bashclub-zsync)
         mv ${zsync} ${zsync}.legacy

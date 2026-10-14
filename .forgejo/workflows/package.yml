@@ -8,15 +8,14 @@ jobs:
   package:
     uses: bashclub/ci-tools/.forgejo/workflows/package.yml@v1
     with:
-      # Hilfe muss die Paketversion anzeigen (kommt zur Laufzeit aus dpkg/rpm)
+      # Hilfe muss die Paketversion anzeigen (kommt zur Laufzeit aus dpkg)
       smoke-test: |
         out=$(bashclub-zsync -h 2>&1)
         echo "$out"
         grep -qE '^bashclub-zsync Version v[0-9]' <<< "$out"
-      # TODO: RPM-Targets ergänzen, sobald zfs/bashclub-checkzfs/zfs-auto-snapshot
-      # dort installierbar sind (siehe overrides.rpm in nfpm.yaml)
-      test-targets: '["debian-12","debian-13"]'
-      # TODO: RPM erst veröffentlichen, wenn die Abhängigkeiten geklärt sind
+      test-targets: '["debian-12","debian-13","ubuntu-24.04"]'
+      deb-dists: "bookworm trixie noble"
+      # kein RPM für dieses Projekt (TODO: formats: deb, sobald ci-tools das kann)
       rpm-targets: ""
       test-prepare: |
         set -euo pipefail
@@ -35,11 +34,17 @@ jobs:
         apt-get update -qq && apt-get install -y -qq ca-certificates curl gpg
         curl -fsSL https://apt.bashclub.org/gpg/bashclub.pub | gpg --dearmor > /usr/share/keyrings/bashclub-archive-keyring.gpg
         . /etc/os-release
+        suite=$VERSION_CODENAME
+        # TODO: entfernen, sobald bashclub-checkzfs auch für diese Distribution (z. B. noble) veröffentlicht ist
+        if ! curl -fsI "https://apt.bashclub.org/release/dists/$suite/Release" >/dev/null; then
+          echo "::warning::bashclub-Repo hat keine Distribution $suite, nutze bookworm"
+          suite=bookworm
+        fi
         if [ "${VERSION_ID%%.*}" -ge 13 ]; then
-          printf '%s\n' 'Types: deb' 'URIs: https://apt.bashclub.org/release' "Suites: $VERSION_CODENAME" \
+          printf '%s\n' 'Types: deb' 'URIs: https://apt.bashclub.org/release' "Suites: $suite" \
             'Components: main' 'Signed-By: /usr/share/keyrings/bashclub-archive-keyring.gpg' > /etc/apt/sources.list.d/bashclub.sources
         else
-          echo "deb [signed-by=/usr/share/keyrings/bashclub-archive-keyring.gpg] https://apt.bashclub.org/release $VERSION_CODENAME main" > /etc/apt/sources.list.d/bashclub.list
+          echo "deb [signed-by=/usr/share/keyrings/bashclub-archive-keyring.gpg] https://apt.bashclub.org/release $suite main" > /etc/apt/sources.list.d/bashclub.list
         fi
         apt-get update -qq
     secrets: inherit

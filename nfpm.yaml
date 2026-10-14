@@ -16,20 +16,10 @@ depends:
   - zfs-auto-snapshot
   - zfsutils-linux
 
-overrides:
-  rpm:
-    depends:
-      - openssh-server
-      - udisks2
-      - which
-      # "zfs" kommt nicht aus den Distro-Repos, sondern aus dem
-      # OpenZFS-Repo (EL/Fedora) bzw. OBS filesystems (SUSE).
-      - zfs
-      # eigenes Projekt (bashclub/checkzfs), RPM kommt aus rpm.bashclub.org
-      - bashclub-checkzfs
-      # TODO: zfs-auto-snapshot gibt es für EL/Fedora/SUSE nicht als Paket;
-      # bashclub-zsync kann alternativ zfs_auto_snapshot_engine=internal nutzen.
-      # - zfs-auto-snapshot
+# nur für zsync-autorun (Wechseldatenträger mit LUKS, Mailbenachrichtigung)
+recommends:
+  - cryptsetup
+  - bsd-mailx | mailx
 
 contents:
   - src: bashclub-zsync/usr/bin/bashclub-zsync
@@ -50,14 +40,8 @@ contents:
     dst: /etc/logrotate.d/bashclub-zsync
     type: config|noreplace
     file_info: { mode: 0644 }
-  # deb: bisheriger Pfad beibehalten; rpm: Paket-Unit-Verzeichnis
   - src: bashclub-zsync/etc/systemd/system/zsync-autorun@.service
     dst: /etc/systemd/system/zsync-autorun@.service
-    packager: deb
-    file_info: { mode: 0644 }
-  - src: bashclub-zsync/etc/systemd/system/zsync-autorun@.service
-    dst: /usr/lib/systemd/system/zsync-autorun@.service
-    packager: rpm
     file_info: { mode: 0644 }
   - src: bashclub-zsync/etc/udev/rules.d/90-automount-zsync.rules.example
     dst: /etc/udev/rules.d/90-automount-zsync.rules.example
@@ -65,12 +49,6 @@ contents:
 
   - src: LICENSE
     dst: /usr/share/doc/bashclub-zsync/copyright/LICENSE
-    packager: deb
-    file_info: { mode: 0644 }
-  - src: LICENSE
-    dst: /usr/share/licenses/bashclub-zsync/LICENSE
-    packager: rpm
-    type: license
     file_info: { mode: 0644 }
   - src: CHANGELOG.md
     dst: /usr/share/doc/bashclub-zsync/CHANGELOG.md

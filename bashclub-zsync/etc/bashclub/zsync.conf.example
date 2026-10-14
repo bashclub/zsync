@@ -23,7 +23,7 @@ zfs_auto_snapshot_keep=0
 zfs_auto_snapshot_label="backup"
 
 # select the zfs auto snapshot engine (zfs-auto-snapshot = "zas" or remote-snapshot-manager = "internal")
-zfs_auto_snapshot_engine="zas"
+zfs_auto_snapshot_engine="internal"
 
 # disable checkzfs with value > 0
 checkzfs_disabled=0

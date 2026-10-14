@@ -10,16 +10,26 @@ ZFS replication script by Thorsten Spille <thorsten@spille-edv.de>
 - pull replication only
 - auto creates full path on target pool, enforce com.sun:auto-snapshot=false, inherits mountpoint and sets canmount=noauto
 - raw replication
-- tested on Proxmox VE 9.x
+- tested on Proxmox VE 9.x, usable on Debian, Ubuntu and TrueNAS SCALE
 - ssh cipher auto selection
 
 ## Installation
+Supported platforms:
 
-### Debian / Proxmox VE (apt)
-Packages are available for Debian 12 (`bookworm`) and Debian 13 (`trixie`) and the corresponding Proxmox VE releases (8 and 9).
+| Platform | Installation |
+|---|---|
+| Proxmox VE 8 / 9, Proxmox Backup Server | apt package |
+| Debian 12 (`bookworm`) / 13 (`trixie`) | apt package |
+| Ubuntu 24.04 (`noble`) | apt package |
+| TrueNAS SCALE | manual installation on a dataset |
 
-#### 1. Enable required external repositories
-`zfsutils-linux` and `zfs-auto-snapshot` are in the Debian `contrib` component. Proxmox VE ships ZFS and has `contrib` enabled by default, so you can skip this step there.
+`bashclub-zsync` is only installed on the replication target (pull replication). The source hosts only need ZFS and SSH access.
+
+### Proxmox VE / Debian / Ubuntu (apt)
+
+#### 1. Enable required components
+`zfsutils-linux` and `zfs-auto-snapshot` are in the Debian `contrib` component (Ubuntu: `main` and `universe`).
+Proxmox VE and Ubuntu have them enabled by default, so you can skip this step there.
 
 Debian 13 (deb822 format, `/etc/apt/sources.list.d/debian.sources`):
 ~~~
@@ -34,9 +44,9 @@ sed -i -E '/^deb .*debian\.org/{/ contrib( |$)/!s/$/ contrib/}' /etc/apt/sources
 `bashclub-checkzfs` (monitoring, see [checkzfs](https://code.bashclub.org/bashclub/checkzfs)) comes from the bashclub repository itself.
 
 #### 2. Add the bashclub repository and install
-Replace `<codename>` with your release codename (`bookworm` or `trixie`).
+Replace `<codename>` with your release codename (`bookworm`, `trixie` or `noble`).
 
-Debian 13 / Proxmox VE 9 and newer (deb822 format):
+Debian 13 / Proxmox VE 9 / Ubuntu 24.04 (deb822 format):
 ~~~
 wget -O- https://apt.bashclub.org/gpg/bashclub.pub | gpg --dearmor > /usr/share/keyrings/bashclub-archive-keyring.gpg
 cat > /etc/apt/sources.list.d/bashclub.sources << EOF
@@ -58,61 +68,32 @@ apt update
 apt install bashclub-zsync
 ~~~
 
-### RHEL / Rocky / AlmaLinux, Fedora, openSUSE (rpm)
-> **Note:** RPM packages are in preparation and not published yet.
+`cryptsetup` and a `mail` command (`bsd-mailx`) are installed as recommended packages. They are only needed for `zsync-autorun` (removable disks with LUKS, mail notification).
 
-On RPM-based distributions `zfs-auto-snapshot` is not available, so set `zfs_auto_snapshot_engine="internal"` in your configuration. `bashclub-checkzfs` (monitoring, see [checkzfs](https://code.bashclub.org/bashclub/checkzfs)) comes from the bashclub repository.
+### TrueNAS SCALE
+TrueNAS does not allow installing packages and the system files are replaced on every update. Install the scripts into a dataset on your pool instead, e.g. `tank/scripts` (replace `tank` with your pool name):
+~~~
+mkdir -p /mnt/tank/scripts/zsync && cd /mnt/tank/scripts/zsync
+curl -fsSL -o bashclub-zsync https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/bashclub-zsync
+curl -fsSL -o remote-snapshot-manager https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/remote-snapshot-manager
+# optional: checkzfs for monitoring
+curl -fsSL -o checkzfs https://code.bashclub.org/bashclub/checkzfs/raw/branch/main/bashclub-checkzfs/usr/bin/checkzfs
+chmod +x bashclub-zsync remote-snapshot-manager checkzfs
 
-#### 1. Enable required external repositories
-ZFS is not part of the distribution repositories. Install it from the OpenZFS project (see the [OpenZFS documentation](https://openzfs.github.io/openzfs-docs/Getting%20Started/index.html) for details and kABI-tracking kmods).
+# creates zsync.conf on first run, adjust it afterwards
+./bashclub-zsync -c /mnt/tank/scripts/zsync/zsync.conf
+~~~
+`bashclub-zsync` finds `remote-snapshot-manager` and `checkzfs` in its own directory. Keep the configuration on the dataset as well and create the cronjob in the web UI under *System → Advanced Settings → Cron Jobs*, e.g.:
+~~~
+/mnt/tank/scripts/zsync/bashclub-zsync -c /mnt/tank/scripts/zsync/zsync.conf > /mnt/tank/scripts/zsync/zsync.log 2>&1
+~~~
+`zfs-auto-snapshot` is not available on TrueNAS, keep `zfs_auto_snapshot_engine="internal"`.
 
-RHEL / Rocky / AlmaLinux 9 and 10 (DKMS packages need EPEL; on RHEL enable EPEL as described by the [Fedora project](https://docs.fedoraproject.org/en-US/epel/)):
+### Manual installation (other distributions)
 ~~~
-dnf install -y epel-release
-dnf install -y https://zfsonlinux.org/epel/zfs-release-3-0$(rpm --eval "%{dist}").noarch.rpm
-dnf install -y kernel-devel
-~~~
-
-Fedora:
-~~~
-dnf install -y https://zfsonlinux.org/fedora/zfs-release-3-1$(rpm --eval "%{dist}").noarch.rpm
-dnf install -y kernel-devel-$(uname -r | awk -F'-' '{print $1}')
-~~~
-
-openSUSE Leap 16 (for Tumbleweed replace `16.0` with `openSUSE_Tumbleweed`):
-~~~
-zypper addrepo https://download.opensuse.org/repositories/filesystems/16.0/filesystems.repo
-~~~
-
-#### 2. Add the bashclub repository and install
-RHEL / Rocky / AlmaLinux (use `el10` instead of `el9` for version 10):
-~~~
-dnf install -y dnf-plugins-core
-dnf config-manager --add-repo https://rpm.bashclub.org/release/el9/config.repo
-dnf install bashclub-zsync
-~~~
-
-Fedora:
-~~~
-dnf config-manager addrepo --from-repofile=https://rpm.bashclub.org/release/fedora/config.repo
-dnf install bashclub-zsync
-~~~
-
-openSUSE:
-~~~
-zypper addrepo https://rpm.bashclub.org/release/suse/config.repo
-zypper refresh
-zypper install bashclub-zsync
-~~~
-
-### Manual installation
-~~~
-wget -q --no-cache -O /usr/bin/bashclub-zsync https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/bashclub-zsync
-chmod +x /usr/bin/bashclub-zsync
-
-# optional: download remote-snapshot-manager
-wget -q --no-cache -O /usr/bin/remote-snapshot-manager https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/remote-snapshot-manager
-chmod +x /usr/bin/remote-snapshot-manager
+wget -q --no-cache -O /usr/local/bin/bashclub-zsync https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/bashclub-zsync
+wget -q --no-cache -O /usr/local/bin/remote-snapshot-manager https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/remote-snapshot-manager
+chmod +x /usr/local/bin/bashclub-zsync /usr/local/bin/remote-snapshot-manager
 
 # optional: download checkzfs for monitoring (requires python3)
 wget -q --no-cache -O /usr/local/bin/checkzfs https://code.bashclub.org/bashclub/checkzfs/raw/branch/main/bashclub-checkzfs/usr/bin/checkzfs
@@ -126,7 +107,7 @@ checkzfs --help
 
 ## Configuration
 After first execution bashclub-zsync will create `/etc/bashclub/zsync.conf` if no configuration parameter is given and file not exists.
-The installation packages provide `/etc/bashclub/zsync.conf.example` with the default values.
+The installation package provides `/etc/bashclub/zsync.conf.example` with the default values.
 
 ~~~
 # replication target path on local machine 
@@ -153,8 +134,9 @@ zfs_auto_snapshot_keep=0
 # make snapshot via zfs-auto-snapshot before replication
 zfs_auto_snapshot_label="backup"
 
-# select snapshot engine: "zas" or "internal"
-zfs_auto_snapshot_engine="zas"
+# select snapshot engine: "zas" (zfs-auto-snapshot on the source) or "internal" (remote-snapshot-manager)
+# new configurations use "internal"; existing configurations without this setting keep using "zas"
+zfs_auto_snapshot_engine="internal"
 
 # disable checkzfs with value > 0
 checkzfs_disabled=0
