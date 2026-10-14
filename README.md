@@ -188,6 +188,12 @@ File: /etc/cron.hourly/bashclub-zsync
 /usr/bin/bashclub-zsync -c /etc/bashclub/zsync.conf > /var/log/bashclub-zsync/zsync.log
 ~~~
 
+## Releases
+Packages are built by Forgejo CI on https://code.bashclub.org/bashclub/zsync:
+- pull request: build and test only
+- merge to `main`: publish to the **testing** repository
+- release: bump `__version__` in `bashclub-zsync/usr/bin/bashclub-zsync` and add a `## [vX.Y.Z] - YYYY-MM-DD` entry to `CHANGELOG.md` in your pull request. After the merge CI tags `vX.Y.Z` automatically and publishes it to the **release** repository.
+
 # Roadmap
 
 Following features are on the wishlist:
