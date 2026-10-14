@@ -3,6 +3,8 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  # manuell neu bauen (z. B. nach Änderungen an ci-tools oder Secrets)
+  workflow_dispatch:
 
 jobs:
   package:
