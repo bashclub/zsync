@@ -5,7 +5,7 @@ version: ${VERSION}
 version_schema: none
 section: admin
 priority: optional
-maintainer: bashclub
+maintainer: Thorsten Spille <kontakt@spille-it.de>
 description: The deb package for bashclub-zsync ${VERSION} maintained from bashclub.
 homepage: https://code.bashclub.org/bashclub/zsync
 
