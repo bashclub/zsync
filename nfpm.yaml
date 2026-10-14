@@ -34,7 +34,6 @@ contents:
 
   - src: bashclub-zsync/etc/bashclub/zsync.conf.example
     dst: /etc/bashclub/zsync.conf.example
-    type: config|noreplace
     file_info: { mode: 0644 }
   - src: bashclub-zsync/etc/logrotate.d/bashclub-zsync
     dst: /etc/logrotate.d/bashclub-zsync
