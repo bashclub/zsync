@@ -13,8 +13,8 @@ jobs:
         out=$(bashclub-zsync -h 2>&1)
         echo "$out"
         grep -qE '^bashclub-zsync Version v[0-9]' <<< "$out"
-      test-targets: '["debian-12","debian-13","ubuntu-24.04"]'
-      deb-dists: "bookworm trixie noble"
+      test-targets: '["debian-12","debian-13","ubuntu-24.04","ubuntu-26.04"]'
+      deb-dists: "bookworm trixie noble resolute"
       # kein RPM für dieses Projekt (TODO: formats: deb, sobald ci-tools das kann)
       rpm-targets: ""
       test-prepare: |
@@ -35,7 +35,7 @@ jobs:
         curl -fsSL https://apt.bashclub.org/gpg/bashclub.pub | gpg --dearmor > /usr/share/keyrings/bashclub-archive-keyring.gpg
         . /etc/os-release
         suite=$VERSION_CODENAME
-        # TODO: entfernen, sobald bashclub-checkzfs auch für diese Distribution (z. B. noble) veröffentlicht ist
+        # TODO: entfernen, sobald bashclub-checkzfs auch für diese Distribution (noble, resolute) veröffentlicht ist
         if ! curl -fsI "https://apt.bashclub.org/release/dists/$suite/Release" >/dev/null; then
           echo "::warning::bashclub-Repo hat keine Distribution $suite, nutze bookworm"
           suite=bookworm

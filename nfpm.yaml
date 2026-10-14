@@ -21,6 +21,14 @@ recommends:
   - cryptsetup
   - bsd-mailx | mailx
 
+# TODO: entfernen, sobald ci-tools nur deb bauen kann (formats: deb);
+# rpm kennt keine Alternativen ("a | b") und bricht sonst den Build ab
+overrides:
+  rpm:
+    recommends:
+      - cryptsetup
+      - mailx
+
 contents:
   - src: bashclub-zsync/usr/bin/bashclub-zsync
     dst: /usr/bin/bashclub-zsync

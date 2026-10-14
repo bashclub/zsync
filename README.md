@@ -20,7 +20,7 @@ Supported platforms:
 |---|---|
 | Proxmox VE 8 / 9, Proxmox Backup Server | apt package |
 | Debian 12 (`bookworm`) / 13 (`trixie`) | apt package |
-| Ubuntu 24.04 (`noble`) | apt package |
+| Ubuntu 24.04 (`noble`) / 26.04 (`resolute`) | apt package |
 | TrueNAS SCALE | manual installation on a dataset |
 
 `bashclub-zsync` is only installed on the replication target (pull replication). The source hosts only need ZFS and SSH access.
@@ -44,9 +44,9 @@ sed -i -E '/^deb .*debian\.org/{/ contrib( |$)/!s/$/ contrib/}' /etc/apt/sources
 `bashclub-checkzfs` (monitoring, see [checkzfs](https://code.bashclub.org/bashclub/checkzfs)) comes from the bashclub repository itself.
 
 #### 2. Add the bashclub repository and install
-Replace `<codename>` with your release codename (`bookworm`, `trixie` or `noble`).
+Replace `<codename>` with your release codename (`bookworm`, `trixie`, `noble` or `resolute`).
 
-Debian 13 / Proxmox VE 9 / Ubuntu 24.04 (deb822 format):
+Debian 13 / Proxmox VE 9 / Ubuntu 24.04 and 26.04 (deb822 format):
 ~~~
 wget -O- https://apt.bashclub.org/gpg/bashclub.pub | gpg --dearmor > /usr/share/keyrings/bashclub-archive-keyring.gpg
 cat > /etc/apt/sources.list.d/bashclub.sources << EOF
@@ -73,7 +73,7 @@ apt install bashclub-zsync
 ### TrueNAS SCALE
 TrueNAS does not allow installing packages and the system files are replaced on every update. Install the scripts into a dataset on your pool instead, e.g. `tank/scripts` (replace `tank` with your pool name):
 ~~~
-mkdir -p /mnt/tank/scripts/zsync && cd /mnt/tank/scripts/zsync
+mkdir -p /mnt/tank/scripts/bashclub-zsync && cd /mnt/tank/scripts/bashclub-zsync
 curl -fsSL -o bashclub-zsync https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/bashclub-zsync
 curl -fsSL -o remote-snapshot-manager https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/remote-snapshot-manager
 # optional: checkzfs for monitoring
@@ -81,11 +81,11 @@ curl -fsSL -o checkzfs https://code.bashclub.org/bashclub/checkzfs/raw/branch/ma
 chmod +x bashclub-zsync remote-snapshot-manager checkzfs
 
 # creates zsync.conf on first run, adjust it afterwards
-./bashclub-zsync -c /mnt/tank/scripts/zsync/zsync.conf
+./bashclub-zsync -c /mnt/tank/scripts/bashclub-zsync/zsync.conf
 ~~~
 `bashclub-zsync` finds `remote-snapshot-manager` and `checkzfs` in its own directory. Keep the configuration on the dataset as well and create the cronjob in the web UI under *System → Advanced Settings → Cron Jobs*, e.g.:
 ~~~
-/mnt/tank/scripts/zsync/bashclub-zsync -c /mnt/tank/scripts/zsync/zsync.conf > /mnt/tank/scripts/zsync/zsync.log 2>&1
+/mnt/tank/scripts/bashclub-zsync/bashclub-zsync -c /mnt/tank/scripts/bashclub-zsync/zsync.conf > /mnt/tank/scripts/bashclub-zsync/bashclub-zsync.log 2>&1
 ~~~
 `zfs-auto-snapshot` is not available on TrueNAS, keep `zfs_auto_snapshot_engine="internal"`.
 
