@@ -3,7 +3,8 @@
 # bashclub zfs replication script
 # Author: (C) 2024 Thorsten Spille <thorsten@spille-edv.de>
 
-__version__=v1.0.18
+# version is taken from the installed package (set by the release tag)
+__version__=v$(dpkg-query -W -f='${Version}' bashclub-zsync 2>/dev/null || rpm -q --qf '%{VERSION}' bashclub-zsync 2>/dev/null || echo dev)
 
 PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
 

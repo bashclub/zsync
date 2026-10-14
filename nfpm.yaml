@@ -21,6 +21,7 @@ overrides:
     depends:
       - openssh-server
       - udisks2
+      - which
       # "zfs" kommt nicht aus den Distro-Repos, sondern aus dem
       # OpenZFS-Repo (EL/Fedora) bzw. OBS filesystems (SUSE).
       - zfs

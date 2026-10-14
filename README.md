@@ -192,7 +192,9 @@ File: /etc/cron.hourly/bashclub-zsync
 Packages are built by Forgejo CI on https://code.bashclub.org/bashclub/zsync:
 - pull request: build and test only
 - merge to `main`: publish to the **testing** repository
-- release: bump `__version__` in `bashclub-zsync/usr/bin/bashclub-zsync` and add a `## [vX.Y.Z] - YYYY-MM-DD` entry to `CHANGELOG.md` in your pull request. After the merge CI tags `vX.Y.Z` automatically and publishes it to the **release** repository.
+- tag `vX.Y.Z` (e.g. via "New release" in Forgejo): build, test and publish version `X.Y.Z` to the **release** repository
+
+The version shown by `bashclub-zsync -h` is read from the installed package, so there is nothing to bump in the code. Please add the changes to `CHANGELOG.md` before tagging.
 
 # Roadmap
 
