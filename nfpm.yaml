@@ -21,11 +21,11 @@ overrides:
     depends:
       - openssh-server
       - udisks2
-      # TODO: "zfs" kommt nicht aus den Distro-Repos, sondern aus dem
+      # "zfs" kommt nicht aus den Distro-Repos, sondern aus dem
       # OpenZFS-Repo (EL/Fedora) bzw. OBS filesystems (SUSE).
       - zfs
-      # TODO: bashclub-checkzfs als RPM auf rpm.bashclub.org verfügbar?
-      # - bashclub-checkzfs
+      # eigenes Projekt (bashclub/checkzfs), RPM kommt aus rpm.bashclub.org
+      - bashclub-checkzfs
       # TODO: zfs-auto-snapshot gibt es für EL/Fedora/SUSE nicht als Paket;
       # bashclub-zsync kann alternativ zfs_auto_snapshot_engine=internal nutzen.
       # - zfs-auto-snapshot

@@ -117,7 +117,7 @@ if which checkzfs; then
     fi
 else
     checkzfs_disabled=1
-    log "[WARN] checkzfs is disabled. for monitoring please install:\n\thttps://github.com/bashclub/check-zfs-replication\n"
+    log "[WARN] checkzfs is disabled. for monitoring please install:\n\thttps://code.bashclub.org/bashclub/checkzfs\n"
 fi
 
 # load config file

@@ -15,11 +15,28 @@ ZFS replication script by Thorsten Spille <thorsten@spille-edv.de>
 
 ## Installation
 
-#### Install via Repository (Debian / Ubuntu / Proxmox)
-Replace `<codename>` with your release codename (e.g. `bookworm`, `trixie`).
-The `zfsutils-linux` and `zfs-auto-snapshot` dependencies are in the Debian `contrib` component, so it must be enabled (already the case on Proxmox).
+### Debian / Proxmox VE (apt)
+Packages are available for Debian 12 (`bookworm`) and Debian 13 (`trixie`) and the corresponding Proxmox VE releases (8 and 9).
 
-Debian 13 (trixie) / Proxmox VE 9 and newer (deb822 format):
+#### 1. Enable required external repositories
+`zfsutils-linux` and `zfs-auto-snapshot` are in the Debian `contrib` component. Proxmox VE ships ZFS and has `contrib` enabled by default, so you can skip this step there.
+
+Debian 13 (deb822 format, `/etc/apt/sources.list.d/debian.sources`):
+~~~
+sed -i '/^Components:/{/contrib/!s/$/ contrib/}' /etc/apt/sources.list.d/debian.sources
+~~~
+
+Debian 12 (one-line format, `/etc/apt/sources.list`):
+~~~
+sed -i -E '/^deb .*debian\.org/{/ contrib( |$)/!s/$/ contrib/}' /etc/apt/sources.list
+~~~
+
+`bashclub-checkzfs` (monitoring, see [checkzfs](https://code.bashclub.org/bashclub/checkzfs)) comes from the bashclub repository itself.
+
+#### 2. Add the bashclub repository and install
+Replace `<codename>` with your release codename (`bookworm` or `trixie`).
+
+Debian 13 / Proxmox VE 9 and newer (deb822 format):
 ~~~
 wget -O- https://apt.bashclub.org/gpg/bashclub.pub | gpg --dearmor > /usr/share/keyrings/bashclub-archive-keyring.gpg
 cat > /etc/apt/sources.list.d/bashclub.sources << EOF
@@ -33,7 +50,7 @@ apt update
 apt install bashclub-zsync
 ~~~
 
-Debian 12 (bookworm) / Proxmox VE 8 and older:
+Debian 12 / Proxmox VE 8:
 ~~~
 wget -O- https://apt.bashclub.org/gpg/bashclub.pub | gpg --dearmor > /usr/share/keyrings/bashclub-archive-keyring.gpg
 echo "deb [signed-by=/usr/share/keyrings/bashclub-archive-keyring.gpg] https://apt.bashclub.org/release <codename> main" > /etc/apt/sources.list.d/bashclub.list
@@ -41,14 +58,54 @@ apt update
 apt install bashclub-zsync
 ~~~
 
-#### Install via Repository (RHEL / Rocky / Alma 9)
-Requires OpenZFS (`zfs` package) from the [OpenZFS repository](https://openzfs.github.io/openzfs-docs/Getting%20Started/RHEL-based%20distro/index.html).
+### RHEL / Rocky / AlmaLinux, Fedora, openSUSE (rpm)
+> **Note:** RPM packages are in preparation and not published yet.
+
+On RPM-based distributions `zfs-auto-snapshot` is not available, so set `zfs_auto_snapshot_engine="internal"` in your configuration. `bashclub-checkzfs` (monitoring, see [checkzfs](https://code.bashclub.org/bashclub/checkzfs)) comes from the bashclub repository.
+
+#### 1. Enable required external repositories
+ZFS is not part of the distribution repositories. Install it from the OpenZFS project (see the [OpenZFS documentation](https://openzfs.github.io/openzfs-docs/Getting%20Started/index.html) for details and kABI-tracking kmods).
+
+RHEL / Rocky / AlmaLinux 9 and 10 (DKMS packages need EPEL; on RHEL enable EPEL as described by the [Fedora project](https://docs.fedoraproject.org/en-US/epel/)):
 ~~~
-dnf config-manager addrepo --from-repofile=https://rpm.bashclub.org/release/el9/config.repo
+dnf install -y epel-release
+dnf install -y https://zfsonlinux.org/epel/zfs-release-3-0$(rpm --eval "%{dist}").noarch.rpm
+dnf install -y kernel-devel
+~~~
+
+Fedora:
+~~~
+dnf install -y https://zfsonlinux.org/fedora/zfs-release-3-1$(rpm --eval "%{dist}").noarch.rpm
+dnf install -y kernel-devel-$(uname -r | awk -F'-' '{print $1}')
+~~~
+
+openSUSE Leap 16 (for Tumbleweed replace `16.0` with `openSUSE_Tumbleweed`):
+~~~
+zypper addrepo https://download.opensuse.org/repositories/filesystems/16.0/filesystems.repo
+~~~
+
+#### 2. Add the bashclub repository and install
+RHEL / Rocky / AlmaLinux (use `el10` instead of `el9` for version 10):
+~~~
+dnf install -y dnf-plugins-core
+dnf config-manager --add-repo https://rpm.bashclub.org/release/el9/config.repo
 dnf install bashclub-zsync
 ~~~
 
-#### Download and make executable
+Fedora:
+~~~
+dnf config-manager addrepo --from-repofile=https://rpm.bashclub.org/release/fedora/config.repo
+dnf install bashclub-zsync
+~~~
+
+openSUSE:
+~~~
+zypper addrepo https://rpm.bashclub.org/release/suse/config.repo
+zypper refresh
+zypper install bashclub-zsync
+~~~
+
+### Manual installation
 ~~~
 wget -q --no-cache -O /usr/bin/bashclub-zsync https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/bashclub-zsync
 chmod +x /usr/bin/bashclub-zsync
@@ -56,6 +113,11 @@ chmod +x /usr/bin/bashclub-zsync
 # optional: download remote-snapshot-manager
 wget -q --no-cache -O /usr/bin/remote-snapshot-manager https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/remote-snapshot-manager
 chmod +x /usr/bin/remote-snapshot-manager
+
+# optional: download checkzfs for monitoring (requires python3)
+wget -q --no-cache -O /usr/local/bin/checkzfs https://code.bashclub.org/bashclub/checkzfs/raw/branch/main/bashclub-checkzfs/usr/bin/checkzfs
+chmod +x /usr/local/bin/checkzfs
+checkzfs --help
 ~~~
 
 ## Documentation
@@ -64,7 +126,7 @@ chmod +x /usr/bin/remote-snapshot-manager
 
 ## Configuration
 After first execution bashclub-zsync will create `/etc/bashclub/zsync.conf` if no configuration parameter is given and file not exists.
-The Debian installation package provides `/etc/bashclub/zsync.conf.example` with the default values.
+The installation packages provide `/etc/bashclub/zsync.conf.example` with the default values.
 
 ~~~
 # replication target path on local machine 
