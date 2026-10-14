@@ -3,9 +3,11 @@
 # bashclub zfs replication script
 # Author: (C) 2024 Thorsten Spille <thorsten@spille-edv.de>
 
-__version__=v1.0.18
+# version is taken from the installed package (set by the release tag)
+__version__=v$(dpkg-query -W -f='${Version}' bashclub-zsync 2>/dev/null || echo dev)
 
-PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
+# also search next to this script (manual installation, e.g. on a TrueNAS dataset)
+PATH="$(dirname "$(readlink -f "$0")"):/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
 
 prog="$(basename $0)"
 zfs=$(which zfs)
@@ -55,6 +57,7 @@ zfs_auto_snapshot_keep=0
 zfs_auto_snapshot_label="backup"
 
 # select snapshot engine: "zas" or "internal"
+# keep "zas" here for existing configs without this setting; new configs get "internal"
 zfs_auto_snapshot_engine="zas"
 
 # disable checkzfs with value > 0
@@ -117,7 +120,7 @@ if which checkzfs; then
     fi
 else
     checkzfs_disabled=1
-    log "[WARN] checkzfs is disabled. for monitoring please install:\n\thttps://github.com/bashclub/check-zfs-replication\n"
+    log "[WARN] checkzfs is disabled. for monitoring please install:\n\thttps://code.bashclub.org/bashclub/checkzfs\n"
 fi
 
 # load config file
@@ -135,7 +138,7 @@ snapshot_filter="$snapshot_filter"
 min_keep=$min_keep
 zfs_auto_snapshot_keep=$zfs_auto_snapshot_keep
 zfs_auto_snapshot_label=$zfs_auto_snapshot_label
-zfs_auto_snapshot_engine=$zfs_auto_snapshot_engine
+zfs_auto_snapshot_engine=internal
 checkzfs_disabled=$checkzfs_disabled
 checkzfs_local=$checkzfs_local
 checkzfs_prefix=$checkzfs_prefix

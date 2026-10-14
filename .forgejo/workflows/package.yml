@@ -1,0 +1,50 @@
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  package:
+    uses: bashclub/ci-tools/.forgejo/workflows/package.yml@v1
+    with:
+      # Hilfe muss die Paketversion anzeigen (kommt zur Laufzeit aus dpkg)
+      smoke-test: |
+        out=$(bashclub-zsync -h 2>&1)
+        echo "$out"
+        grep -qE '^bashclub-zsync Version v[0-9]' <<< "$out"
+      test-targets: '["debian-12","debian-13","ubuntu-24.04","ubuntu-26.04"]'
+      deb-dists: "bookworm trixie noble resolute"
+      formats: deb
+      test-prepare: |
+        set -euo pipefail
+        echo 'APT::Install-Recommends "false";' > /etc/apt/apt.conf.d/99no-recommends
+        # contrib (zfsutils-linux, zfs-auto-snapshot) für Debian-Quellen ergänzen, falls nicht vorhanden
+        for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+          [ -f "$f" ] || continue
+          sed -Ei '/^[[:space:]]*deb(-src)?[[:space:]].*debian\.org/{/[[:space:]]contrib([[:space:]]|$)/!s/[[:space:]]*$/ contrib/}' "$f"
+        done
+        for f in /etc/apt/sources.list.d/*.sources; do
+          [ -f "$f" ] || continue
+          awk 'BEGIN { RS = ""; ORS = "\n\n" }
+               /URIs:[^\n]*debian\.org/ && !/Components:[^\n]*[ \t]contrib([ \t\n]|$)/ { sub(/Components:[^\n]*/, "& contrib") }
+               { print }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+        done
+        apt-get update -qq && apt-get install -y -qq ca-certificates curl gpg
+        curl -fsSL https://apt.bashclub.org/gpg/bashclub.pub | gpg --dearmor > /usr/share/keyrings/bashclub-archive-keyring.gpg
+        . /etc/os-release
+        suite=$VERSION_CODENAME
+        # TODO: entfernen, sobald bashclub-checkzfs auch für diese Distribution (noble, resolute) veröffentlicht ist
+        if ! curl -fsI "https://apt.bashclub.org/release/dists/$suite/Release" >/dev/null; then
+          echo "::warning::bashclub-Repo hat keine Distribution $suite, nutze bookworm"
+          suite=bookworm
+        fi
+        if [ "${VERSION_ID%%.*}" -ge 13 ]; then
+          printf '%s\n' 'Types: deb' 'URIs: https://apt.bashclub.org/release' "Suites: $suite" \
+            'Components: main' 'Signed-By: /usr/share/keyrings/bashclub-archive-keyring.gpg' > /etc/apt/sources.list.d/bashclub.sources
+        else
+          echo "deb [signed-by=/usr/share/keyrings/bashclub-archive-keyring.gpg] https://apt.bashclub.org/release $suite main" > /etc/apt/sources.list.d/bashclub.list
+        fi
+        apt-get update -qq
+    secrets: inherit
+

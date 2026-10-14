@@ -1,0 +1,60 @@
+name: bashclub-zsync
+arch: all
+platform: linux
+version: ${VERSION}
+version_schema: none
+section: admin
+priority: optional
+maintainer: Thorsten Spille <kontakt@spille-it.de>
+description: The deb package for bashclub-zsync ${VERSION} maintained from bashclub.
+homepage: https://code.bashclub.org/bashclub/zsync
+
+depends:
+  - bashclub-checkzfs
+  - openssh-server
+  - udisks2
+  - zfs-auto-snapshot
+  - zfsutils-linux
+
+# nur für zsync-autorun (Wechseldatenträger mit LUKS, Mailbenachrichtigung)
+recommends:
+  - cryptsetup
+  - bsd-mailx | mailx
+
+contents:
+  - src: bashclub-zsync/usr/bin/bashclub-zsync
+    dst: /usr/bin/bashclub-zsync
+    file_info: { mode: 0755 }
+  - src: bashclub-zsync/usr/bin/remote-snapshot-manager
+    dst: /usr/bin/remote-snapshot-manager
+    file_info: { mode: 0755 }
+  - src: bashclub-zsync/usr/bin/zsync-autorun
+    dst: /usr/bin/zsync-autorun
+    file_info: { mode: 0755 }
+
+  - src: bashclub-zsync/etc/bashclub/zsync.conf.example
+    dst: /etc/bashclub/zsync.conf.example
+    type: config|noreplace
+    file_info: { mode: 0644 }
+  - src: bashclub-zsync/etc/logrotate.d/bashclub-zsync
+    dst: /etc/logrotate.d/bashclub-zsync
+    type: config|noreplace
+    file_info: { mode: 0644 }
+  - src: bashclub-zsync/etc/systemd/system/zsync-autorun@.service
+    dst: /etc/systemd/system/zsync-autorun@.service
+    file_info: { mode: 0644 }
+  - src: bashclub-zsync/etc/udev/rules.d/90-automount-zsync.rules.example
+    dst: /etc/udev/rules.d/90-automount-zsync.rules.example
+    file_info: { mode: 0644 }
+
+  - src: LICENSE
+    dst: /usr/share/doc/bashclub-zsync/copyright/LICENSE
+    file_info: { mode: 0644 }
+  - src: CHANGELOG.md
+    dst: /usr/share/doc/bashclub-zsync/CHANGELOG.md
+    file_info: { mode: 0644 }
+
+scripts:
+  preinstall: packaging/scripts/preinst
+  postinstall: packaging/scripts/postinst
+  postremove: packaging/scripts/postrm
