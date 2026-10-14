@@ -71,9 +71,11 @@ apt install bashclub-zsync
 `cryptsetup` and a `mail` command (`bsd-mailx`) are installed as recommended packages. They are only needed for `zsync-autorun` (removable disks with LUKS, mail notification).
 
 ### TrueNAS SCALE
-TrueNAS does not allow installing packages and the system files are replaced on every update. Install the scripts into a dataset on your pool instead, e.g. `tank/scripts` (replace `tank` with your pool name):
+TrueNAS does not allow installing packages and the system files are replaced on every update. The scripts are therefore installed into `scripts/bashclub-zsync` on your data pool. The first data pool is detected automatically; to use another one, set it first, e.g. `pool=tank`.
 ~~~
-mkdir -p /mnt/tank/scripts/bashclub-zsync && cd /mnt/tank/scripts/bashclub-zsync
+pool=${pool:-$(zpool list -H -o name | grep -vx boot-pool | head -n1)}
+dir=$(zfs get -H -o value mountpoint "$pool")/scripts/bashclub-zsync
+mkdir -p "$dir" && cd "$dir"
 curl -fsSL -o bashclub-zsync https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/bashclub-zsync
 curl -fsSL -o remote-snapshot-manager https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/remote-snapshot-manager
 # optional: checkzfs for monitoring
@@ -81,12 +83,13 @@ curl -fsSL -o checkzfs https://code.bashclub.org/bashclub/checkzfs/raw/branch/ma
 chmod +x bashclub-zsync remote-snapshot-manager checkzfs
 
 # creates zsync.conf on first run, adjust it afterwards
-./bashclub-zsync -c /mnt/tank/scripts/bashclub-zsync/zsync.conf
+./bashclub-zsync -c "$dir/zsync.conf"
+
+# prints the command for the cron job
+echo "$dir/bashclub-zsync -c $dir/zsync.conf > $dir/bashclub-zsync.log 2>&1"
 ~~~
-`bashclub-zsync` finds `remote-snapshot-manager` and `checkzfs` in its own directory. Keep the configuration on the dataset as well and create the cronjob in the web UI under *System → Advanced Settings → Cron Jobs*, e.g.:
-~~~
-/mnt/tank/scripts/bashclub-zsync/bashclub-zsync -c /mnt/tank/scripts/bashclub-zsync/zsync.conf > /mnt/tank/scripts/bashclub-zsync/bashclub-zsync.log 2>&1
-~~~
+`bashclub-zsync` finds `remote-snapshot-manager` and `checkzfs` in its own directory. Create the cron job in the web UI under *System → Advanced Settings → Cron Jobs* with the command printed by the last line.
+
 `zfs-auto-snapshot` is not available on TrueNAS, keep `zfs_auto_snapshot_engine="internal"`.
 
 ### Manual installation (other distributions)
