@@ -44,7 +44,7 @@ sed -i -E '/^deb .*debian\.org/{/ contrib( |$)/!s/$/ contrib/}' /etc/apt/sources
 `bashclub-checkzfs` (monitoring, see [checkzfs](https://code.bashclub.org/bashclub/checkzfs)) comes from the bashclub repository itself.
 
 #### 2. Add the bashclub repository and install
-Replace `<codename>` with your release codename (`bookworm`, `trixie`, `noble` or `resolute`).
+The release codename (`bookworm`, `trixie`, `noble` or `resolute`) is read from `/etc/os-release`, so the commands can be copied as they are.
 
 Debian 13 / Proxmox VE 9 / Ubuntu 24.04 and 26.04 (deb822 format):
 ~~~
@@ -52,7 +52,7 @@ wget -O- https://apt.bashclub.org/gpg/bashclub.pub | gpg --dearmor > /usr/share/
 cat > /etc/apt/sources.list.d/bashclub.sources << EOF
 Types: deb
 URIs: https://apt.bashclub.org/release
-Suites: <codename>
+Suites: $(. /etc/os-release && echo "$VERSION_CODENAME")
 Components: main
 Signed-By: /usr/share/keyrings/bashclub-archive-keyring.gpg
 EOF
@@ -63,7 +63,7 @@ apt install bashclub-zsync
 Debian 12 / Proxmox VE 8:
 ~~~
 wget -O- https://apt.bashclub.org/gpg/bashclub.pub | gpg --dearmor > /usr/share/keyrings/bashclub-archive-keyring.gpg
-echo "deb [signed-by=/usr/share/keyrings/bashclub-archive-keyring.gpg] https://apt.bashclub.org/release <codename> main" > /etc/apt/sources.list.d/bashclub.list
+echo "deb [signed-by=/usr/share/keyrings/bashclub-archive-keyring.gpg] https://apt.bashclub.org/release $(. /etc/os-release && echo "$VERSION_CODENAME") main" > /etc/apt/sources.list.d/bashclub.list
 apt update
 apt install bashclub-zsync
 ~~~
