@@ -186,6 +186,9 @@ conf=/etc/bashclub/zsync.conf
 ( . "$conf"; ssh -p "$sshport" "$source" "zfs list -H -t snapshot -o name | grep '@zfs-auto-snap_${zfs_auto_snapshot_label}-' | xargs -r -n1 zfs destroy -v" )
 ~~~
 
+### refquota
+The `refquota` of a filesystem is replicated with the initial replication only. If it is raised on the source later, the target keeps the old value and the replication fails with "quota exceeded" as soon as the data exceeds it. Before each incremental replication `bashclub-zsync` therefore raises the `refquota` on the target to the value of the source, or removes it if the source has none. It never lowers it, and `quota` is not changed.
+
 ### Monitoring with Checkmk
 The package contains the local check `bashclub_zsync`. If the Checkmk agent is installed (`/usr/lib/check_mk_agent` exists, also when the agent is installed later), it is linked to `/usr/lib/check_mk_agent/local/bashclub_zsync`. To disable it:
 ~~~

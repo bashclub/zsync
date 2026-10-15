@@ -5,7 +5,7 @@ side=${ZSIDE:-target}
 # receive erst nach dem Ende des Streams protokollieren, damit die Reihenfolge in Pipes eindeutig ist
 [[ $1 == receive ]] && cat > /dev/null
 echo "$side: zfs $*" >> "$ZTEST_LOG"
-declare -A SNAPS_source_post=() TYPES=()
+declare -A SNAPS_source_post=() TYPES=() REFQUOTA_source=() REFQUOTA_target=()
 source "$ZTEST_SCENARIO"
 
 # Snapshots einer Seite: "<snapshot> <guid>" je Zeile, älteste zuerst.
@@ -21,11 +21,18 @@ case $1 in
   list)
     shift; cols=name; sort=; type=; ds=
     while (( $# )); do
-      case $1 in -H) ;; -o) cols=$2; shift ;; -s) sort=asc; shift ;; -S) sort=desc; shift ;; -t) type=$2; shift ;; *) ds=$1 ;; esac
+      case $1 in -H|-Hp|-p) ;; -o) cols=$2; shift ;; -s) sort=asc; shift ;; -S) sort=desc; shift ;; -t) type=$2; shift ;; *) ds=$1 ;; esac
       shift
     done
     if [[ $type != snapshot && -z $ds ]]; then
-      for d in $(datasets); do echo "$d"$'\t'"${TYPES[$d]:-filesystem}"; done; exit 0
+      # Spalten name, type, refquota (Bytes, 0 = none, "-" für Volumes)
+      for d in $(datasets); do
+        t=${TYPES[$d]:-filesystem}; q=0; [[ $t == volume ]] && q=-
+        rq="REFQUOTA_${side}[$d]"; [[ -n ${!rq+x} ]] && q=${!rq}
+        line=; IFS=, read -ra c <<< "$cols"
+        for f in "${c[@]}"; do case $f in name) v=$d ;; type) v=$t ;; refquota) v=$q ;; esac; line+="${line:+$'\t'}$v"; done
+        echo "$line"
+      done; exit 0
     fi
     if [[ $type != snapshot ]]; then datasets | grep -qx "$ds" && { echo "$ds"; exit 0; }; echo "cannot open '$ds': dataset does not exist" >&2; exit 1; fi
     datasets | grep -qx "$ds" || { echo "cannot open '$ds': dataset does not exist" >&2; exit 1; }
@@ -45,6 +52,7 @@ case $1 in
       "get -H -o value,source com.sun:auto-snapshot "*) printf 'false\tlocal\n' ;;
       "get -H -o value canmount "*) echo "${CANMOUNT:-noauto}" ;;
       "get -H -o value mounted "*) echo "${MOUNTED:-yes}" ;;
+      "get -Hp -o value refquota "*) rq="REFQUOTA_${side}[${@: -1}]"; echo "${!rq:-0}" ;;
     esac
     ;;
   send) touch "$ZTEST_STATE/sent"; echo "STREAM $*" ;;
