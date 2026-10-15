@@ -53,3 +53,17 @@ jobs:
         apt-get update -qq
     secrets: inherit
 
+
+  # echte ZFS-Tests auf der Test-VM (Runner mit Label zfs im Host-Modus, siehe tests/integration/README.md)
+  integration:
+    runs-on: zfs
+    steps:
+      - name: Quellstand holen
+        run: |
+          rm -rf src && git init -q src && cd src
+          # volle Historie und Tags: die Paketversion kommt aus git describe
+          git fetch -q --tags "${{ github.server_url }}/${{ github.repository }}" "${{ github.ref }}"
+          git checkout -q FETCH_HEAD
+          git log -1 --oneline
+      - name: Paket bauen, installieren und testen
+        run: cd src && tests/integration/ci.sh
