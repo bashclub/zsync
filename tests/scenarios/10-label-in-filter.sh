@@ -20,5 +20,5 @@ TAGS=$'pool/x\tall\tlocal'
 declare -A TYPES=()
 DATASETS_source="pool pool/x"
 DATASETS_target="backup backup/zsync backup/zsync/pool backup/zsync/pool/x"
-declare -A SNAPS_source=([pool/x]=$'pool/x@backup-02 702\npool/x@zfs-auto-snap_daily-02 703\npool/x@backup-03 704')
-declare -A SNAPS_target=([backup/zsync/pool/x]=$'backup/zsync/pool/x@backup-01 701\nbackup/zsync/pool/x@backup-02 702\nbackup/zsync/pool/x@zfs-auto-snap_daily-02 703')
+declare -A SNAPS_source=([pool/x]=$'pool/x@backup-2026-10-02-1800 702\npool/x@zfs-auto-snap_daily-02 703\npool/x@backup-2026-10-03-1800 704')
+declare -A SNAPS_target=([backup/zsync/pool/x]=$'backup/zsync/pool/x@backup-2026-10-01-1800 701\nbackup/zsync/pool/x@backup-2026-10-02-1800 702\nbackup/zsync/pool/x@zfs-auto-snap_daily-02 703')

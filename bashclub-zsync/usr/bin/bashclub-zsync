@@ -48,6 +48,11 @@ zfs_auto_snapshot_label="backup"
 # keep "zas" here for existing configs without this setting; new configs get "internal"
 zfs_auto_snapshot_engine="zas"
 
+# snapshots of the label: "strict" = only the name scheme of the snapshot engine
+# (internal: <label>-YYYY-MM-DD-HHMM, zas: zfs-auto-snap_<label>-YYYY-MM-DD-HHMM), "legacy" = any name containing the label
+# keep "legacy" here for existing configs without this setting; new configs get "strict"
+zfs_auto_snapshot_label_match="legacy"
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
@@ -165,6 +170,7 @@ min_keep=$min_keep
 zfs_auto_snapshot_keep=$zfs_auto_snapshot_keep
 zfs_auto_snapshot_label=$zfs_auto_snapshot_label
 zfs_auto_snapshot_engine=internal
+zfs_auto_snapshot_label_match=strict
 checkzfs_disabled=$checkzfs_disabled
 checkzfs_local=$checkzfs_local
 checkzfs_prefix=$checkzfs_prefix
@@ -197,8 +203,8 @@ zsync_sshport=-p$sshport
 
 config_log="[INFO] Configuration:"
 for setting in target source sshport tag snapshot_filter min_keep zfs_auto_snapshot_keep zfs_auto_snapshot_label \
-               zfs_auto_snapshot_engine checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age \
-               checkzfs_max_snapshot_count checkzfs_spool checkzfs_spool_maxage; do
+               zfs_auto_snapshot_engine zfs_auto_snapshot_label_match checkzfs_disabled checkzfs_local checkzfs_prefix \
+               checkzfs_max_age checkzfs_max_snapshot_count checkzfs_spool checkzfs_spool_maxage; do
     config_log+="\n\t$setting=${!setting}"
 done
 log "$config_log\n"
@@ -294,6 +300,39 @@ if [ $zfs_auto_snapshot_keep -gt 1 ]; then
     fi
 fi
 
+#### snapshot name patterns (grep -E): all snapshots to replicate and the snapshots of each interval
+# legacy: "@.*<interval>" for every interval including the label (unchanged behavior)
+# strict: the label only matches the name scheme of the snapshot engine, so snapshots left over from
+#         another engine (e.g. zfs-auto-snap_<label>-... after switching to internal) or from a label
+#         that contains this label (e.g. <label>-old-...) are neither replicated nor used for deletion
+if [[ $zfs_auto_snapshot_label_match != "strict" ]] && [[ $zfs_auto_snapshot_label_match != "legacy" ]]; then
+    log "[WARN] Unknown value zfs_auto_snapshot_label_match=$zfs_auto_snapshot_label_match, using legacy."
+    zfs_auto_snapshot_label_match=legacy
+fi
+if [[ $zfs_auto_snapshot_engine == "zas" ]]; then
+    label_scheme="zfs-auto-snap_$zfs_auto_snapshot_label"
+else
+    label_scheme="$zfs_auto_snapshot_label"
+fi
+# name ends after the date, followed by a tab (lines with guid) or the end of the line
+label_regex="@$label_scheme-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}([[:space:]]|\$)"
+declare -A interval_regex
+for interval in $(sed "s/|/\n/g" <<< "$snapshot_filter"); do
+    interval_regex[$interval]="@.*$interval"
+done
+if [ $zfs_auto_snapshot_keep -gt 1 ] && [[ $zfs_auto_snapshot_label_match == "strict" ]]; then
+    interval_regex[$zfs_auto_snapshot_label]=$label_regex
+    snapshot_regex=$(IFS='|'; echo "(${interval_regex[*]})")
+else
+    snapshot_regex="@.*($snapshot_filter)"
+fi
+
+# snapshots whose name contains the label but does not match the name scheme of the snapshot engine:
+# not created by this configuration, but in legacy mode replicated and used for deletion
+function label_leftovers() {
+    grep -E "@.*$zfs_auto_snapshot_label" | grep -vE "$label_regex"
+}
+
 #### replication per dataset
 for name in "${syncvols[@]}"; do
     log "[INFO] Replicate $name"
@@ -315,7 +354,13 @@ for name in "${syncvols[@]}"; do
 
     # source snapshots (oldest first), queried directly before the replication of this dataset
     source_snaps=$(remote "zfs list -H -o name,guid -s creation -t snapshot $name 2>/dev/null")
-    if cut -f1 <<< "$source_snaps" | grep -qE "@.*($snapshot_filter)"; then
+    if [ $zfs_auto_snapshot_keep -gt 1 ]; then
+        leftovers=$(cut -f1 <<< "$source_snaps" | label_leftovers)
+        if [[ -n $leftovers ]]; then
+            log "[WARN] $name - snapshots on the source contain the label $zfs_auto_snapshot_label, but do not match the name scheme of the snapshot engine $zfs_auto_snapshot_engine (e.g. left over after switching the engine). Check and delete them on the source if they are no longer needed:\n$(sed 's/^/\t/' <<< "$leftovers")"
+        fi
+    fi
+    if cut -f1 <<< "$source_snaps" | grep -qE "$snapshot_regex"; then
         IFS=$' '
         # initial replication: create the path on the target, then send the oldest matching snapshot
         if ! zfs list -H $target/$name > /dev/null 2>&1 ; then
@@ -332,7 +377,7 @@ for name in "${syncvols[@]}"; do
 
             debug "$name - Start initial replication"
             IFS=$'\n'
-            snap=$(remote "zfs list -H -t snapshot -o name -S creation $name | grep -E \"@.*($snapshot_filter)\" | tail -1")
+            snap=$(remote "zfs list -H -t snapshot -o name -S creation $name | grep -E \"$snapshot_regex\" | tail -1")
             if [[ -n $snap ]]; then
                 log "[INFO] Start initial replication: $snap => $target/$(echo $name | cut -d'/' -f1)"
                 if remote "zfs send -w -p $debug $snap" | zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | cut -d'/' -f1); then
@@ -360,7 +405,7 @@ for name in "${syncvols[@]}"; do
                 if [[ $fstype == "filesystem" ]] && [[ $(zfs get -H -o value canmount $target/$name) != "noauto" ]]; then
                     zfs set canmount=noauto $target/$name
                 fi
-                for snap in $(grep -E "@.*($snapshot_filter)" <<< "$source_snaps" | grep --after-context=200 $guid | grep -v $guid | cut -f1); do
+                for snap in $(grep -E "$snapshot_regex" <<< "$source_snaps" | grep --after-context=200 $guid | grep -v $guid | cut -f1); do
                     log "[INFO] Replicating delta of $last => $snap to $target/$name"
                     remote "zfs send -w $debug -i $last $snap" | zfs receive -x $tag -x com.sun:auto-snapshot -F $debug $target/$name \
                         || { rc=1; log "[ERROR] incremental replication to $target/$name failed."; }
@@ -383,9 +428,15 @@ for name in "${syncvols[@]}"; do
         IFS=$'\n'
         for interval in $filter ; do
             debug "$name - Checking interval $interval"
-            guid=$(grep -E "@.*$interval" <<< "$source_snaps" | cut -f1 | tail -1)
+            guid=$(grep -E "${interval_regex[$interval]}" <<< "$source_snaps" | cut -f1 | tail -1)
             if [[ -n $guid ]]; then
-                target_snaps=$(zfs list -H -o name,guid -S creation -t snapshot $target/$name | grep -E "@.*$interval")
+                target_snaps=$(zfs list -H -o name,guid -S creation -t snapshot $target/$name | grep -E "${interval_regex[$interval]}")
+                # deletion starts at the oldest source snapshot on the target: without it nothing is deleted
+                if [[ -n $target_snaps ]] && ! grep -q $guid <<< "$target_snaps"; then
+                    oldest=$(grep -E "${interval_regex[$interval]}" <<< "$source_snaps" | tail -1 | cut -f2)
+                    log "[ERROR] $name - the oldest source snapshot of interval $interval ($oldest) does not exist on $target/$name, no snapshots of this interval are deleted on the target."
+                    rc=1
+                fi
                 snaps_to_delete=$(grep --after-context=200 $guid <<< "$target_snaps" | grep -v $guid | cut -f1)
                 snap_count=$(grep -c . <<< "$target_snaps")
 
@@ -401,6 +452,12 @@ for name in "${syncvols[@]}"; do
                 done
             fi
         done
+        if [ $zfs_auto_snapshot_keep -gt 1 ]; then
+            leftovers=$(zfs list -H -o name -t snapshot $target/$name 2>/dev/null | label_leftovers)
+            if [[ -n $leftovers ]]; then
+                log "[WARN] $name - snapshots on the target contain the label $zfs_auto_snapshot_label, but do not match the name scheme of the snapshot engine $zfs_auto_snapshot_engine. They are not deleted by zsync in strict mode, check and delete them if they are no longer needed:\n$(sed 's/^/\t/' <<< "$leftovers")"
+            fi
+        fi
     else
         debug "$name - No snapshots found with filter $snapshot_filter"
     fi
