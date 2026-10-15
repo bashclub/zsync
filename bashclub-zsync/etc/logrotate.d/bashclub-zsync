@@ -5,5 +5,5 @@
         delaycompress
         missingok
         notifempty
-        create 644 root root
+        create 664 root bashclub-zsync
 }

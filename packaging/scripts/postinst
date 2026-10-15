@@ -2,11 +2,13 @@
 
 PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
 
-# ensure log folder is present
-if [ ! -d /var/log/bashclub-zsync ]; then
-  mkdir -p /var/log/bashclub-zsync
-  chown -R root:root /var/log/bashclub-zsync
-  chmod -R 755 /var/log/bashclub-zsync
+# group for running bashclub-zsync without root: logs, run status and /run/bashclub-zsync are writable for it
+getent group bashclub-zsync > /dev/null || groupadd --system bashclub-zsync
+install -d -m 2775 -o root -g bashclub-zsync /var/log/bashclub-zsync /var/lib/bashclub-zsync
+if command -v systemd-tmpfiles > /dev/null && [ -d /run/systemd/system ]; then
+  systemd-tmpfiles --create /usr/lib/tmpfiles.d/bashclub-zsync.conf
+else
+  install -d -m 2775 -o root -g bashclub-zsync /run/bashclub-zsync
 fi
 
 chown root:root /usr/bin/bashclub-zsync

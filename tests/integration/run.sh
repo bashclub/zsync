@@ -245,6 +245,54 @@ bandwidth_limit=2m"
   equal "weiter mit daily-04" "zfs-auto-snap_daily-01 zfs-auto-snap_daily-02 zfs-auto-snap_daily-04" "$(snaps "$ZCI_POOL_DST/resume/$ZCI_POOL_SRC/data")"
 }
 
+# Betrieb ohne root (#11): Benutzer mit zfs allow auf Quelle und Ziel repliziert über ssh (zsync-ci@localhost),
+# mit Snapshot-Engine internal, Holds, Bookmarks und Resume; Proxmox-typische Datasets
+case_unprivileged() {
+  local user=zsync-ci home=/var/lib/zsync-ci-user
+  id $user > /dev/null 2>&1 || useradd --system --create-home --home-dir $home --shell /bin/bash $user
+  usermod -aG bashclub-zsync $user
+  if [ ! -f $home/.ssh/id_ed25519 ]; then
+    su - $user -c 'ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519'
+    echo "from=\"127.0.0.1,::1\" $(cat $home/.ssh/id_ed25519.pub)" > $home/.ssh/authorized_keys
+    chown $user: $home/.ssh/authorized_keys; chmod 600 $home/.ssh/authorized_keys
+    su - $user -c 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new localhost true'
+  fi
+  zfs create -o acltype=posixacl -o xattr=sa -o refquota=1G "$ZCI_POOL_SRC/subvol-100-disk-0"
+  zfs create -V 64M "$ZCI_POOL_SRC/vm-101-disk-0"
+  echo "zsync-ci-passphrase" | zfs create -o encryption=on -o keyformat=passphrase "$ZCI_POOL_SRC/enc"
+  zfs set bashclub:zsync=subvols "$ZCI_POOL_SRC"
+  write "$ZCI_POOL_SRC/subvol-100-disk-0" 2; write "$ZCI_POOL_SRC/enc" 2
+  # Rechte wie im README
+  check "Rechte auf der Quelle" zfs allow -u $user send,snapshot,destroy,mount,hold,release,bookmark "$ZCI_POOL_SRC"
+  zfs create -o canmount=noauto -o com.sun:auto-snapshot=false "$ZCI_POOL_DST/unprivileged"
+  check "Rechte auf dem Ziel" zfs allow -u $user "create,receive,mount,destroy,rollback,hold,release,userprop,$ZCI_RECV_PROPS" "$ZCI_POOL_DST/unprivileged"
+  config unprivileged "source=$user@localhost
+snapshot_filter=\"\"
+zfs_auto_snapshot_keep=3
+source_hold=1
+source_bookmark=1
+transfer_resume=1"
+  local d run_as="su - $user -c"
+  for n in 1 2; do
+    echo "===== $(date +%T) als $user" >> "$log"
+    $run_as "bashclub-zsync -c $conf" >> "$log" 2>&1; rc=$?
+    equal "Lauf $n als $user: Exit-Code" 0 "$rc"
+    [ $n -eq 1 ] && sleep 61   # eigener Snapshot-Name pro Minute (remote-snapshot-manager)
+  done
+  for d in subvol-100-disk-0 vm-101-disk-0 enc; do
+    equal "$d: zwei Snapshots repliziert" 2 "$(zfs list -H -o name -t snapshot "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/$d" | wc -l)"
+  done
+  equal "Subvol: refquota übernommen" 1G "$(prop "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/subvol-100-disk-0" refquota)"
+  equal "Subvol: acltype wie auf der Quelle" "$(prop "$ZCI_POOL_SRC/subvol-100-disk-0" acltype)" "$(prop "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/subvol-100-disk-0" acltype)"
+  equal "Subvol: xattr wie auf der Quelle" "$(prop "$ZCI_POOL_SRC/subvol-100-disk-0" xattr)" "$(prop "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/subvol-100-disk-0" xattr)"
+  check "keine abgelehnten Properties" not grep -q 'permission denied' "$log"
+  equal "nicht eingehängt" no "$(prop "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/subvol-100-disk-0" mounted)"
+  equal "keine Holds übrig" "" "$(zfs list -H -o name -t snapshot -r "$ZCI_POOL_SRC" | xargs zfs holds -H | grep zsync_)"
+  check "Bookmarks angelegt" test "$(zfs list -H -o name -t bookmark -r "$ZCI_POOL_SRC" | wc -l)" -ge 3
+  equal "Status für das Monitoring geschrieben" "rc=0" "$(grep '^rc=' "$LIB_DIR/$id.last")"
+  check "keine Warnung zu Rechten im Log" not grep -q 'not writable' "$log"
+}
+
 # Snapshots verschiedener Labels in derselben Sekunde (#30): Erstreplikation beginnt beim ältesten,
 # das Löschen folgt dem ältesten Snapshot der Quelle
 case_same_second() {
@@ -270,7 +318,7 @@ case_checkmk() {
   check "Statusdatei des Laufs entfernt" test ! -e "$RUN_DIR/$id.state"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume same_second checkmk)
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged same_second checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
 rm -rf /var/log/zsync-ci

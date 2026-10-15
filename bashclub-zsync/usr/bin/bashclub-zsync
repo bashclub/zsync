@@ -244,7 +244,7 @@ if [[ -z $ZSYNC_LOCK ]]; then
     log "[WARN] flock (util-linux) not found, running without protection against concurrent runs."
 else
     # pid of the active run for the message above
-    echo $$ > "$ZSYNC_LOCK"
+    echo $$ > "$ZSYNC_LOCK" 2>/dev/null
 fi
 
 #### log file without logrotate (e.g. TrueNAS: cron job with ">> /mnt/<pool>/.../bashclub-zsync.log")
@@ -303,13 +303,16 @@ fi
 run_start=$(date +%s)
 datasets_total=0
 datasets_failed=0
-if mkdir -p /run/bashclub-zsync /var/lib/bashclub-zsync 2>/dev/null; then
+# without root: the package makes both directories writable for the group bashclub-zsync
+if mkdir -p /run/bashclub-zsync /var/lib/bashclub-zsync 2>/dev/null && [ -w /run/bashclub-zsync ] && [ -w /var/lib/bashclub-zsync ]; then
     status_file=/run/bashclub-zsync/$status_id.state
     # start time of the process, to tell a reused pid apart
     pid_start=$(sed 's/.*) //' /proc/$$/stat 2>/dev/null | cut -d' ' -f20)
     { tail -n 10 "$status_lib.history" 2>/dev/null; echo $run_start; } > "$status_lib.history.tmp" \
         && mv -f "$status_lib.history.tmp" "$status_lib.history"
     status start
+else
+    log "[WARN] /run/bashclub-zsync or /var/lib/bashclub-zsync is not writable for $(id -un) (add it to the group bashclub-zsync), no run status for the monitoring."
 fi
 
 # end of the run (also on errors): release the holds on the source, write the result for the monitoring
@@ -470,6 +473,10 @@ fi
 bookmark_name="zsync_$(hostname -s)_$(tr '/' '_' <<< "$target")"
 hold_tag=$bookmark_name
 
+#### without root (zfs allow): receive without mounting, on Linux only root may mount
+nomount=
+if [ "$(id -u)" -ne 0 ]; then nomount=-u; fi
+
 #### resumable transfers: receive -s keeps the partial state of an interrupted transfer (resume token)
 resumable=
 if [[ $transfer_resume == "1" ]]; then resumable=-s; fi
@@ -572,7 +579,7 @@ for name in "${syncvols[@]}"; do
                 log "[INFO] $name - resuming the interrupted transfer to $target/$name"
                 # an interrupted initial replication has no snapshot yet
                 if [[ -z $(zfs list -H -o name -t snapshot $target/$name 2>/dev/null) ]]; then
-                    recv_opts=($mp $cm -x $tag -x com.sun:auto-snapshot)
+                    recv_opts=($nomount $mp $cm -x $tag -x com.sun:auto-snapshot)
                 else
                     recv_opts=(-x $tag -x com.sun:auto-snapshot -F)
                 fi
@@ -613,7 +620,7 @@ for name in "${syncvols[@]}"; do
             hold_snaps "$snap"
             if [[ -n $snap ]]; then
                 log "[INFO] Start initial replication: $snap => $target/$(echo $name | cut -d'/' -f1)"
-                if remote "zfs send -w -p $debug $snap" | throttle | zfs receive $resumable $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | cut -d'/' -f1); then
+                if remote "zfs send -w -p $debug $snap" | throttle | zfs receive $resumable $nomount $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | cut -d'/' -f1); then
                     # receive mounts the new filesystem despite canmount=noauto: unmount it, so it does not show
                     # up as mounted filesystem (e.g. in checkmk) until the next reboot
                     if [[ $fstype == "filesystem" ]] && [[ $(zfs get -H -o value mounted $target/$name) == "yes" ]]; then
@@ -882,8 +889,13 @@ if [ $checkzfs_disabled -eq 0 ]; then
     # mktemp creates the file with mode 600, keep the previous mode of the spool file
     chmod 644 $spoolfile
     if [ $checkzfs_spool -eq 0 ] || [ $checkzfs_local -gt 0 ]; then
-        mkdir -p $spooldir
-        mv $spoolfile $spooltmp && mv $spooltmp $spooldir/$spoolname
+        mkdir -p $spooldir 2>/dev/null
+        if [ -w $spooldir ]; then
+            mv $spoolfile $spooltmp && mv $spooltmp $spooldir/$spoolname
+        else
+            log "[WARN] $spooldir is not writable for $(id -un), the checkzfs output is not stored."
+            rm -f $spoolfile
+        fi
     else
         remote "mkdir -p $spooldir"
         scp -P ${sshport} $spoolfile ${source}:$spooltmp && remote "mv $spooltmp $spooldir/$spoolname"

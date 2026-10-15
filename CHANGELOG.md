@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- operation without root on the backup server and the source with delegated ZFS permissions (`zfs allow`): replicas are received without mounting (`zfs receive -u`), the package creates the group `bashclub-zsync` and makes `/var/log/bashclub-zsync`, `/var/lib/bashclub-zsync` and `/run/bashclub-zsync` (tmpfiles.d) writable for it, missing write access to the run status or the checkmk spool only logs a warning; README with copyable commands for user, permissions and source (#11)
 - setting `transfer_resume`: transfers are received with `zfs receive -s`, an interrupted initial replication or delta continues in the next run (`zfs send -t`), also raw encrypted; a partial state that cannot be resumed (snapshot deleted on the source, or `transfer_resume=0`) is discarded; existing configurations without the setting keep `0`, new configurations get `1` (#8)
 - setting `source_hold`: holds on the base and the snapshots still to be sent while a dataset is replicated, released at its end or at the end of the run (also on errors), holds of an aborted run are released by the next one; existing configurations without the setting keep `0`, new configurations get `1` (#6)
 - setting `source_bookmark`: a bookmark of the newest replicated snapshot on the source (per backup host and target), the replication continues from it if the rotation deleted the snapshot, also raw encrypted; existing configurations without the setting keep `0`, new configurations get `1` (#22)

@@ -7,6 +7,9 @@ LIB_DIR=/var/lib/bashclub-zsync
 RUN_DIR=/run/bashclub-zsync
 CHECK=/usr/share/bashclub-zsync/checkmk/bashclub_zsync
 
+# Properties, die zfs send -p mitbringen kann (ohne sharenfs/sharesmb): Rechte für den Betrieb ohne root, wie im README
+ZCI_RECV_PROPS=aclinherit,aclmode,acltype,atime,canmount,checksum,compression,context,copies,dedup,defcontext,devices,dnodesize,exec,filesystem_limit,fscontext,logbias,mountpoint,nbmand,overlay,primarycache,quota,readonly,recordsize,redundant_metadata,refquota,refreservation,relatime,reservation,rootcontext,secondarycache,setuid,snapdev,snapdir,snapshot_limit,special_small_blocks,sync,volmode,volsize,vscan,xattr
+
 failed_cases=()
 case_failed=0
 
@@ -85,11 +88,17 @@ last_run_log() { awk '/^===== /{ buf = "" } { buf = buf $0 "\n" } END { printf "
 write() { dd if=/dev/urandom of="$(zfs get -H -o value mountpoint "$1")/${3:-file}" bs=1M count=${2:-1} status=none conv=fsync; }
 # eigene Sekunde je Snapshot (realistische Zeiten); Snapshots in derselben Sekunde prüft case_same_second
 snap() { sleep 1.05; zfs snapshot "$1@zfs-auto-snap_daily-$2"; }
-# Snapshots mit verschiedenen Namen in derselben Sekunde: zu Beginn einer neuen Sekunde ohne Pause anlegen
+# Snapshots mit verschiedenen Namen in derselben Sekunde: zu Beginn einer neuen Sekunde ohne Pause anlegen;
+# landen sie unter Last doch in zwei Sekunden, wieder löschen und erneut versuchen (höchstens fünfmal)
 snaps_same_second() {
-  local ds=$1 n; shift
-  sleep "$(printf '0.%03d' $((1000 - 10#$(date +%3N))))"
-  for n in "$@"; do zfs snapshot "$ds@zfs-auto-snap_$n"; done
+  local ds=$1 n try; shift
+  for try in 1 2 3 4 5; do
+    sleep "$(printf '0.%03d' $((1000 - 10#$(date +%3N))))"
+    for n in "$@"; do zfs snapshot "$ds@zfs-auto-snap_$n"; done
+    [ "$(zfs list -Hp -o creation -t snapshot "$ds" | sort -u | wc -l)" -eq 1 ] && return 0
+    for n in "$@"; do zfs destroy "$ds@zfs-auto-snap_$n"; done
+  done
+  return 1
 }
 seconds_of() { zfs list -Hp -o creation -t snapshot "$1" | sort -u | wc -l; }
 # Snapshot-Namen (ohne Dataset) älteste zuerst

@@ -8,6 +8,7 @@
 
 4. Öffnen Sie die Konfigurationsdatei mit einem Texteditor und passen Sie die folgenden Einstellungen an:
 
+   - Betrieb ohne root (Backupserver und Quelle mit `zfs allow`): README, Abschnitt „Running without root“, mit kopierbaren Befehlen.
    - `source`: Geben Sie den SSH-Adresse des Quellservers an, von dem die Daten repliziert werden sollen. Beispiel: `source=user@host`. `source=local` repliziert Datasets desselben Hosts ohne SSH (z. B. von `rpool` in einen Backup-Pool).
    - `target`: Geben Sie die Pfad des Ziel-ZFS-Dateisystems auf dem Zielserver an, zu dem die Daten repliziert werden sollen. Beispiel: `target=pool/dataset`
    - `sshport`: Geben Sie den SSH-Port des Quellservers an. Standardmäßig ist dies `22`, aber Sie können ihn entsprechend anpassen.
