@@ -69,6 +69,11 @@ target_rollback_max=24
 # (about 84 Mbit/s); applied on this host with pv (package pv), empty = no limit
 bandwidth_limit=""
 
+# keep a bookmark of the newest replicated snapshot on the source (one per backup host and target): if the rotation
+# on the source deletes this snapshot before the next replication, the replication continues from the bookmark
+# 1 = on, 0 = off; keep 0 here for existing configs without this setting, new configs get 1
+source_bookmark=0
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
@@ -248,6 +253,7 @@ zfs_auto_snapshot_label_match=strict
 target_rollback=$target_rollback
 target_rollback_max=$target_rollback_max
 bandwidth_limit=$bandwidth_limit
+source_bookmark=1
 checkzfs_disabled=$checkzfs_disabled
 checkzfs_local=$checkzfs_local
 checkzfs_prefix=$checkzfs_prefix
@@ -295,7 +301,7 @@ zsync_sshport=-p$sshport
 config_log="[INFO] Configuration:"
 for setting in target source sshport tag snapshot_filter min_keep zfs_auto_snapshot_keep zfs_auto_snapshot_label \
                zfs_auto_snapshot_engine zfs_auto_snapshot_label_match target_rollback target_rollback_max \
-               bandwidth_limit checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
+               bandwidth_limit source_bookmark checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
                checkzfs_spool checkzfs_spool_maxage; do
     config_log+="\n\t$setting=${!setting}"
 done
@@ -420,6 +426,9 @@ if [[ $zfs_auto_snapshot_label_match != "strict" ]] && [[ $zfs_auto_snapshot_lab
     log "[WARN] Unknown value zfs_auto_snapshot_label_match=$zfs_auto_snapshot_label_match, using legacy."
     zfs_auto_snapshot_label_match=legacy
 fi
+#### bookmark on the source per backup host and target, e.g. pool/data#zsync_backup1_backup_pve1
+bookmark_name="zsync_$(hostname -s)_$(tr '/' '_' <<< "$target")"
+
 #### bandwidth limit of the transfer: pv between send and receive on this host, without pv no limit
 throttle_rate=
 if [[ -n $bandwidth_limit ]]; then
@@ -564,6 +573,19 @@ for name in "${syncvols[@]}"; do
         guid=$(zfs list -H -o guid -s createtxg -t snapshot $target/$name | tail -1)
         if [[ $guid != "" ]]; then
             last=$(grep $guid <<< "$source_snaps" | tail -1 | cut -f1)
+            # newest target snapshot deleted on the source (rotation): continue from the bookmark of this snapshot.
+            # A rollback on the source destroys newer bookmarks (zfs rollback -r), then the bookmark does not exist.
+            delta_snaps=
+            if [[ $last == "" ]] && [[ $source_bookmark == "1" ]]; then
+                bookmark_txg=$(remote "zfs list -H -o name,guid,createtxg -t bookmark $name 2>/dev/null" \
+                    | awk -F'\t' -v b="$name#$bookmark_name" -v g="$guid" '$1 == b && $2 == g { print $3 }')
+                if [[ -n $bookmark_txg ]]; then
+                    last="$name#$bookmark_name"
+                    delta_snaps=$(remote "zfs list -H -o name,createtxg -s createtxg -t snapshot $name" \
+                        | awk -F'\t' -v t="$bookmark_txg" '$2 > t { print $1 }' | grep -E "$snapshot_regex")
+                    log "[INFO] $name - the newest snapshot of $target/$name was deleted on the source, continuing from the bookmark $last"
+                fi
+            fi
             # newest target snapshot missing on the source (rollback or deleted there): with target_rollback=1
             # roll the target back to the newest common snapshot (at most target_rollback_max snapshots destroyed)
             if [[ $last == "" ]] && [[ $target_rollback == "1" ]]; then
@@ -593,12 +615,21 @@ for name in "${syncvols[@]}"; do
                 if [[ $fstype == "filesystem" ]] && [[ $(zfs get -H -o value canmount $target/$name) != "noauto" ]]; then
                     zfs set canmount=noauto $target/$name
                 fi
-                for snap in $(grep -E "$snapshot_regex" <<< "$source_snaps" | grep --after-context=200 $guid | grep -v $guid | cut -f1); do
+                if [[ -z $delta_snaps ]]; then
+                    delta_snaps=$(grep -E "$snapshot_regex" <<< "$source_snaps" | grep --after-context=200 $guid | grep -v $guid | cut -f1)
+                fi
+                for snap in $delta_snaps; do
                     log "[INFO] Replicating delta of $last => $snap to $target/$name"
                     remote "zfs send -w $debug -i $last $snap" | throttle | zfs receive -x $tag -x com.sun:auto-snapshot -F $debug $target/$name \
                         || { rc=1; log "[ERROR] incremental replication to $target/$name failed."; }
                     last=$snap
                 done
+                # bookmark of the newest replicated snapshot for the next run (only replaced if it points elsewhere)
+                if [[ $source_bookmark == "1" ]] && [ $rc -eq 0 ] && [[ $last == *@* ]]; then
+                    debug "$name - bookmark $name#$bookmark_name => $last"
+                    remote "if [ \"\$(zfs get -H -o value guid $name#$bookmark_name 2>/dev/null)\" != \"\$(zfs get -H -o value guid $last)\" ]; then zfs destroy $name#$bookmark_name 2>/dev/null; zfs bookmark $last $name#$bookmark_name; fi" \
+                        || log "[WARN] $name - creating the bookmark $name#$bookmark_name failed, the replication continues without it."
+                fi
                 # replication failed: the chain breaks if the base is the oldest snapshot of its interval on the source
                 if [ $rc -ne 0 ]; then
                     base=$(zfs list -H -o guid,name -s createtxg -t snapshot $target/$name | tail -1)

@@ -163,6 +163,11 @@ target_rollback_max=24
 # (about 84 Mbit/s); applied on this host with pv (package pv), empty = no limit
 bandwidth_limit=""
 
+# keep a bookmark of the newest replicated snapshot on the source (one per backup host and target): if the rotation
+# on the source deletes this snapshot before the next replication, the replication continues from the bookmark
+# 1 = on, 0 = off; existing configurations without this setting keep 0, new configurations get 1
+source_bookmark=1
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
@@ -200,6 +205,9 @@ conf=/etc/bashclub/zsync.conf
 
 ### Local replication (pool to pool)
 To replicate datasets of the same host, e.g. from `rpool` to a backup pool, set `source=local`: the commands run on this host without ssh (no ssh login to localhost needed), `remote-snapshot-manager` and checkzfs work locally. Datasets in the target are never selected, also if the target is in the same pool and inherits `bashclub:zsync`. `source=root@localhost` still works as before.
+
+### Bookmarks on the source
+If the replication stops longer than the source keeps its snapshots, the rotation deletes the snapshot the replica ends with, and only a full replication would help. With `source_bookmark=1` (default for new configurations) `bashclub-zsync` keeps a ZFS bookmark of the newest replicated snapshot on the source, e.g. `rpool/data#zsync_backup1_backup_pve1` (backup host and target in the name, so several backup servers do not interfere). A bookmark takes no space and holds no data, the rotation can still delete the snapshot. The next run then continues from the bookmark (also raw encrypted). A rollback on the source destroys newer bookmarks (`zfs rollback -r`), so a replica is never appended to a different history; see `target_rollback` for this case. Bookmarks of datasets that are no longer replicated stay on the source (`zfs list -t bookmark`).
 
 ### Bandwidth limit
 `bandwidth_limit` limits the transfer to the given bytes per second, e.g. `bandwidth_limit=10m` (10 MiB/s, about 84 Mbit/s) for an offsite backup over a shared line. The limit is applied on the backup server with `pv` between `zfs send` and `zfs receive`; install it with `apt install pv`. Without `pv` the transfer runs without limit and the log shows a warning.

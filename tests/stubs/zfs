@@ -5,7 +5,7 @@ side=${ZSIDE:-target}
 # receive erst nach dem Ende des Streams protokollieren, damit die Reihenfolge in Pipes eindeutig ist
 [[ $1 == receive ]] && cat > /dev/null
 echo "$side: zfs $*" >> "$ZTEST_LOG"
-declare -A SNAPS_source_post=() TYPES=() REFQUOTA_source=() REFQUOTA_target=() CREATION_source=() ORPHAN_KEEP=()
+declare -A SNAPS_source_post=() TYPES=() REFQUOTA_source=() REFQUOTA_target=() CREATION_source=() ORPHAN_KEEP=() BOOKMARKS_source=()
 source "$ZTEST_SCENARIO"
 
 # Snapshots einer Seite: "<snapshot> <guid>" je Zeile, älteste zuerst.
@@ -41,6 +41,12 @@ case $1 in
         fi
       done; exit 0
     fi
+    # Bookmarks: "<dataset>#<name> <guid>" je Zeile, createtxg = guid
+    if [[ $type == bookmark ]]; then
+      bm="BOOKMARKS_${side}[$ds]"
+      while read -r n g; do [[ -n $n ]] && printf '%s\t%s\t%s\n' "$n" "$g" "$g"; done <<< "${!bm}"
+      exit 0
+    fi
     if [[ $type != snapshot && -z $ds ]]; then
       # Spalten name, type, refquota (Bytes, 0 = none, "-" für Volumes)
       for d in $(datasets); do
@@ -59,7 +65,7 @@ case $1 in
     while read -r n g; do
       line=; IFS=, read -ra c <<< "$cols"
       # creation eines Snapshots = seine guid (Szenarien mit Zeitbezug nutzen Zahlen als guid)
-      for f in "${c[@]}"; do case $f in name) v=$n ;; guid|creation) v=$g ;; esac; line+="${line:+$'\t'}$v"; done
+      for f in "${c[@]}"; do case $f in name) v=$n ;; guid|creation|createtxg) v=$g ;; esac; line+="${line:+$'\t'}$v"; done
       echo "$line"
     done <<< "$out"
     ;;
@@ -70,6 +76,9 @@ case $1 in
       "get -H -o value,source com.sun:auto-snapshot "*) printf 'false\tlocal\n' ;;
       "get -H -o value canmount "*) echo "${CANMOUNT:-noauto}" ;;
       "get -H -o value mounted "*) echo "${MOUNTED:-yes}" ;;
+      "get -H -o value guid "*)
+        obj=${@: -1}; ds=${obj%%[@#]*}; sv="SNAPS_${side}[$ds]"; bv="BOOKMARKS_${side}[$ds]"
+        printf '%s\n%s\n' "${!sv}" "${!bv}" | awk -v o="$obj" '$1 == o { print $2 }' ;;
       "get -Hp -o value creation "*) echo "${CREATION_source[${@: -1}]:-0}" ;;
       "get -H -o name,value -r -t filesystem,volume bashclub:zsync-orphan "*)
         for d in $(datasets | grep -E "^${@: -1}(/|\$)"); do echo "$d"$'\t'"${ORPHAN_KEEP[$d]:--}"; done ;;
@@ -81,6 +90,6 @@ case $1 in
     [[ -n $RECV_FAIL && "$*" == *$RECV_FAIL* ]] && { echo "cannot receive: simulated failure" >&2; exit 1; }
     ;;
   rollback) echo "${@: -1}" > "$ZTEST_STATE/rollback_$(cut -d@ -f1 <<< "${@: -1}" | tr / _)" ;;
-  create|set|destroy) ;;
+  create|set|destroy|bookmark) ;;
 esac
 exit 0

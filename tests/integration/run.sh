@@ -73,11 +73,12 @@ case_refquota() {
 case_rollback() {
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
   for n in 01 02 03; do write "$ZCI_POOL_SRC/data" 1 f$n; snap "$ZCI_POOL_SRC/data" $n; done
-  config rollback; zsync
+  config rollback "source_bookmark=1"; zsync
   zfs rollback -r "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-01"; write "$ZCI_POOL_SRC/data" 1 f04; snap "$ZCI_POOL_SRC/data" 04
   zsync
   equal "ohne target_rollback: Exit-Code" 1 "$rc"
   equal "ohne target_rollback: Zustand" diverged "$(state_of "$ZCI_POOL_SRC/data")"
+  check "kein Anfügen aus einem Bookmark nach Rollback" not grep -q 'continuing from the bookmark' "$log"
   echo "target_rollback=1" >> "$conf"
   zsync
   equal "mit target_rollback=1: Exit-Code" 0 "$rc"
@@ -141,6 +142,32 @@ case_bandwidth_lock() {
   check "Replikat vollständig" grep -q 'zfs-auto-snap_daily-01' <<< "$(snaps "$ZCI_POOL_DST/bandwidth_lock/$ZCI_POOL_SRC/data")"
 }
 
+# Bookmark (#22): die Rotation löscht auf der Quelle alle Snapshots des Replikats, zsync fügt aus dem Bookmark an
+# (unverschlüsselt und raw-verschlüsselt)
+case_bookmark() {
+  zfs create "$ZCI_POOL_SRC/plain"
+  echo "zsync-ci-passphrase" | zfs create -o encryption=on -o keyformat=passphrase "$ZCI_POOL_SRC/enc"
+  local d bm=zsync_$(hostname -s)_${ZCI_POOL_DST}_bookmark
+  for d in plain enc; do
+    zfs set bashclub:zsync=all "$ZCI_POOL_SRC/$d"; write "$ZCI_POOL_SRC/$d" 1; snap "$ZCI_POOL_SRC/$d" 01; snap "$ZCI_POOL_SRC/$d" 02
+  done
+  config bookmark "source_bookmark=1"; zsync
+  equal "Exit-Code" 0 "$rc"
+  for d in plain enc; do
+    equal "$d: Bookmark zeigt auf den neuesten replizierten Snapshot" "$(guid "$ZCI_POOL_SRC/$d@zfs-auto-snap_daily-02")" "$(guid "$ZCI_POOL_SRC/$d#$bm")"
+    write "$ZCI_POOL_SRC/$d" 1 more; snap "$ZCI_POOL_SRC/$d" 03
+    zfs destroy "$ZCI_POOL_SRC/$d@zfs-auto-snap_daily-01"; zfs destroy "$ZCI_POOL_SRC/$d@zfs-auto-snap_daily-02"
+  done
+  zsync
+  equal "nach Rotation: Exit-Code" 0 "$rc"
+  check "aus dem Bookmark angefügt" grep -q 'continuing from the bookmark' <<< "$(last_run_log)"
+  for d in plain enc; do
+    equal "$d: Ziel rotiert wie die Quelle" "zfs-auto-snap_daily-03" "$(snaps "$ZCI_POOL_DST/bookmark/$ZCI_POOL_SRC/$d")"
+    equal "$d: Bookmark weitergesetzt" "$(guid "$ZCI_POOL_SRC/$d@zfs-auto-snap_daily-03")" "$(guid "$ZCI_POOL_SRC/$d#$bm")"
+    equal "$d: Zustand ok" ok "$(state_of "$ZCI_POOL_SRC/$d")"
+  done
+}
+
 # Snapshots verschiedener Labels in derselben Sekunde (#30): Erstreplikation beginnt beim ältesten,
 # das Löschen folgt dem ältesten Snapshot der Quelle
 case_same_second() {
@@ -166,7 +193,7 @@ case_checkmk() {
   check "Statusdatei des Laufs entfernt" test ! -e "$RUN_DIR/$id.state"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock same_second checkmk)
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark same_second checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
 rm -rf /var/log/zsync-ci

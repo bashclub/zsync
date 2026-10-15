@@ -45,6 +45,11 @@ target_rollback_max=24
 # (about 84 Mbit/s); applied on this host with pv (package pv), empty = no limit
 bandwidth_limit=""
 
+# keep a bookmark of the newest replicated snapshot on the source (one per backup host and target): if the rotation
+# on the source deletes this snapshot before the next replication, the replication continues from the bookmark
+# 1 = on, 0 = off; existing configurations without this setting keep 0, new configurations get 1
+source_bookmark=1
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
