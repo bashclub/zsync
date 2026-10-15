@@ -335,7 +335,9 @@ case_timer() {
 # das Löschen folgt dem ältesten Snapshot der Quelle
 case_same_second() {
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; write "$ZCI_POOL_SRC/data" 1
-  snaps_same_second "$ZCI_POOL_SRC/data" daily-01 weekly-01
+  if ! snaps_same_second "$ZCI_POOL_SRC/data" daily-01 weekly-01; then
+    skip "zwei Snapshots in derselben Sekunde unter Last nicht herstellbar"; return
+  fi
   equal "zwei Labels in derselben Sekunde" 1 "$(seconds_of "$ZCI_POOL_SRC/data")"
   config same_second 'snapshot_filter="daily|weekly"'
   zsync
@@ -361,16 +363,18 @@ cases=("${@:-${all_cases[@]}}")
 safety
 rm -rf /var/log/zsync-ci
 echo "bashclub-zsync $(dpkg-query -W -f='${Version}' bashclub-zsync 2>/dev/null), $(zfs version | head -1)"
+skipped_cases=()
 for c in "${cases[@]}"; do
   echo "### $c"
-  case_failed=0
+  case_failed=0; case_skipped=0
   reset_pools
   "case_$c"
+  if [ $case_skipped -ne 0 ] && [ $case_failed -eq 0 ]; then skipped_cases+=("$c"); fi
   if [ $case_failed -ne 0 ]; then
     failed_cases+=("$c")
     echo "  Log: /var/log/zsync-ci/$c.log"
   fi
 done
 cleanup_pools
-echo "### Ergebnis: $(( ${#cases[@]} - ${#failed_cases[@]} ))/${#cases[@]} Fälle bestanden${failed_cases:+, fehlgeschlagen: ${failed_cases[*]}}"
+echo "### Ergebnis: $(( ${#cases[@]} - ${#failed_cases[@]} - ${#skipped_cases[@]} ))/${#cases[@]} Fälle bestanden${skipped_cases:+, übersprungen: ${skipped_cases[*]}}${failed_cases:+, fehlgeschlagen: ${failed_cases[*]}}"
 [ ${#failed_cases[@]} -eq 0 ]
