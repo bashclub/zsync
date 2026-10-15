@@ -17,8 +17,9 @@ reset() {
 history() { for ((i = $2; i >= 1; i--)); do echo $((T - i * $1)); done > "$w/lib/$id.history"; }
 # last <rc> <ende> [ok_ende] [dauer]
 last() {
-  printf 'config=%s\nstart=%s\nend=%s\nduration=%s\nrc=%s\ndatasets=3\ndatasets_failed=%s\nok_start=\nok_end=%s\nok_duration=%s\n' \
-    "$conf" $(($2 - ${4:-60})) $2 ${4:-60} $1 $(( $1 ? 1 : 0 )) "${3-$2}" ${4:-60} > "$w/lib/$id.last"
+  local ok_end=${3-$2}
+  printf 'config=%s\nstart=%s\nend=%s\nduration=%s\nrc=%s\ndatasets=3\ndatasets_failed=%s\nok_start=%s\nok_end=%s\nok_duration=%s\n' \
+    "$conf" $(($2 - ${4:-60})) $2 ${4:-60} $1 $(( $1 ? 1 : 0 )) "${ok_end:+$((ok_end - ${4:-60}))}" "$ok_end" ${4:-60} > "$w/lib/$id.last"
 }
 # proc <pid> <ppid> <zustand> <start> <cmdline> [rchar] [wchan]
 proc() {
@@ -113,6 +114,31 @@ reset; last 0 $((T - 1800)); history 3600 6; ds pool/x rolled_back $T "rolled ba
 expect "Rollback im letzten Lauf: OK mit Hinweis" 0 "rolled back by the last run: pool/x \(rolled back to daily-02, 2 snapshots destroyed\)"
 reset; last 0 $((T - 1800)); history 3600 6; for x in a b c d e; do ds pool/$x broken $T "x"; done
 expect "lange Liste wird gekürzt" 2 "full replication needed for 5 datasets: pool/a \(x, since 0s\), pool/b \(x, since 0s\), pool/c \(x, since 0s\) \(\+2 more\)"
+
+# systemd-Timer der Config: Intervall aus letztem und nächstem Start, keine Lernphase
+cat > "$w/systemctl" << 'EOS'
+#!/bin/bash
+case $1 in
+  is-active) [[ $ZTEST_TIMER == on ]] ;;
+  show)
+    case "$*" in
+      *"-p LastTriggerUSec "*) if [ "$ZTEST_TIMER_LAST" -gt 0 ]; then date -d "@$ZTEST_TIMER_LAST" '+%a %Y-%m-%d %H:%M:%S %Z'; else echo; fi ;;
+      *"-p NextElapseUSecRealtime "*) date -d "@$ZTEST_TIMER_NEXT" '+%a %Y-%m-%d %H:%M:%S %Z' ;;
+    esac ;;
+esac
+EOS
+chmod +x "$w/systemctl"
+export ZSYNC_SYSTEMCTL=$w/systemctl ZSYNC_CONF_DIR=$w/etc ZTEST_TIMER=on ZTEST_TIMER_LAST=$((T - 1800)) ZTEST_TIMER_NEXT=$((T + 1800))
+reset; last 0 $((T - 1800)); history 3600 1
+expect "Timer aktiv: Intervall aus dem Timer, keine Lernphase" 0 "interval 1h 0m from bashclub-zsync@pve1.timer"
+reset; last 0 $((T - 12000)); history 3600 1
+expect "Timer aktiv: drei Intervalle ohne Erfolg -> CRIT ohne Lernphase" 2 "from bashclub-zsync@pve1.timer"
+ZTEST_TIMER_LAST=0; reset; last 0 $((T - 600)); history 3600 1
+expect "Timer noch nie ausgelöst: letzter Erfolg als letzter Start" 0 "from bashclub-zsync@pve1.timer"
+ZTEST_TIMER_LAST=$((T - 1800))
+ZTEST_TIMER=off; reset; last 0 $((T - 1800)); history 3600 1
+expect "Timer aus: Lernphase wie bisher" 0 "learning 0/5"
+unset ZSYNC_SYSTEMCTL ZSYNC_CONF_DIR
 
 # Metriken
 reset; last 0 $((T - 1800)) $((T - 1800)) 120; history 3600 6
