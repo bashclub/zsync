@@ -192,6 +192,24 @@ bandwidth_limit=1m"
   equal "Hold eines abgebrochenen Laufs freigegeben" "" "$(zfs holds -H "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-03" | grep -F "$tag")"
 }
 
+# Snapshot während der Replikation gelöscht (#7, ohne Holds): er wird übersprungen, die übrigen werden übertragen
+case_deleted_during() {
+  zfs create -o compression=off "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  write "$ZCI_POOL_SRC/data" 1; snap "$ZCI_POOL_SRC/data" 01
+  config deleted_during "bandwidth_limit=1m"
+  zsync
+  write "$ZCI_POOL_SRC/data" 6 big; snap "$ZCI_POOL_SRC/data" 02
+  write "$ZCI_POOL_SRC/data" 1 c; snap "$ZCI_POOL_SRC/data" 03
+  write "$ZCI_POOL_SRC/data" 1 d; snap "$ZCI_POOL_SRC/data" 04
+  zsync & local run=$!
+  sleep 3
+  check "während des Deltas 01 -> 02: daily-03 gelöscht (keine Holds)" zfs destroy "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-03"
+  wait $run; rc=$?
+  equal "Exit-Code" 0 "$rc"
+  equal "daily-03 übersprungen, daily-04 übertragen" "zfs-auto-snap_daily-01 zfs-auto-snap_daily-02 zfs-auto-snap_daily-04" "$(snaps "$ZCI_POOL_DST/deleted_during/$ZCI_POOL_SRC/data")"
+  check "Hinweis im Log" grep -q 'was deleted on the source during the replication' <<< "$(last_run_log)"
+}
+
 # Snapshots verschiedener Labels in derselben Sekunde (#30): Erstreplikation beginnt beim ältesten,
 # das Löschen folgt dem ältesten Snapshot der Quelle
 case_same_second() {
@@ -217,7 +235,7 @@ case_checkmk() {
   check "Statusdatei des Laufs entfernt" test ! -e "$RUN_DIR/$id.state"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold same_second checkmk)
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during same_second checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
 rm -rf /var/log/zsync-ci

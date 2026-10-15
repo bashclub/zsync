@@ -13,7 +13,7 @@ und prüft das Ergebnis am Ziel. Am Ende werden die Pools zerstört.
 
 Fälle: `replication` (Dateisystem mit Kind, Volume, raw-verschlüsselt), `engine_internal`, `rotation`,
 `refquota`, `rollback`, `broken_chain`, `orphans`, `local_mode`, `bandwidth_lock`, `bookmark` (Anfügen aus dem Bookmark, auch raw-verschlüsselt), `hold` (Basis und geplante Snapshots während des
-Deltas nicht löschbar), `same_second` (zwei Labels
+Deltas nicht löschbar), `deleted_during` (Snapshot während der Replikation gelöscht), `same_second` (zwei Labels
 in derselben Sekunde), `checkmk`.
 
 ## Test-VM einrichten
