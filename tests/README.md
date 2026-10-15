@@ -5,7 +5,8 @@ und `zfs-auto-snapshot` sind Stubs (`stubs/`), die jeden Aufruf protokollieren. 
 führt der ssh-Stub lokal mit denselben Stubs aus. Die Antworten von `zfs` kommen aus den Szenarien
 (`scenarios/`). Ein Szenario kann `before_run`/`after_run` definieren (Argument: Arbeitsverzeichnis),
 z. B. hält `9-locked.sh` damit die Sperre eines anderen Laufs. Ergebnis je Szenario: `.calls`, `.log`,
-`.conf`, `.spool` und `.files` (Dateien im Spool und Reste in /tmp).
+`.conf`, `.spool`, `.files` (Dateien im Spool und Reste in /tmp) und `.status` (Status-Dateien für das
+Monitoring).
 
 Damit lässt sich eine Änderung am Skript gegen den vorherigen Stand prüfen: Die Liste der ausgeführten
 Befehle (`*.calls`) muss gleich bleiben, Abweichungen im Log (`*.log`) müssen gewollt sein.
@@ -16,3 +17,6 @@ podman run --rm -v "$PWD:/src:ro,Z" -v /tmp:/out:Z docker.io/library/debian:13 b
   '/src/tests/run.sh /tmp/zsync-main /out/zsync-old && /src/tests/run.sh /src/bashclub-zsync/usr/bin/bashclub-zsync /out/zsync-new'
 diff -r /tmp/zsync-old /tmp/zsync-new
 ```
+
+`checkmk.sh` testet den Checkmk-Check mit Status-Dateien und einem nachgebauten `/proc` (Lernphase, Alter,
+Hänger, D-Zustand, Abbruch, übersprungene Läufe): `tests/checkmk.sh` (ohne root, ohne ZFS).

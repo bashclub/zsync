@@ -147,6 +147,10 @@ zfs_auto_snapshot_engine="internal"
 # new configurations use "strict"; existing configurations without this setting keep using "legacy"
 zfs_auto_snapshot_label_match="strict"
 
+# maximum age of the last successful run for the checkmk check bashclub_zsync, e.g. 26h, 90m or seconds
+# empty = derived from the start times of the previous runs, 0 = no age check (e.g. removable disks)
+monitor_max_age=""
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
@@ -181,6 +185,28 @@ If the list is correct, delete them:
 conf=/etc/bashclub/zsync.conf
 ( . "$conf"; ssh -p "$sshport" "$source" "zfs list -H -t snapshot -o name | grep '@zfs-auto-snap_${zfs_auto_snapshot_label}-' | xargs -r -n1 zfs destroy -v" )
 ~~~
+
+### Monitoring with Checkmk
+The package contains the local check `bashclub_zsync`. If the Checkmk agent is installed (`/usr/lib/check_mk_agent` exists, also when the agent is installed later), it is linked to `/usr/lib/check_mk_agent/local/bashclub_zsync`. To disable it:
+~~~
+touch /etc/bashclub/zsync-checkmk.disabled
+dpkg-reconfigure bashclub-zsync
+~~~
+It shows one service `zsync <config>` per configuration and reads only status files of `bashclub-zsync` and `/proc`, it never calls `zfs` itself:
+
+| State | Detection |
+|---|---|
+| last successful run too old | WARN after interval + max(20 %, 5 min) + duration of the last successful run, CRIT after 3 intervals |
+| last run failed | WARN |
+| phase without transfer too long (listing, snapshots, deletion, checkzfs) | WARN 15 min, CRIT 1 h |
+| transfer without progress (bytes read by `zfs receive`) | WARN 10 min, CRIT 30 min |
+| process of the run blocked in state D, e.g. waiting for ZFS (with kernel function) | WARN 5 min, CRIT 15 min |
+| run aborted (killed, crashed, power loss) | WARN until the next run |
+| 3 or more runs skipped during one active run | WARN |
+
+The interval is the median of the start intervals of the last 10 runs, so it needs no configuration and manual runs do not change it. Until 5 intervals are known (learning phase) the age check is at most WARN. `monitor_max_age` in the configuration sets the maximum age instead (WARN, CRIT at 3 times the value), `monitor_max_age=0` disables the age check, e.g. for removable disks. All other checks are active from the first run. The thresholds can be changed in `/etc/bashclub/zsync-checkmk.conf`, e.g. `stall_crit=3600` (variables at the top of the check).
+
+The age of the replicated snapshots per dataset is still checked by checkzfs.
 
 ### Define a cronjob
 #### cron.d example

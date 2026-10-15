@@ -3,3 +3,13 @@
 if [ -f /etc/bashclub/zsync.conf ] && [ ! -f /etc/bashclub/zsync.conf.backup_$(date +%Y-%m-%d) ] ; then
   cp /etc/bashclub/zsync.conf /etc/bashclub/zsync.conf.backup_$(date +%Y-%m-%d)
 fi
+
+# checkmk local check and run status of the monitoring
+if [ "$1" = remove ] || [ "$1" = purge ]; then
+  if [ -L /usr/lib/check_mk_agent/local/bashclub_zsync ]; then
+    rm -f /usr/lib/check_mk_agent/local/bashclub_zsync
+  fi
+fi
+if [ "$1" = purge ]; then
+  rm -rf /var/lib/bashclub-zsync /run/bashclub-zsync
+fi

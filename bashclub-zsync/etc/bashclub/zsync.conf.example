@@ -29,6 +29,10 @@ zfs_auto_snapshot_engine="internal"
 # (internal: <label>-YYYY-MM-DD-HHMM, zas: zfs-auto-snap_<label>-YYYY-MM-DD-HHMM), "legacy" = any name containing the label
 zfs_auto_snapshot_label_match="strict"
 
+# maximum age of the last successful run for the checkmk check bashclub_zsync, e.g. 26h, 90m or seconds
+# empty = derived from the start times of the previous runs, 0 = no age check (e.g. removable disks)
+monitor_max_age=""
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 

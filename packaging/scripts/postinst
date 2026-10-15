@@ -25,3 +25,14 @@ chmod 644 /etc/logrotate.d/bashclub-zsync
 if [ ! -f /etc/bashclub/zsync.conf ] && [ -f /etc/bashclub/zsync.conf.backup_$(date +%Y-%m-%d) ] ; then
   cp /etc/bashclub/zsync.conf.backup_$(date +%Y-%m-%d) /etc/bashclub/zsync.conf
 fi
+
+# checkmk local check: link into the agent if it is installed (also when the agent is installed later,
+# via dpkg trigger) and unless disabled with /etc/bashclub/zsync-checkmk.disabled
+check=/usr/share/bashclub-zsync/checkmk/bashclub_zsync
+link=/usr/lib/check_mk_agent/local/bashclub_zsync
+if [ -d /usr/lib/check_mk_agent ] && [ ! -e /etc/bashclub/zsync-checkmk.disabled ]; then
+  mkdir -p /usr/lib/check_mk_agent/local
+  ln -sfn $check $link
+elif [ -L $link ]; then
+  rm -f $link
+fi

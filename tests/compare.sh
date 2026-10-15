@@ -13,7 +13,7 @@ for f in "$old"/*.calls; do
     echo "verändernde Aufrufe: UNTERSCHIED"; cat /tmp/compare.$$
   fi
   echo "Abfragen: $(grep -vcE "$changing" "$f") -> $(grep -vcE "$changing" "$new/$n.calls")"
-  for x in conf spool files; do cmp -s "$old/$n.$x" "$new/$n.$x" || echo ".$x: UNTERSCHIED"; done
+  for x in conf spool files status; do cmp -s "$old/$n.$x" "$new/$n.$x" || echo ".$x: UNTERSCHIED"; done
   diff -U0 "$old/$n.log" "$new/$n.log" | grep -v '^@@\|^---\|^+++' | sed 's/^/log /'
 done
 rm -f /tmp/compare.$$

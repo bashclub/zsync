@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Added
+- Checkmk local check `bashclub_zsync`, linked into the agent if it is installed (also later, via dpkg trigger): one service per configuration, detects a too old last successful run (interval learned from the previous runs, learning phase), failed and aborted runs, phases that take too long, transfers without progress, processes blocked in state D and skipped runs; opt-out with `/etc/bashclub/zsync-checkmk.disabled` (#15)
+- run status for the monitoring in `/run/bashclub-zsync` and `/var/lib/bashclub-zsync` (#15)
+- setting `monitor_max_age` for the age check of the monitoring (#15)
 - setting `zfs_auto_snapshot_label_match`: with `strict` only snapshots in the name scheme of the snapshot engine belong to the label, leftovers of another engine or label are neither replicated nor used for deletion; existing configurations without the setting keep the previous behavior (`legacy`), new configurations get `strict` (#3)
 - warning for snapshots that contain the label but do not match the name scheme of the snapshot engine, on the source and on the target (#3)
 - error (exit code 1) if the oldest source snapshot of an interval does not exist on the target, so no target snapshots of this interval would be deleted; previously nothing was deleted silently and the target filled up (#3)

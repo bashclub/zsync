@@ -53,6 +53,10 @@ zfs_auto_snapshot_engine="zas"
 # keep "legacy" here for existing configs without this setting; new configs get "strict"
 zfs_auto_snapshot_label_match="legacy"
 
+# maximum age of the last successful run for the checkmk check bashclub_zsync, e.g. 26h, 90m or seconds
+# empty = derived from the start times of the previous runs, 0 = no age check (e.g. removable disks)
+monitor_max_age=""
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
@@ -114,6 +118,42 @@ function remote() {
     ssh $controlmaster $controlpath $controlpersist $sshcipher $zsync_sshport $source "$@"
 }
 
+#### run status for monitoring (checkmk local check bashclub_zsync), file names from the config path
+# /run/bashclub-zsync/<config>.state      active run: pid, phase, dataset (removed at the end of the run)
+# /var/lib/bashclub-zsync/<config>.last   result of the last run and of the last successful run
+# /var/lib/bashclub-zsync/<config>.history start times of the last runs (interval for the age check)
+# /var/lib/bashclub-zsync/<config>.skipped times of runs skipped because of an active run
+conf_path=$(readlink -m "$conf" 2>/dev/null || echo "$conf")
+status_id=$(tr '/' '_' <<< "$conf_path")
+status_file=
+status_lib=/var/lib/bashclub-zsync/$status_id
+
+# phase of the active run: status <phase> [dataset]
+function status() {
+    if [[ -n $status_file ]]; then
+        printf 'config=%s\npid=%s\npid_start=%s\nrun_start=%s\nphase=%s\ndataset=%s\nphase_since=%s\n' \
+            "$conf_path" $$ "$pid_start" "$run_start" "$1" "$2" "$(date +%s)" > "$status_file.tmp" \
+            && mv -f "$status_file.tmp" "$status_file"
+    fi
+}
+
+# at the end of the run (trap EXIT): result of this run, the last successful run is kept if this one failed
+function finish_status() {
+    local code=$? end=$(date +%s) key value
+    local -A prev=()
+    if [[ -f $status_lib.last ]]; then
+        while IFS='=' read -r key value; do prev[$key]=$value; done < "$status_lib.last"
+    fi
+    if [ $code -eq 0 ]; then
+        prev[ok_start]=$run_start; prev[ok_end]=$end; prev[ok_duration]=$((end - run_start))
+    fi
+    printf 'config=%s\nstart=%s\nend=%s\nduration=%s\nrc=%s\ndatasets=%s\ndatasets_failed=%s\nok_start=%s\nok_end=%s\nok_duration=%s\n' \
+        "$conf_path" $run_start $end $((end - run_start)) $code $datasets_total $datasets_failed \
+        "${prev[ok_start]}" "${prev[ok_end]}" "${prev[ok_duration]}" > "$status_lib.last.tmp" \
+        && mv -f "$status_lib.last.tmp" "$status_lib.last"
+    rm -f "$status_file"
+}
+
 #### one run per config at a time: the script runs again under flock, a second run is skipped
 # flock -o: the script itself does not hold the lock, so the background ssh master
 # connection (ControlPersist) does not keep the lock after the run has finished
@@ -127,6 +167,10 @@ if [[ -z $ZSYNC_LOCK ]]; then
         lock_rc=$?
         if [ $lock_rc -eq 75 ]; then
             log "[ERROR] Another run with configuration $conf is still active (pid $(cat "$ZSYNC_LOCK" 2>/dev/null)). Skipping this run."
+            if mkdir -p /var/lib/bashclub-zsync 2>/dev/null; then
+                { tail -n 19 "$status_lib.skipped" 2>/dev/null; date +%s; } > "$status_lib.skipped.tmp" \
+                    && mv -f "$status_lib.skipped.tmp" "$status_lib.skipped"
+            fi
             exit 1
         fi
         exit $lock_rc
@@ -183,6 +227,20 @@ EOF
     usage 0
 fi
 
+# run status from here on (not for -h and not when the initial config file was created)
+run_start=$(date +%s)
+datasets_total=0
+datasets_failed=0
+if mkdir -p /run/bashclub-zsync /var/lib/bashclub-zsync 2>/dev/null; then
+    status_file=/run/bashclub-zsync/$status_id.state
+    # start time of the process, to tell a reused pid apart
+    pid_start=$(sed 's/.*) //' /proc/$$/stat 2>/dev/null | cut -d' ' -f20)
+    { tail -n 10 "$status_lib.history" 2>/dev/null; echo $run_start; } > "$status_lib.history.tmp" \
+        && mv -f "$status_lib.history.tmp" "$status_lib.history"
+    trap finish_status EXIT
+    status start
+fi
+
 # checked after loading the config, so checkzfs_disabled from the config is respected
 if [[ -n $checkzfs ]]; then
     if [ $checkzfs_disabled -eq 0 ]; then
@@ -208,6 +266,8 @@ for setting in target source sshport tag snapshot_filter min_keep zfs_auto_snaps
     config_log+="\n\t$setting=${!setting}"
 done
 log "$config_log\n"
+
+status prepare
 
 #### ssh connection: shared master connection, aes cipher if both hosts support it
 controlmaster=-oControlMaster=auto
@@ -336,6 +396,11 @@ function label_leftovers() {
 #### replication per dataset
 for name in "${syncvols[@]}"; do
     log "[INFO] Replicate $name"
+    status replicate "$name"
+    # failed datasets are counted for the monitoring, rc of the whole run stays 1 after a failure
+    ((datasets_total++))
+    rc_before=$rc
+    rc=0
     fstype=${fstypes[$name]}
     if [[ $fstype == "filesystem" ]]; then
         mp=-xmountpoint
@@ -348,6 +413,7 @@ for name in "${syncvols[@]}"; do
     if [ $zfs_auto_snapshot_keep -gt 1 ]; then
         if [[ $zfs_auto_snapshot_engine == "internal" ]]; then
             debug "Running remote-snapshot-manager"
+            status snapshot "$name"
             $rsm $debug -d $name -k $zfs_auto_snapshot_keep -l $zfs_auto_snapshot_label -h $source -p $sshport
         fi
     fi
@@ -376,6 +442,7 @@ for name in "${syncvols[@]}"; do
             done
 
             debug "$name - Start initial replication"
+            status send "$name"
             IFS=$'\n'
             snap=$(remote "zfs list -H -t snapshot -o name -S creation $name | grep -E \"$snapshot_regex\" | tail -1")
             if [[ -n $snap ]]; then
@@ -397,6 +464,7 @@ for name in "${syncvols[@]}"; do
 
         # incremental replication: from the newest target snapshot (matched by guid) to all newer source snapshots
         debug "$name - Start incremental replication"
+        status send "$name"
         guid=$(zfs list -H -o guid -s creation -t snapshot $target/$name | tail -1)
         if [[ $guid != "" ]]; then
             last=$(grep $guid <<< "$source_snaps" | tail -1 | cut -f1)
@@ -422,6 +490,7 @@ for name in "${syncvols[@]}"; do
 
         # delete target snapshots older than the oldest source snapshot of each interval, keep at least min_keep
         debug "$name - Start deletion of old snapshots"
+        status delete "$name"
         # source snapshots (newest first), queried again after the replication
         source_snaps=$(remote "zfs list -H -o guid,name -S creation -t snapshot $name")
         filter=$(echo -e $snapshot_filter | sed "s/|/\n/g")
@@ -461,6 +530,8 @@ for name in "${syncvols[@]}"; do
     else
         debug "$name - No snapshots found with filter $snapshot_filter"
     fi
+    if [ $rc -ne 0 ]; then ((datasets_failed++)); fi
+    if [ $rc_before -ne 0 ]; then rc=$rc_before; fi
     log "[INFO] Replication of $name finished."
 done
 
@@ -469,6 +540,7 @@ done
 # (ignored by the checkmk agent) and then renamed, so the agent never reads a partial file
 if [ $checkzfs_disabled -eq 0 ]; then
     log "[INFO] Running checkzfs..."
+    status checkzfs
     spooldir=/var/lib/check_mk_agent/spool
     spoolname=${checkzfs_spool_maxage}_${checkzfs_prefix}
     spoolfile=$(mktemp /tmp/.$spoolname.XXXXXX)
