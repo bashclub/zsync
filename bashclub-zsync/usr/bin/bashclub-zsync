@@ -148,14 +148,12 @@ else
     log "[WARN] checkzfs is disabled. for monitoring please install:\n\thttps://code.bashclub.org/bashclub/checkzfs\n"
 fi
 
-if [[ $source == "" ]]; then
-    log "[INFO] source is empty, switching to local mode."
-    zsync_sshport=
-    connection=
-else
-    zsync_sshport=-p$sshport
-    connection="\n\tsource=$source\n\tsshport=$sshport"
+if [[ -z $source ]]; then
+    log "[ERROR] source is empty. For local replication use ssh to localhost, e.g. source=root@localhost"
+    exit 1
 fi
+zsync_sshport=-p$sshport
+connection="\n\tsource=$source\n\tsshport=$sshport"
 log "[INFO] Configuration:\n\ttarget=$target$connection\n\ttag=$tag\n\tsnapshot_filter=$snapshot_filter\n\tmin_keep=$min_keep\n\tzfs_auto_snapshot_keep=$zfs_auto_snapshot_keep\n\tzfs_auto_snapshot_label=$zfs_auto_snapshot_label\n\tzfs_auto_snapshot_engine=$zfs_auto_snapshot_engine\n\tcheckzfs_disabled=$checkzfs_disabled\n\tcheckzfs_local=$checkzfs_local\n\tcheckzfs_prefix=$checkzfs_prefix\n\tcheckzfs_max_age=$checkzfs_max_age\n\tcheckzfs_max_snapshot_count=$checkzfs_max_snapshot_count\n\tcheckzfs_spool=$checkzfs_spool\n\tcheckzfs_spool_maxage=$checkzfs_spool_maxage\n"
 
 controlmaster=-oControlMaster=auto
