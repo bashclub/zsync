@@ -1,0 +1,13 @@
+#!/bin/bash
+# Stub für ssh: protokolliert Optionen (sortiert), Host und Befehl und führt den Befehl als Quelle lokal aus.
+opts=(); host=; i=0; args=("$@")
+while (( i < ${#args[@]} )); do
+  a=${args[i]}
+  if [[ $a == -* ]]; then opts+=("$a")
+  elif [[ -z $host ]]; then host=$a
+  else break; fi
+  ((i++))
+done
+cmd="${args[*]:i}"
+echo "ssh [$(printf '%s\n' "${opts[@]}" | sort | tr '\n' ' ')] $host: $cmd" >> "$ZTEST_LOG"
+ZSIDE=source exec bash -c "$cmd"
