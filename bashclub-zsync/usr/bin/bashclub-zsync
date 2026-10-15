@@ -108,18 +108,6 @@ function remote() {
     ssh $controlmaster $controlpath $controlpersist $sshcipher $zsync_sshport $source "$@"
 }
 
-if which checkzfs; then
-    if [ $checkzfs_disabled -eq 0 ]; then
-        checkzfs=$(which checkzfs)
-        log "[INFO] installed checkzfs found: $checkzfs"
-    else
-        log "[INFO] checkzfs is disabled by configuration."
-    fi
-else
-    checkzfs_disabled=1
-    log "[WARN] checkzfs is disabled. for monitoring please install:\n\thttps://code.bashclub.org/bashclub/checkzfs\n"
-fi
-
 # load config file
 if [ -f $conf ]; then
     log "[INFO] Reading configuration $conf"
@@ -146,6 +134,18 @@ checkzfs_spool_maxage=$checkzfs_spool_maxage
 EOF
     log "[INFO] Initial config file created. Please adjust and restart script. Exiting..."
     usage 0
+fi
+
+# checked after loading the config, so checkzfs_disabled from the config is respected
+if [[ -n $checkzfs ]]; then
+    if [ $checkzfs_disabled -eq 0 ]; then
+        log "[INFO] installed checkzfs found: $checkzfs"
+    else
+        log "[INFO] checkzfs is disabled by configuration."
+    fi
+else
+    checkzfs_disabled=1
+    log "[WARN] checkzfs is disabled. for monitoring please install:\n\thttps://code.bashclub.org/bashclub/checkzfs\n"
 fi
 
 if [[ $source == "" ]]; then
