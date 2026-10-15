@@ -1,5 +1,15 @@
 # Change log
 
+## [Unreleased]
+
+### Fixed
+- only one run per configuration at a time: a second run with the same configuration is skipped with an error message instead of creating snapshots and replicating at the same time (#2)
+- the checkzfs output is written to a temporary file of the run and renamed into the checkmk spool, so concurrent runs and the checkmk agent never see a partial or deleted file (#2)
+- the snapshot label is not added to the snapshot filter a second time if it is already contained (#2)
+
+### Changed
+- the cron examples in the README append to the log (`>>`), so a skipped run does not empty the log of the active run
+
 ## [v1.0.19] - 2026-10-15
 
 ### Added
