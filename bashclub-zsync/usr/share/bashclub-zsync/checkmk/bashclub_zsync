@@ -12,7 +12,8 @@
 #   /var/lib/bashclub-zsync/<config>.check   state of this check (transfer progress, blocked processes)
 #
 # Checks:
-#   age of the last successful run   interval = median of the start intervals (or monitor_max_age in the config),
+#   age of the last successful run   interval = from the systemd timer bashclub-zsync@<name>.timer, otherwise the
+#                                    median of the start intervals (or monitor_max_age in the config),
 #                                    WARN after interval + max(20 %, 5 min) + duration of the last successful run
 #                                    (or of the active run, if it takes longer),
 #                                    CRIT after 3 intervals + duration; learning phase until 5 intervals: at most WARN
@@ -30,6 +31,8 @@
 RUN_DIR=${ZSYNC_RUN_DIR:-/run/bashclub-zsync}
 LIB_DIR=${ZSYNC_LIB_DIR:-/var/lib/bashclub-zsync}
 PROC=${ZSYNC_PROC:-/proc}
+SYSTEMCTL=${ZSYNC_SYSTEMCTL:-systemctl}
+CONF_DIR=${ZSYNC_CONF_DIR:-/etc/bashclub}
 NOW=${ZSYNC_NOW:-$(date +%s)}
 
 # thresholds in seconds, can be changed in /etc/bashclub/zsync-checkmk.conf
@@ -267,10 +270,33 @@ for id in $ids; do
             ok_duration=$((NOW - ${st[run_start]}))
         fi
         learning=0
+        # systemd timer of this configuration (bashclub-zsync@<name>.timer): interval from its last and next start
+        # (last and next instead of the schedule: a schedule like weekdays 6-22 every 15 min has a pause at night)
+        timer_interval=
+        if [[ $(dirname "$conf") == "$CONF_DIR" ]] && command -v "$SYSTEMCTL" > /dev/null \
+            && "$SYSTEMCTL" is-active --quiet "bashclub-zsync@$name.timer" 2>/dev/null; then
+            timer_last=$("$SYSTEMCTL" show -p LastTriggerUSec --value "bashclub-zsync@$name.timer" 2>/dev/null)
+            timer_next=$("$SYSTEMCTL" show -p NextElapseUSecRealtime --value "bashclub-zsync@$name.timer" 2>/dev/null)
+            if [[ -n $timer_last && $timer_last != n/a ]]; then timer_last=$(date -d "$timer_last" +%s 2>/dev/null); else timer_last=; fi
+            if [[ -n $timer_next && $timer_next != n/a ]]; then timer_next=$(date -d "$timer_next" +%s 2>/dev/null); else timer_next=; fi
+            # timer not triggered yet (e.g. started by hand): the last successful run is the last start
+            if [[ -z $timer_last ]]; then timer_last=${last[ok_start]}; fi
+            if [[ -n $timer_last && -n $timer_next ]] && [ $timer_next -gt $timer_last ]; then
+                timer_interval=$((timer_next - timer_last))
+            fi
+        fi
         if [[ -n $max_age ]]; then
             warn_at=$(seconds "$max_age")
             crit_at=$((warn_at * 3))
             source_text="monitor_max_age=$max_age"
+        elif [[ -n $timer_interval ]]; then
+            interval=$timer_interval
+            grace=$((interval / 5))
+            if [ $grace -lt 300 ]; then grace=300; fi
+            warn_at=$((interval + grace + ok_duration))
+            crit_at=$((3 * interval + ok_duration))
+            if [ $crit_at -le $warn_at ]; then crit_at=$((warn_at + grace)); fi
+            source_text="interval $(duration $interval) from bashclub-zsync@$name.timer"
         else
             # median of the intervals between the start times
             intervals=$(sort -n "$LIB_DIR/$id.history" 2>/dev/null | awk 'NR > 1 && $1 > p { print $1 - p } { p = $1 }' | sort -n)

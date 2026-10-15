@@ -32,6 +32,15 @@ contents:
   - src: bashclub-zsync/usr/bin/remote-snapshot-manager
     dst: /usr/bin/remote-snapshot-manager
     file_info: { mode: 0755 }
+  - src: bashclub-zsync/usr/bin/bashclub-zsync-timer
+    dst: /usr/bin/bashclub-zsync-timer
+    file_info: { mode: 0755 }
+  - src: bashclub-zsync/usr/lib/systemd/system/bashclub-zsync@.service
+    dst: /usr/lib/systemd/system/bashclub-zsync@.service
+    file_info: { mode: 0644 }
+  - src: bashclub-zsync/usr/lib/systemd/system/bashclub-zsync@.timer
+    dst: /usr/lib/systemd/system/bashclub-zsync@.timer
+    file_info: { mode: 0644 }
   - src: bashclub-zsync/usr/bin/zsync-autorun
     dst: /usr/bin/zsync-autorun
     file_info: { mode: 0755 }

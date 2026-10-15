@@ -1,0 +1,13 @@
+[Unit]
+Description=bashclub-zsync timer for /etc/bashclub/%i.conf
+Documentation=https://code.bashclub.org/bashclub/zsync
+
+[Timer]
+# default schedule; per configuration: bashclub-zsync-timer enable <name> <OnCalendar>
+# (drop-in /etc/systemd/system/bashclub-zsync@<name>.timer.d/schedule.conf)
+OnCalendar=daily
+# a run missed while the host was off is started after the next boot
+Persistent=true
+
+[Install]
+WantedBy=timers.target

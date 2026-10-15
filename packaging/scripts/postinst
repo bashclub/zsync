@@ -38,3 +38,12 @@ if [ -d /usr/lib/check_mk_agent ] && [ ! -e /etc/bashclub/zsync-checkmk.disabled
 elif [ -L $link ]; then
   rm -f $link
 fi
+
+# systemd timers instead of cron: only a hint, existing cron jobs are not changed automatically
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload > /dev/null 2>&1 || true
+  if grep -rlsE '^[^#]*bashclub-zsync[[:space:]].*-c[[:space:]]' /etc/crontab /etc/cron.d /var/spool/cron/crontabs /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly > /dev/null 2>&1; then
+    echo "bashclub-zsync: cron jobs found, systemd timers are available now (bashclub-zsync@<name>.timer):"
+    echo "    bashclub-zsync-timer migrate --dry-run"
+  fi
+fi

@@ -8,6 +8,7 @@
 
 4. Öffnen Sie die Konfigurationsdatei mit einem Texteditor und passen Sie die folgenden Einstellungen an:
 
+   - Zeitsteuerung per systemd-Timer statt Cron (`bashclub-zsync@<name>.timer`, Werkzeug `bashclub-zsync-timer` mit `enable`, `list`, `migrate --dry-run`): README, Abschnitt „Run with systemd timers“.
    - Betrieb ohne root (Backupserver und Quelle mit `zfs allow`): README, Abschnitt „Running without root“, mit kopierbaren Befehlen.
    - `source`: Geben Sie den SSH-Adresse des Quellservers an, von dem die Daten repliziert werden sollen. Beispiel: `source=user@host`. `source=local` repliziert Datasets desselben Hosts ohne SSH (z. B. von `rpool` in einen Backup-Pool).
    - `target`: Geben Sie die Pfad des Ziel-ZFS-Dateisystems auf dem Zielserver an, zu dem die Daten repliziert werden sollen. Beispiel: `target=pool/dataset`

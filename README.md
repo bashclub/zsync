@@ -301,16 +301,33 @@ test -f /var/lib/zsync/.ssh/id_ed25519 || su - zsync -c 'install -d -m 700 ~/.ss
 ( . "$conf"; sed -i "s|^source=.*|source=zsync@${source#*@}|" "$conf"
   su - zsync -c "ssh -p $sshport -o StrictHostKeyChecking=accept-new zsync@${source#*@} zfs list -H -o name" | head -n 3 )
 ~~~
-5. Logs of earlier root runs writable for the group, the cron job runs as `zsync`:
+5. Logs of earlier root runs writable for the group, the timer or the cron job runs as `zsync`:
 ~~~
 chgrp bashclub-zsync /var/log/bashclub-zsync/*.log 2> /dev/null; chmod g+w /var/log/bashclub-zsync/*.log 2> /dev/null
-sed -i -E 's#^([^#].*[[:space:]])root([[:space:]]+/usr/bin/bashclub-zsync)#\1zsync\2#' /etc/cron.d/bashclub-zsync
+sed -i -E 's#^([^#].*[[:space:]])root([[:space:]]+/usr/bin/bashclub-zsync)#\1zsync\2#' /etc/cron.d/bashclub-zsync 2> /dev/null
+systemctl is-enabled --quiet "bashclub-zsync@$(basename "$conf" .conf).timer" 2> /dev/null && bashclub-zsync-timer enable "$(basename "$conf" .conf)" --user zsync
 ~~~
 The checkzfs output goes to the checkmk spool `/var/lib/check_mk_agent/spool` (with `checkzfs_spool=1` on the source). It belongs to root; `bashclub-zsync` logs a warning and skips it until the group may write there:
 ~~~
 install -d -m 2775 -g bashclub-zsync /var/lib/check_mk_agent/spool
 ~~~
 The snapshot engine `zas` (zfs-auto-snapshot on the source) also works as user `zsync` with these permissions.
+
+### Run with systemd timers
+Each configuration `/etc/bashclub/<name>.conf` can have its own timer `bashclub-zsync@<name>.timer` (Proxmox VE, Debian, Ubuntu). A run missed while the host was off is started after the next boot, a timer never starts a second run while the previous one is still active, and the output goes to the journal. The Checkmk check takes the interval for the age check from the timer.
+
+Enable the timer of `/etc/bashclub/zsync.conf` (schedule in [systemd.time](https://www.freedesktop.org/software/systemd/man/latest/systemd.time.html) format, e.g. `daily`, `hourly`, `"*-*-* 23:00"`, `"Mon..Fri *-*-* 06..22:00/15"`) and show all configurations, timers and remaining cron jobs:
+~~~
+bashclub-zsync-timer enable zsync "*-*-* 23:00"
+bashclub-zsync-timer list
+journalctl -u bashclub-zsync@zsync
+~~~
+Take over existing cron jobs that run `bashclub-zsync -c /etc/bashclub/<name>.conf`, also scripts in `/etc/cron.{hourly,daily,weekly,monthly}`: schedule, user and log file are kept, the cron lines are commented out and the timers enabled. The dry run only shows what would happen; schedules that cannot be converted exactly (e.g. `@reboot`, `6-22/2`) are listed and left as they are:
+~~~
+bashclub-zsync-timer migrate --dry-run
+bashclub-zsync-timer migrate
+~~~
+`--user <user>` runs a timer as unprivileged user (see "Running without root"), `--log <file>` appends the output to a file instead of the journal, `bashclub-zsync-timer disable <name>` stops a timer. The package does not migrate anything by itself, it only shows a hint if cron jobs exist. Removable disks keep using `zsync-autorun@` (udev), TrueNAS SCALE keeps using cron.
 
 ### Define a cronjob
 #### cron.d example

@@ -1,0 +1,12 @@
+[Unit]
+Description=bashclub-zsync replication with /etc/bashclub/%i.conf
+Documentation=https://code.bashclub.org/bashclub/zsync
+After=network-online.target zfs.target
+Wants=network-online.target
+ConditionPathExists=/etc/bashclub/%i.conf
+
+[Service]
+Type=oneshot
+# output goes to the journal (journalctl -u bashclub-zsync@<name>), user and log file per configuration:
+# bashclub-zsync-timer enable/migrate writes drop-ins in /etc/systemd/system/bashclub-zsync@<name>.service.d/
+ExecStart=/usr/bin/bashclub-zsync -c /etc/bashclub/%i.conf

@@ -293,11 +293,51 @@ transfer_resume=1"
   check "keine Warnung zu Rechten im Log" not grep -q 'not writable' "$log"
 }
 
+# systemd-Timer (#12): echter Timer und Dienst, Checkmk liest das Intervall aus dem Timer, Migration von Cronjobs
+# (die Test-Cronjobs liegen in einem eigenen Verzeichnis, der cron der VM führt sie nicht aus)
+case_timer() {
+  local name=zci-timer tconf=/etc/bashclub/zci-timer.conf crondir=/tmp/zci-cron unit
+  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; snap "$ZCI_POOL_SRC/data" 01
+  config timer; cp "$conf" "$tconf"; conf=$tconf; id=$(tr '/' '_' <<< "$conf")
+  check "Timer einschalten" bashclub-zsync-timer enable $name "*-*-* 03:00"
+  equal "Timer eingeschaltet" enabled "$(systemctl is-enabled bashclub-zsync@$name.timer)"
+  check "Zeitplan aus dem Drop-in" grep -q 'OnCalendar=\*-\*-\* 03:00' <<< "$(systemctl show -p TimersCalendar --value bashclub-zsync@$name.timer)"
+  local since; since=$(date '+%Y-%m-%d %H:%M:%S')
+  systemctl start bashclub-zsync@$name.service
+  equal "Dienst erfolgreich" success "$(systemctl show -p Result --value bashclub-zsync@$name.service)"
+  equal "repliziert" "zfs-auto-snap_daily-01" "$(snaps "$ZCI_POOL_DST/timer/$ZCI_POOL_SRC/data")"
+  check "Log im Journal" grep -q 'Reading configuration /etc/bashclub/zci-timer.conf' <<< "$(journalctl -u bashclub-zsync@$name.service --since "$since" --no-pager)"
+  check "Checkmk: Intervall aus dem Timer" grep -q "from bashclub-zsync@$name.timer" <<< "$(check_output)"
+  # Migration: Cronjob mit Benutzer und Logdatei plus cron.daily-Skript derselben Config
+  rm -rf "$crondir"; mkdir -p $crondir/cron.d $crondir/cron.daily
+  echo "*/15 6-22 * * 1-5 root /usr/bin/bashclub-zsync -c $tconf >> /var/log/bashclub-zsync/zci-timer.log 2>&1" > $crondir/cron.d/zsync
+  printf '#!/bin/sh\n/usr/bin/bashclub-zsync -c %s > /dev/null\n' "$tconf" > $crondir/cron.daily/zsync
+  local before; before=$(cat $crondir/cron.d/zsync $crondir/cron.daily/zsync | md5sum)
+  local plan; plan=$(ZSYNC_CRON_DIRS="$crondir/cron.d $crondir/cron.daily" bashclub-zsync-timer migrate --dry-run)
+  check "Probelauf: Cron-Zeitplan umgerechnet" grep -qF 'OnCalendar=Mon..Fri *-*-* 6..22:0/15:00' <<< "$plan"
+  check "Probelauf: cron.daily mit Debian-Zeit" grep -qF 'OnCalendar=*-*-* 06:25:00' <<< "$plan"
+  equal "Probelauf ändert nichts" "$before" "$(cat $crondir/cron.d/zsync $crondir/cron.daily/zsync | md5sum)"
+  ZSYNC_CRON_DIRS="$crondir/cron.d $crondir/cron.daily" bashclub-zsync-timer migrate > /dev/null
+  check "Cron-Zeile auskommentiert" grep -q '^# bashclub-zsync-timer: migrated' $crondir/cron.d/zsync
+  check "cron.daily-Zeile auskommentiert" grep -q '^# bashclub-zsync-timer: migrated' $crondir/cron.daily/zsync
+  equal "beide Zeitpläne im Timer" 2 "$(systemctl show -p TimersCalendar --value bashclub-zsync@$name.timer | grep -o OnCalendar= | wc -l)"
+  check "Logdatei übernommen" grep -q 'append:/var/log/bashclub-zsync/zci-timer.log' /etc/systemd/system/bashclub-zsync@$name.service.d/log.conf
+  systemctl start bashclub-zsync@$name.service
+  check "Ausgabe in der übernommenen Logdatei" grep -q 'Reading configuration' /var/log/bashclub-zsync/zci-timer.log
+  check "erneute Migration findet nichts mehr" grep -q 'no cron jobs' <<< "$(ZSYNC_CRON_DIRS="$crondir/cron.d $crondir/cron.daily" bashclub-zsync-timer migrate --dry-run)"
+  # aufräumen
+  bashclub-zsync-timer disable $name > /dev/null
+  rm -rf /etc/systemd/system/bashclub-zsync@$name.timer.d /etc/systemd/system/bashclub-zsync@$name.service.d "$crondir" "$tconf" /var/log/bashclub-zsync/zci-timer.log
+  systemctl daemon-reload
+}
+
 # Snapshots verschiedener Labels in derselben Sekunde (#30): Erstreplikation beginnt beim ältesten,
 # das Löschen folgt dem ältesten Snapshot der Quelle
 case_same_second() {
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; write "$ZCI_POOL_SRC/data" 1
-  snaps_same_second "$ZCI_POOL_SRC/data" daily-01 weekly-01
+  if ! snaps_same_second "$ZCI_POOL_SRC/data" daily-01 weekly-01; then
+    skip "zwei Snapshots in derselben Sekunde unter Last nicht herstellbar"; return
+  fi
   equal "zwei Labels in derselben Sekunde" 1 "$(seconds_of "$ZCI_POOL_SRC/data")"
   config same_second 'snapshot_filter="daily|weekly"'
   zsync
@@ -318,21 +358,23 @@ case_checkmk() {
   check "Statusdatei des Laufs entfernt" test ! -e "$RUN_DIR/$id.state"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged same_second checkmk)
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
 rm -rf /var/log/zsync-ci
 echo "bashclub-zsync $(dpkg-query -W -f='${Version}' bashclub-zsync 2>/dev/null), $(zfs version | head -1)"
+skipped_cases=()
 for c in "${cases[@]}"; do
   echo "### $c"
-  case_failed=0
+  case_failed=0; case_skipped=0
   reset_pools
   "case_$c"
+  if [ $case_skipped -ne 0 ] && [ $case_failed -eq 0 ]; then skipped_cases+=("$c"); fi
   if [ $case_failed -ne 0 ]; then
     failed_cases+=("$c")
     echo "  Log: /var/log/zsync-ci/$c.log"
   fi
 done
 cleanup_pools
-echo "### Ergebnis: $(( ${#cases[@]} - ${#failed_cases[@]} ))/${#cases[@]} Fälle bestanden${failed_cases:+, fehlgeschlagen: ${failed_cases[*]}}"
+echo "### Ergebnis: $(( ${#cases[@]} - ${#failed_cases[@]} - ${#skipped_cases[@]} ))/${#cases[@]} Fälle bestanden${skipped_cases:+, übersprungen: ${skipped_cases[*]}}${failed_cases:+, fehlgeschlagen: ${failed_cases[*]}}"
 [ ${#failed_cases[@]} -eq 0 ]

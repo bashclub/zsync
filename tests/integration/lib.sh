@@ -17,6 +17,8 @@ fail() { echo "  FAIL $*"; case_failed=1; }
 ok() { echo "  ok   $*"; }
 # check <beschreibung> <befehl...>, verneint: check <beschreibung> not <befehl...>
 check() { local desc=$1; shift; if "$@"; then ok "$desc"; else fail "$desc"; fi; }
+# Vorbedingung eines Falls nicht herstellbar: übersprungen (weder bestanden noch fehlgeschlagen)
+skip() { echo "  skip $*"; case_skipped=1; }
 not() { ! "$@"; }
 # equal <beschreibung> <erwartet> <ist>
 equal() { if [[ $2 == "$3" ]]; then ok "$1"; else fail "$1: erwartet '$2', ist '$3'"; fi; }
@@ -88,11 +90,12 @@ last_run_log() { awk '/^===== /{ buf = "" } { buf = buf $0 "\n" } END { printf "
 write() { dd if=/dev/urandom of="$(zfs get -H -o value mountpoint "$1")/${3:-file}" bs=1M count=${2:-1} status=none conv=fsync; }
 # eigene Sekunde je Snapshot (realistische Zeiten); Snapshots in derselben Sekunde prüft case_same_second
 snap() { sleep 1.05; zfs snapshot "$1@zfs-auto-snap_daily-$2"; }
-# Snapshots mit verschiedenen Namen in derselben Sekunde: zu Beginn einer neuen Sekunde ohne Pause anlegen;
-# landen sie unter Last doch in zwei Sekunden, wieder löschen und erneut versuchen (höchstens fünfmal)
+# Snapshots mit verschiedenen Namen in derselben Sekunde: zu Beginn einer neuen Sekunde ohne Pause anlegen.
+# ZFS legt Snapshots eines Datasets nie in derselben Transaktion an (zfs program: EAGAIN), es braucht also zwei
+# Transaktionen in einer Sekunde; unter Last gelingt das nicht immer -> erneut versuchen, sonst Rückgabe 1
 snaps_same_second() {
   local ds=$1 n try; shift
-  for try in 1 2 3 4 5; do
+  for try in $(seq 1 10); do
     sleep "$(printf '0.%03d' $((1000 - 10#$(date +%3N))))"
     for n in "$@"; do zfs snapshot "$ds@zfs-auto-snap_$n"; done
     [ "$(zfs list -Hp -o creation -t snapshot "$ds" | sort -u | wc -l)" -eq 1 ] && return 0
