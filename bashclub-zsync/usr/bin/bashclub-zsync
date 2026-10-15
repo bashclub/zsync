@@ -221,6 +221,8 @@ for zvol in $(remote "zfs get -H -o name,value,source -t filesystem,volume $tag"
     fi
 done
 checkzfs_filter=${checkzfs_filter::-1}
+declare -A fstypes
+while IFS=$'\t' read -r dataset fstype; do fstypes[$dataset]=$fstype; done <<< "$(remote "zfs list -H -o name,type -t filesystem,volume")"
 log "$include_list"
 log "$exclude_list"
 log "$checkzfs_headline\ncheckzfs_filter=$checkzfs_filter\n"
@@ -253,7 +255,7 @@ fi
 #### replication per dataset
 for name in "${syncvols[@]}"; do
     log "[INFO] Replicate $name"
-    fstype=$(remote zfs get -H -o value type $name)
+    fstype=${fstypes[$name]}
     if [[ $fstype == "filesystem" ]]; then
         mp=-xmountpoint
         cm=-ocanmount=noauto
@@ -269,7 +271,9 @@ for name in "${syncvols[@]}"; do
         fi
     fi
 
-    if [[ $(remote "zfs list -H -t snapshot -o name -S creation $name 2>/dev/null | grep -E \"@.*($snapshot_filter)\" | wc -l | tr -d ' '") -gt 0 ]]; then
+    # source snapshots (oldest first), queried directly before the replication of this dataset
+    source_snaps=$(remote "zfs list -H -o name,guid -s creation -t snapshot $name 2>/dev/null")
+    if cut -f1 <<< "$source_snaps" | grep -qE "@.*($snapshot_filter)"; then
         IFS=$' '
         # initial replication: create the path on the target, then send the oldest matching snapshot
         if ! zfs list -H $target/$name > /dev/null 2>&1 ; then
@@ -286,24 +290,27 @@ for name in "${syncvols[@]}"; do
 
             debug "$name - Start initial replication"
             IFS=$'\n'
-            for snap in $(remote "zfs list -H -t snapshot -o name -S creation $name | grep -E \"@.*($snapshot_filter)\" | tail -1"); do
+            snap=$(remote "zfs list -H -t snapshot -o name -S creation $name | grep -E \"@.*($snapshot_filter)\" | tail -1")
+            if [[ -n $snap ]]; then
                 log "[INFO] Start initial replication: $snap => $target/$(echo $name | cut -d'/' -f1)"
                 remote "zfs send -w -p $debug $snap" | zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | cut -d'/' -f1) \
                     || { rc=1; log "[ERROR] initial replication to $target/$name failed."; }
-            done
+            fi
+            # the initial replication may take long, query the source snapshots again
+            source_snaps=$(remote "zfs list -H -o name,guid -s creation -t snapshot $name 2>/dev/null")
         fi
 
         # incremental replication: from the newest target snapshot (matched by guid) to all newer source snapshots
         debug "$name - Start incremental replication"
         guid=$(zfs list -H -o guid -s creation -t snapshot $target/$name | tail -1)
         if [[ $guid != "" ]]; then
-            last=$(remote "zfs list -H -o name,guid -t snapshot $name | grep $guid | tail -1 | cut -f1")
+            last=$(grep $guid <<< "$source_snaps" | tail -1 | cut -f1)
             if [[ $last != "" ]]; then
                 IFS=$'\n'
                 if [[ $fstype == "filesystem" ]] && [[ $(zfs get -H -o value canmount $target/$name) != "noauto" ]]; then
                     zfs set canmount=noauto $target/$name
                 fi
-                for snap in $(remote "zfs list -H -o name,guid -s creation -t snapshot $name | grep -E \"@.*($snapshot_filter)\" | grep --after-context=200 $guid | grep -v $guid | cut -f1"); do
+                for snap in $(grep -E "@.*($snapshot_filter)" <<< "$source_snaps" | grep --after-context=200 $guid | grep -v $guid | cut -f1); do
                     log "[INFO] Replicating delta of $last => $snap to $target/$name"
                     remote "zfs send -w $debug -i $last $snap" | zfs receive -x $tag -x com.sun:auto-snapshot -F $debug $target/$name \
                         || { rc=1; log "[ERROR] incremental replication to $target/$name failed."; }
@@ -320,14 +327,17 @@ for name in "${syncvols[@]}"; do
 
         # delete target snapshots older than the oldest source snapshot of each interval, keep at least min_keep
         debug "$name - Start deletion of old snapshots"
+        # source snapshots (newest first), queried again after the replication
+        source_snaps=$(remote "zfs list -H -o guid,name -S creation -t snapshot $name")
         filter=$(echo -e $snapshot_filter | sed "s/|/\n/g")
         IFS=$'\n'
         for interval in $filter ; do
             debug "$name - Checking interval $interval"
-            guid=$(remote "zfs list -H -o guid,name -S creation -t snapshot $name | grep -E \"@.*$interval\" | cut -f1 | tail -1")
-            if [[ "$(echo -e "$guid" | sed 's/\n//g')" != "" ]]; then
-                snaps_to_delete=$(zfs list -H -o name,guid -S creation -t snapshot $target/$name | grep -E "@.*$interval" | grep --after-context=200 $guid | grep -v $guid | cut -f1)
-                snap_count=$(zfs list -H -o name,guid -S creation -t snapshot $target/$name | grep -E "@.*$interval" | wc -l | tr -d ' ')
+            guid=$(grep -E "@.*$interval" <<< "$source_snaps" | cut -f1 | tail -1)
+            if [[ -n $guid ]]; then
+                target_snaps=$(zfs list -H -o name,guid -S creation -t snapshot $target/$name | grep -E "@.*$interval")
+                snaps_to_delete=$(grep --after-context=200 $guid <<< "$target_snaps" | grep -v $guid | cut -f1)
+                snap_count=$(grep -c . <<< "$target_snaps")
 
                 for snap in $snaps_to_delete; do
                     if [[ $snap_count -gt $min_keep ]]; then
