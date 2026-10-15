@@ -270,6 +270,48 @@ The age of the replicated snapshots per dataset is still checked by checkzfs.
 - **chain at risk**: the replication of a dataset failed and its base is the oldest snapshot of its interval on the source; with the next rotation there is no common snapshot anymore
 - **replica only on the target**: the dataset was deleted or renamed on the source, or it is no longer selected (`bashclub:zsync`). It is not replicated anymore and never deleted automatically. To keep it as archive without warning: `zfs set bashclub:zsync-orphan=keep <replica>`. One target per source: datasets of another configuration in the same target would count as replicas without source.
 
+### Running without root
+`bashclub-zsync` can run as an unprivileged user on the backup server and log in to the source as an unprivileged user. Both only get the ZFS permissions they need (`zfs allow`), there is no root login on the source anymore. On Linux only root may mount, so the replicas are received without mounting (`zfs receive -u`); the package makes logs and run status writable for the group `bashclub-zsync`.
+
+Run the following blocks as root on the backup server, once per configuration. They read target, source and port from the configuration and set up the source over the existing root access.
+
+1. User `zsync` on the backup server, member of the group `bashclub-zsync`, with its own ssh key:
+~~~
+conf=/etc/bashclub/zsync.conf
+id zsync > /dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/zsync --shell /bin/bash --groups bashclub-zsync zsync
+test -f /var/lib/zsync/.ssh/id_ed25519 || su - zsync -c 'install -d -m 700 ~/.ssh && ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519'
+~~~
+2. Target with the permissions to receive (all properties `zfs send -p` can bring along, except `sharenfs`/`sharesmb`):
+~~~
+( . "$conf"
+  zfs list "$target" > /dev/null 2>&1 || zfs create -p -o canmount=noauto -o com.sun:auto-snapshot=false "$target"
+  zfs allow -u zsync create,receive,mount,destroy,rollback,hold,release,userprop,aclinherit,aclmode,acltype,atime,canmount,checksum,compression,context,copies,dedup,defcontext,devices,dnodesize,exec,filesystem_limit,fscontext,logbias,mountpoint,nbmand,overlay,primarycache,quota,readonly,recordsize,redundant_metadata,refquota,refreservation,relatime,reservation,rootcontext,secondarycache,setuid,snapdev,snapdir,snapshot_limit,special_small_blocks,sync,volmode,volsize,vscan,xattr "$target" )
+~~~
+3. User `zsync` on the source with the key of the backup server and the permissions to send, snapshot, hold and bookmark on all pools:
+~~~
+( . "$conf"; key=$(cat /var/lib/zsync/.ssh/id_ed25519.pub)
+  ssh -p "$sshport" "$source" "id zsync > /dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/zsync --shell /bin/bash zsync
+    install -d -m 700 -o zsync -g zsync /var/lib/zsync/.ssh
+    grep -qxF '$key' /var/lib/zsync/.ssh/authorized_keys 2> /dev/null || echo '$key' >> /var/lib/zsync/.ssh/authorized_keys
+    chown zsync: /var/lib/zsync/.ssh/authorized_keys; chmod 600 /var/lib/zsync/.ssh/authorized_keys
+    for p in \$(zpool list -H -o name); do zfs allow -u zsync send,snapshot,destroy,mount,hold,release,bookmark \$p; done" )
+~~~
+4. Switch the configuration to the user and test the connection:
+~~~
+( . "$conf"; sed -i "s|^source=.*|source=zsync@${source#*@}|" "$conf"
+  su - zsync -c "ssh -p $sshport -o StrictHostKeyChecking=accept-new zsync@${source#*@} zfs list -H -o name" | head -n 3 )
+~~~
+5. Logs of earlier root runs writable for the group, the cron job runs as `zsync`:
+~~~
+chgrp bashclub-zsync /var/log/bashclub-zsync/*.log 2> /dev/null; chmod g+w /var/log/bashclub-zsync/*.log 2> /dev/null
+sed -i -E 's#^([^#].*[[:space:]])root([[:space:]]+/usr/bin/bashclub-zsync)#\1zsync\2#' /etc/cron.d/bashclub-zsync
+~~~
+The checkzfs output goes to the checkmk spool `/var/lib/check_mk_agent/spool` (with `checkzfs_spool=1` on the source). It belongs to root; `bashclub-zsync` logs a warning and skips it until the group may write there:
+~~~
+install -d -m 2775 -g bashclub-zsync /var/lib/check_mk_agent/spool
+~~~
+The snapshot engine `zas` (zfs-auto-snapshot on the source) also works as user `zsync` with these permissions.
+
 ### Define a cronjob
 #### cron.d example
 File: /etc/cron.d/bashclub-zsync

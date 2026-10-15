@@ -48,6 +48,9 @@ contents:
     dst: /etc/logrotate.d/bashclub-zsync
     type: config|noreplace
     file_info: { mode: 0644 }
+  - src: bashclub-zsync/usr/lib/tmpfiles.d/bashclub-zsync.conf
+    dst: /usr/lib/tmpfiles.d/bashclub-zsync.conf
+    file_info: { mode: 0644 }
   - src: bashclub-zsync/etc/systemd/system/zsync-autorun@.service
     dst: /etc/systemd/system/zsync-autorun@.service
     file_info: { mode: 0644 }
