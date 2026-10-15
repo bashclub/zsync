@@ -1,0 +1,3 @@
+#!/bin/bash
+echo "checkzfs $*" >> "$ZTEST_LOG"
+echo "0 checkzfs_stub - ok"

@@ -1,0 +1,3 @@
+#!/bin/bash
+echo "zfs-auto-snapshot $*" >> "$ZTEST_LOG"
+
