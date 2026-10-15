@@ -4,7 +4,7 @@
 und `zfs-auto-snapshot` sind Stubs (`stubs/`), die jeden Aufruf protokollieren. Befehle für die Quelle
 führt der ssh-Stub lokal mit denselben Stubs aus. Die Antworten von `zfs` kommen aus den Szenarien
 (`scenarios/`). Ein Szenario kann `before_run`/`after_run` definieren (Argument: Arbeitsverzeichnis),
-z. B. hält `9-locked.sh` damit die Sperre eines anderen Laufs. Ergebnis je Szenario: `.calls`, `.log`,
+z. B. hält `9-locked.sh` damit die Sperre eines anderen Laufs. Mit `PV=1` steht ein `pv`-Stub bereit. Ergebnis je Szenario: `.calls`, `.log`,
 `.conf`, `.spool`, `.files` (Dateien im Spool und Reste in /tmp) und `.status` (Status-Dateien für das
 Monitoring).
 

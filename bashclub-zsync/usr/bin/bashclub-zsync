@@ -65,6 +65,10 @@ target_rollback=0
 # maximum number of target snapshots a rollback may destroy, otherwise only an error is logged
 target_rollback_max=24
 
+# bandwidth limit of the transfer in bytes per second with suffix k, m, g (1024 based), e.g. 10m = 10 MiB/s
+# (about 84 Mbit/s); applied on this host with pv (package pv), empty = no limit
+bandwidth_limit=""
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
@@ -124,6 +128,15 @@ function debug() {
 # bytes in readable form (10737418240 -> 10GiB)
 function size() {
     numfmt --to=iec-i --suffix=B $1 2>/dev/null || echo "$1 bytes"
+}
+
+# stream between zfs send and zfs receive, limited to bandwidth_limit if pv is available
+function throttle() {
+    if [[ -n $throttle_rate ]]; then
+        pv -q -L $throttle_rate
+    else
+        cat
+    fi
 }
 
 # run a command on the source host
@@ -230,6 +243,7 @@ zfs_auto_snapshot_engine=internal
 zfs_auto_snapshot_label_match=strict
 target_rollback=$target_rollback
 target_rollback_max=$target_rollback_max
+bandwidth_limit=$bandwidth_limit
 checkzfs_disabled=$checkzfs_disabled
 checkzfs_local=$checkzfs_local
 checkzfs_prefix=$checkzfs_prefix
@@ -277,7 +291,7 @@ zsync_sshport=-p$sshport
 config_log="[INFO] Configuration:"
 for setting in target source sshport tag snapshot_filter min_keep zfs_auto_snapshot_keep zfs_auto_snapshot_label \
                zfs_auto_snapshot_engine zfs_auto_snapshot_label_match target_rollback target_rollback_max \
-               checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
+               bandwidth_limit checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
                checkzfs_spool checkzfs_spool_maxage; do
     config_log+="\n\t$setting=${!setting}"
 done
@@ -389,6 +403,19 @@ if [[ $zfs_auto_snapshot_label_match != "strict" ]] && [[ $zfs_auto_snapshot_lab
     log "[WARN] Unknown value zfs_auto_snapshot_label_match=$zfs_auto_snapshot_label_match, using legacy."
     zfs_auto_snapshot_label_match=legacy
 fi
+#### bandwidth limit of the transfer: pv between send and receive on this host, without pv no limit
+throttle_rate=
+if [[ -n $bandwidth_limit ]]; then
+    if ! [[ $bandwidth_limit =~ ^[0-9]+[kKmMgGtT]?$ ]]; then
+        log "[WARN] Invalid value bandwidth_limit=$bandwidth_limit (e.g. 10m), running without bandwidth limit."
+    elif ! which pv > /dev/null; then
+        log "[WARN] pv not found, running without bandwidth limit. Install pv to limit the bandwidth."
+    else
+        throttle_rate=$bandwidth_limit
+        log "[INFO] Bandwidth limit: $bandwidth_limit bytes per second (pv)"
+    fi
+fi
+
 if ! [[ $target_rollback_max =~ ^[0-9]+$ ]]; then
     log "[WARN] Invalid value target_rollback_max=$target_rollback_max, using 24."
     target_rollback_max=24
@@ -480,7 +507,7 @@ for name in "${syncvols[@]}"; do
             snap=$(remote "zfs list -H -t snapshot -o name -S creation $name | grep -E \"$snapshot_regex\" | tail -1")
             if [[ -n $snap ]]; then
                 log "[INFO] Start initial replication: $snap => $target/$(echo $name | cut -d'/' -f1)"
-                if remote "zfs send -w -p $debug $snap" | zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | cut -d'/' -f1); then
+                if remote "zfs send -w -p $debug $snap" | throttle | zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | cut -d'/' -f1); then
                     # receive mounts the new filesystem despite canmount=noauto: unmount it, so it does not show
                     # up as mounted filesystem (e.g. in checkmk) until the next reboot
                     if [[ $fstype == "filesystem" ]] && [[ $(zfs get -H -o value mounted $target/$name) == "yes" ]]; then
@@ -547,7 +574,7 @@ for name in "${syncvols[@]}"; do
                 fi
                 for snap in $(grep -E "$snapshot_regex" <<< "$source_snaps" | grep --after-context=200 $guid | grep -v $guid | cut -f1); do
                     log "[INFO] Replicating delta of $last => $snap to $target/$name"
-                    remote "zfs send -w $debug -i $last $snap" | zfs receive -x $tag -x com.sun:auto-snapshot -F $debug $target/$name \
+                    remote "zfs send -w $debug -i $last $snap" | throttle | zfs receive -x $tag -x com.sun:auto-snapshot -F $debug $target/$name \
                         || { rc=1; log "[ERROR] incremental replication to $target/$name failed."; }
                     last=$snap
                 done
