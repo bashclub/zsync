@@ -153,9 +153,16 @@ if [[ -z $source ]]; then
     exit 1
 fi
 zsync_sshport=-p$sshport
-connection="\n\tsource=$source\n\tsshport=$sshport"
-log "[INFO] Configuration:\n\ttarget=$target$connection\n\ttag=$tag\n\tsnapshot_filter=$snapshot_filter\n\tmin_keep=$min_keep\n\tzfs_auto_snapshot_keep=$zfs_auto_snapshot_keep\n\tzfs_auto_snapshot_label=$zfs_auto_snapshot_label\n\tzfs_auto_snapshot_engine=$zfs_auto_snapshot_engine\n\tcheckzfs_disabled=$checkzfs_disabled\n\tcheckzfs_local=$checkzfs_local\n\tcheckzfs_prefix=$checkzfs_prefix\n\tcheckzfs_max_age=$checkzfs_max_age\n\tcheckzfs_max_snapshot_count=$checkzfs_max_snapshot_count\n\tcheckzfs_spool=$checkzfs_spool\n\tcheckzfs_spool_maxage=$checkzfs_spool_maxage\n"
 
+config_log="[INFO] Configuration:"
+for setting in target source sshport tag snapshot_filter min_keep zfs_auto_snapshot_keep zfs_auto_snapshot_label \
+               zfs_auto_snapshot_engine checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age \
+               checkzfs_max_snapshot_count checkzfs_spool checkzfs_spool_maxage; do
+    config_log+="\n\t$setting=${!setting}"
+done
+log "$config_log\n"
+
+#### ssh connection: shared master connection, aes cipher if both hosts support it
 controlmaster=-oControlMaster=auto
 controlpath=-oControlPath=~/.ssh/bashclub-zsync-%r@%h-%p
 controlpersist=-oControlPersist=15
@@ -183,6 +190,9 @@ else
     sshcipher=-cchacha20-poly1305@openssh.com
 fi
 
+#### datasets to replicate: zfs user property $tag on the source
+# all     = this dataset (if set locally or inherited, not received)
+# subvols = only child datasets (the dataset with the local setting itself is skipped)
 include_list="[INFO] Included datasets:\n"
 exclude_list="[INFO] Excluded datasets:\n"
 checkzfs_headline="[INFO] checkzfs filter:"
@@ -215,6 +225,7 @@ log "$include_list"
 log "$exclude_list"
 log "$checkzfs_headline\ncheckzfs_filter=$checkzfs_filter\n"
 
+#### target dataset, never snapshotted by zfs-auto-snapshot on this host
 if ! zfs list $target > /dev/null 2>&1 ; then
     debug "$target does not exist. Creating..."
     zfs create -o canmount=noauto -o com.sun:auto-snapshot=false $target
@@ -225,6 +236,7 @@ else
     fi
 fi
 
+#### snapshots on the source before replication (zas: once for all datasets, internal: per dataset below)
 if [ $zfs_auto_snapshot_keep -gt 1 ]; then
     if [[ $zfs_auto_snapshot_engine == "zas" ]]; then
         debug "Running zfs-auto-snapshot"
@@ -238,6 +250,7 @@ if [ $zfs_auto_snapshot_keep -gt 1 ]; then
     fi
 fi
 
+#### replication per dataset
 for name in "${syncvols[@]}"; do
     log "[INFO] Replicate $name"
     fstype=$(remote zfs get -H -o value type $name)
@@ -258,6 +271,7 @@ for name in "${syncvols[@]}"; do
 
     if [[ $(remote "zfs list -H -t snapshot -o name -S creation $name 2>/dev/null | grep -E \"@.*($snapshot_filter)\" | wc -l | tr -d ' '") -gt 0 ]]; then
         IFS=$' '
+        # initial replication: create the path on the target, then send the oldest matching snapshot
         if ! zfs list -H $target/$name > /dev/null 2>&1 ; then
             debug "$target/$name does not exist"
             prefix=""
@@ -279,6 +293,7 @@ for name in "${syncvols[@]}"; do
             done
         fi
 
+        # incremental replication: from the newest target snapshot (matched by guid) to all newer source snapshots
         debug "$name - Start incremental replication"
         guid=$(zfs list -H -o guid -s creation -t snapshot $target/$name | tail -1)
         if [[ $guid != "" ]]; then
@@ -303,6 +318,7 @@ for name in "${syncvols[@]}"; do
             if [ $rc -eq 0 ]; then rc=1; fi
         fi
 
+        # delete target snapshots older than the oldest source snapshot of each interval, keep at least min_keep
         debug "$name - Start deletion of old snapshots"
         filter=$(echo -e $snapshot_filter | sed "s/|/\n/g")
         IFS=$'\n'
@@ -331,6 +347,7 @@ for name in "${syncvols[@]}"; do
     log "[INFO] Replication of $name finished."
 done
 
+#### monitoring: checkzfs output into the checkmk spool (local or on the source)
 if [ $checkzfs_disabled -eq 0 ]; then
     log "[INFO] Running checkzfs..."
     spoolfile=/tmp/${checkzfs_spool_maxage}_${checkzfs_prefix}
