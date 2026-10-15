@@ -13,7 +13,14 @@ source "$ZTEST_SCENARIO"
 snaps() {
   local v="SNAPS_${side}"
   [[ $side == source && -e $ZTEST_STATE/sent && -n ${SNAPS_source_post[$1]+x} ]] && v=SNAPS_source_post
-  local -n m=$v; printf '%s' "${m[$1]}" | sed '/^$/d'
+  local -n m=$v
+  # nach "zfs rollback -r <ds>@<snap>" fehlen auf dem Ziel alle neueren Snapshots
+  local rb="$ZTEST_STATE/rollback_${1//\//_}"
+  if [[ $side == target && -f $rb ]]; then
+    printf '%s' "${m[$1]}" | sed '/^$/d' | sed "/^$(sed 's#[/.]#\\&#g' "$rb") /q"
+  else
+    printf '%s' "${m[$1]}" | sed '/^$/d'
+  fi
 }
 datasets() { local v="DATASETS_${side}"; printf '%s\n' ${!v}; }
 
@@ -73,6 +80,7 @@ case $1 in
   receive)
     [[ -n $RECV_FAIL && "$*" == *$RECV_FAIL* ]] && { echo "cannot receive: simulated failure" >&2; exit 1; }
     ;;
+  rollback) echo "${@: -1}" > "$ZTEST_STATE/rollback_$(cut -d@ -f1 <<< "${@: -1}" | tr / _)" ;;
   create|set|destroy) ;;
 esac
 exit 0

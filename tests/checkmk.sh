@@ -109,6 +109,8 @@ ds pool/untagged orphan_unselected $((T - 90000)) "is not selected for replicati
 expect "verwaist seit 25 h: WARN" 1 "2 datasets only on the target: pool/gone \(does not exist on the source, since 1d 1h\), pool/untagged \(is not selected for replication anymore, since 1d 1h\)"
 reset; last 0 $((T - 1800)); history 3600 6; ds pool/kept orphan_kept $((T - 900000)) "does not exist on the source"; ds pool/m no_snapshots $T ""
 expect "quittiert und ohne Snapshots: OK mit Hinweis" 0 "1 kept replicas without source, 1 datasets without matching snapshots"
+reset; last 0 $((T - 1800)); history 3600 6; ds pool/x rolled_back $T "rolled back to daily-02, 2 snapshots destroyed"
+expect "Rollback im letzten Lauf: OK mit Hinweis" 0 "rolled back by the last run: pool/x \(rolled back to daily-02, 2 snapshots destroyed\)"
 reset; last 0 $((T - 1800)); history 3600 6; for x in a b c d e; do ds pool/$x broken $T "x"; done
 expect "lange Liste wird gekürzt" 2 "full replication needed for 5 datasets: pool/a \(x, since 0s\), pool/b \(x, since 0s\), pool/c \(x, since 0s\) \(\+2 more\)"
 

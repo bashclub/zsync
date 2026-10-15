@@ -33,6 +33,14 @@ zfs_auto_snapshot_label_match="strict"
 # empty = derived from the start times of the previous runs, 0 = no age check (e.g. removable disks)
 monitor_max_age=""
 
+# newest target snapshot does not exist on the source anymore (rollback or deleted on the source):
+# 1 = roll the target back to the newest common snapshot and continue from there,
+# 0 = no replication of this dataset until it is fixed manually (previous behavior)
+target_rollback=0
+
+# maximum number of target snapshots a rollback may destroy, otherwise only an error is logged
+target_rollback_max=24
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 

@@ -57,6 +57,14 @@ zfs_auto_snapshot_label_match="legacy"
 # empty = derived from the start times of the previous runs, 0 = no age check (e.g. removable disks)
 monitor_max_age=""
 
+# newest target snapshot does not exist on the source anymore (rollback or deleted on the source):
+# 1 = roll the target back to the newest common snapshot and continue from there,
+# 0 = no replication of this dataset until it is fixed manually (previous behavior)
+target_rollback=0
+
+# maximum number of target snapshots a rollback may destroy, otherwise only an error is logged
+target_rollback_max=24
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
@@ -220,6 +228,8 @@ zfs_auto_snapshot_keep=$zfs_auto_snapshot_keep
 zfs_auto_snapshot_label=$zfs_auto_snapshot_label
 zfs_auto_snapshot_engine=internal
 zfs_auto_snapshot_label_match=strict
+target_rollback=$target_rollback
+target_rollback_max=$target_rollback_max
 checkzfs_disabled=$checkzfs_disabled
 checkzfs_local=$checkzfs_local
 checkzfs_prefix=$checkzfs_prefix
@@ -266,8 +276,9 @@ zsync_sshport=-p$sshport
 
 config_log="[INFO] Configuration:"
 for setting in target source sshport tag snapshot_filter min_keep zfs_auto_snapshot_keep zfs_auto_snapshot_label \
-               zfs_auto_snapshot_engine zfs_auto_snapshot_label_match checkzfs_disabled checkzfs_local checkzfs_prefix \
-               checkzfs_max_age checkzfs_max_snapshot_count checkzfs_spool checkzfs_spool_maxage; do
+               zfs_auto_snapshot_engine zfs_auto_snapshot_label_match target_rollback target_rollback_max \
+               checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
+               checkzfs_spool checkzfs_spool_maxage; do
     config_log+="\n\t$setting=${!setting}"
 done
 log "$config_log\n"
@@ -378,6 +389,10 @@ if [[ $zfs_auto_snapshot_label_match != "strict" ]] && [[ $zfs_auto_snapshot_lab
     log "[WARN] Unknown value zfs_auto_snapshot_label_match=$zfs_auto_snapshot_label_match, using legacy."
     zfs_auto_snapshot_label_match=legacy
 fi
+if ! [[ $target_rollback_max =~ ^[0-9]+$ ]]; then
+    log "[WARN] Invalid value target_rollback_max=$target_rollback_max, using 24."
+    target_rollback_max=24
+fi
 if [[ $zfs_auto_snapshot_engine == "zas" ]]; then
     label_scheme="zfs-auto-snap_$zfs_auto_snapshot_label"
 else
@@ -403,7 +418,7 @@ function label_leftovers() {
 }
 
 # state of each dataset for the monitoring (written to <config>.datasets):
-# ok, failed, at_risk, diverged, broken, empty, no_snapshots, orphan_missing, orphan_unselected, orphan_kept
+# ok, rolled_back, failed, at_risk, diverged, broken, empty, no_snapshots, orphan_missing, orphan_unselected, orphan_kept
 declare -A ds_state ds_detail
 
 # fix for a target without a usable snapshot: keep the old replica under a new name, the next run replicates again
@@ -501,6 +516,30 @@ for name in "${syncvols[@]}"; do
         guid=$(zfs list -H -o guid -s creation -t snapshot $target/$name | tail -1)
         if [[ $guid != "" ]]; then
             last=$(grep $guid <<< "$source_snaps" | tail -1 | cut -f1)
+            # newest target snapshot missing on the source (rollback or deleted there): with target_rollback=1
+            # roll the target back to the newest common snapshot (at most target_rollback_max snapshots destroyed)
+            if [[ $last == "" ]] && [[ $target_rollback == "1" ]]; then
+                target_list=$(zfs list -H -o guid,name -S creation -t snapshot $target/$name)
+                common=$(awk -F'\t' 'NR == FNR { g[$2] = 1; next } ($1 in g) { print $2; exit }' \
+                    <(printf '%s\n' "$source_snaps") <(printf '%s\n' "$target_list"))
+                if [[ -n $common ]]; then
+                    discard=$(awk -F'\t' -v c="$common" '$2 == c { exit } { print $2 }' <<< "$target_list")
+                    count=$(grep -c . <<< "$discard")
+                    if [ $count -le $target_rollback_max ]; then
+                        log "[WARN] $name - the newest snapshot on $target/$name does not exist on the source anymore. Rolling back to $common (target_rollback=1), destroying $count snapshots:\n$(sed 's/^/\t/' <<< "$discard")"
+                        if zfs rollback -r $common; then
+                            ds_state[$name]=rolled_back
+                            ds_detail[$name]="rolled back to ${common#*@}, $count snapshots destroyed"
+                            guid=$(zfs list -H -o guid -s creation -t snapshot $target/$name | tail -1)
+                            last=$(grep $guid <<< "$source_snaps" | tail -1 | cut -f1)
+                        else
+                            rc=1; log "[ERROR] rollback of $target/$name to $common failed."
+                        fi
+                    else
+                        log "[ERROR] $name - a rollback to $common would destroy $count snapshots on the target, more than target_rollback_max=$target_rollback_max. Check and roll back manually:\n\tzfs rollback -r $common"
+                    fi
+                fi
+            fi
             if [[ $last != "" ]]; then
                 IFS=$'\n'
                 if [[ $fstype == "filesystem" ]] && [[ $(zfs get -H -o value canmount $target/$name) != "noauto" ]]; then
@@ -603,7 +642,7 @@ for name in "${syncvols[@]}"; do
         debug "$name - No snapshots found with filter $snapshot_filter"
         ds_state[$name]=no_snapshots
     fi
-    if [[ -z ${ds_state[$name]} ]]; then
+    if [[ -z ${ds_state[$name]} ]] || { [[ ${ds_state[$name]} == "rolled_back" ]] && [ $rc -ne 0 ]; }; then
         if [ $rc -ne 0 ]; then ds_state[$name]=failed; else ds_state[$name]=ok; fi
     fi
     if [ $rc -ne 0 ]; then ((datasets_failed++)); fi
