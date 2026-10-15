@@ -10,13 +10,14 @@ for sc in "$here"/scenarios/*.sh; do
   n=$(basename "$sc" .sh); w=$(mktemp -d /tmp/zsync-test.XXXX)
   cp "$script" "$w/bashclub-zsync"
   cp "$here"/stubs/{zfs,ssh,scp,remote-snapshot-manager,zfs-auto-snapshot} "$w/"
-  DEBUG=0; CHECKZFS=1; CONF=; source "$sc"
+  DEBUG=0; CHECKZFS=1; CONF=; unset SNAPS_source_post; declare -A SNAPS_source_post=(); source "$sc"
   [[ $CHECKZFS == 1 ]] && cp "$here/stubs/checkzfs" "$w/"
   [[ -n $CONF ]] && printf '%s\n' "$CONF" > "$w/zsync.conf"
   rm -rf /var/lib/check_mk_agent/spool /tmp/*_zsync
   : > "$out/$n.calls"
   args=(-c "$w/zsync.conf"); [[ $DEBUG == 1 ]] && args=(-d "${args[@]}")
-  ZTEST_LOG="$out/$n.calls" ZTEST_SCENARIO="$sc" bash "$w/bashclub-zsync" "${args[@]}" > "$out/$n.log" 2>&1
+  mkdir -p "$w/state"
+  ZTEST_STATE="$w/state" ZTEST_LOG="$out/$n.calls" ZTEST_SCENARIO="$sc" bash "$w/bashclub-zsync" "${args[@]}" > "$out/$n.log" 2>&1
   echo "exit=$?" >> "$out/$n.calls"
   sed -i -E "s#^[A-Z][a-z]{2} [ 0-9][0-9] [0-9:]{8} ##; s#$w#<dir>#g" "$out/$n.log" "$out/$n.calls"
   cp "$w/zsync.conf" "$out/$n.conf" 2>/dev/null
