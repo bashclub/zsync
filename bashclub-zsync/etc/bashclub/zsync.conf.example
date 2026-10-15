@@ -50,6 +50,11 @@ bandwidth_limit=""
 # 1 = on, 0 = off; existing configurations without this setting keep 0, new configurations get 1
 source_bookmark=1
 
+# hold the snapshots of a dataset on the source (zfs hold) while it is replicated, so the rotation or an admin cannot
+# delete the base or a snapshot that is still to be sent; released at the end of the dataset or of the run
+# 1 = on, 0 = off; existing configurations without this setting keep 0, new configurations get 1
+source_hold=1
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 

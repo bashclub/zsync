@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- setting `source_hold`: holds on the base and the snapshots still to be sent while a dataset is replicated, released at its end or at the end of the run (also on errors), holds of an aborted run are released by the next one; existing configurations without the setting keep `0`, new configurations get `1` (#6)
 - setting `source_bookmark`: a bookmark of the newest replicated snapshot on the source (per backup host and target), the replication continues from it if the rotation deleted the snapshot, also raw encrypted; existing configurations without the setting keep `0`, new configurations get `1` (#22)
 - local mode `source=local`: replication between pools of the same host without ssh; `remote-snapshot-manager` and checkzfs run locally, datasets in the target are never selected (#26)
 - setting `bandwidth_limit` (e.g. `10m`): limits the transfer with `pv` on the backup server, without `pv` the transfer runs without limit and a warning is logged; `pv` is suggested by the package (#9)

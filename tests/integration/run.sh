@@ -168,6 +168,30 @@ case_bookmark() {
   done
 }
 
+# Holds (#6): Basis und noch zu sendende Snapshots sind während der Replikation geschützt, danach freigegeben;
+# ein Hold aus einem abgebrochenen Lauf wird beim nächsten Lauf mit freigegeben
+case_hold() {
+  zfs create -o compression=off "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  write "$ZCI_POOL_SRC/data" 1; snap "$ZCI_POOL_SRC/data" 01
+  config hold "source_hold=1
+bandwidth_limit=1m"
+  zsync
+  local tag=zsync_$(hostname -s)_${ZCI_POOL_DST}_hold s
+  write "$ZCI_POOL_SRC/data" 6 big; snap "$ZCI_POOL_SRC/data" 02; write "$ZCI_POOL_SRC/data" 1 more; snap "$ZCI_POOL_SRC/data" 03
+  zsync & local run=$!
+  sleep 3
+  check "während des Deltas: Basis daily-01 nicht löschbar" not zfs destroy "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-01"
+  check "während des Deltas: daily-03 (noch zu senden) nicht löschbar" not zfs destroy "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-03"
+  wait $run; rc=$?
+  equal "Exit-Code" 0 "$rc"
+  equal "alle Snapshots repliziert" "zfs-auto-snap_daily-01 zfs-auto-snap_daily-02 zfs-auto-snap_daily-03" "$(snaps "$ZCI_POOL_DST/hold/$ZCI_POOL_SRC/data")"
+  equal "danach keine Holds mehr" "" "$(zfs list -H -o name -t snapshot "$ZCI_POOL_SRC/data" | xargs zfs holds -H | grep -F "$tag")"
+  # Hold aus einem abgebrochenen Lauf
+  zfs hold "$tag" "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-03"
+  zsync
+  equal "Hold eines abgebrochenen Laufs freigegeben" "" "$(zfs holds -H "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-03" | grep -F "$tag")"
+}
+
 # Snapshots verschiedener Labels in derselben Sekunde (#30): Erstreplikation beginnt beim ältesten,
 # das Löschen folgt dem ältesten Snapshot der Quelle
 case_same_second() {
@@ -193,7 +217,7 @@ case_checkmk() {
   check "Statusdatei des Laufs entfernt" test ! -e "$RUN_DIR/$id.state"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark same_second checkmk)
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold same_second checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
 rm -rf /var/log/zsync-ci

@@ -74,6 +74,11 @@ bandwidth_limit=""
 # 1 = on, 0 = off; keep 0 here for existing configs without this setting, new configs get 1
 source_bookmark=0
 
+# hold the snapshots of a dataset on the source (zfs hold) while it is replicated, so the rotation or an admin cannot
+# delete the base or a snapshot that is still to be sent; released at the end of the dataset or of the run
+# 1 = on, 0 = off; keep 0 here for existing configs without this setting, new configs get 1
+source_hold=0
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
@@ -144,6 +149,27 @@ function throttle() {
     fi
 }
 
+# hold snapshots on the source (source_hold=1) until release_snaps; bookmarks and empty names are skipped
+held_snaps=()
+function hold_snaps() {
+    local snaps=() s
+    if [[ $source_hold != "1" ]]; then return 0; fi
+    for s in "$@"; do
+        if [[ $s == *@* ]]; then snaps+=("$s"); fi
+    done
+    if [ ${#snaps[@]} -eq 0 ]; then return 0; fi
+    debug "Holding ${#snaps[@]} snapshots on the source ($hold_tag)"
+    # a hold left over by an aborted run already exists: that is fine, the snapshot is held
+    remote "for s in $(printf '%s ' "${snaps[@]}"); do zfs hold $hold_tag \$s 2>/dev/null; done; true"
+    held_snaps+=("${snaps[@]}")
+}
+function release_snaps() {
+    if [ ${#held_snaps[@]} -eq 0 ]; then return 0; fi
+    debug "Releasing ${#held_snaps[@]} snapshots on the source ($hold_tag)"
+    remote "for s in $(printf '%s ' "${held_snaps[@]}"); do zfs release $hold_tag \$s 2>/dev/null; done; true"
+    held_snaps=()
+}
+
 # run a command on the source host (source=local: on this host without ssh)
 function remote() {
     if [[ $source == "local" ]]; then
@@ -174,7 +200,7 @@ function status() {
 
 # at the end of the run (trap EXIT): result of this run, the last successful run is kept if this one failed
 function finish_status() {
-    local code=$? end=$(date +%s) key value
+    local code=${1:-$?} end=$(date +%s) key value
     local -A prev=()
     if [[ -f $status_lib.last ]]; then
         while IFS='=' read -r key value; do prev[$key]=$value; done < "$status_lib.last"
@@ -254,6 +280,7 @@ target_rollback=$target_rollback
 target_rollback_max=$target_rollback_max
 bandwidth_limit=$bandwidth_limit
 source_bookmark=1
+source_hold=1
 checkzfs_disabled=$checkzfs_disabled
 checkzfs_local=$checkzfs_local
 checkzfs_prefix=$checkzfs_prefix
@@ -276,9 +303,16 @@ if mkdir -p /run/bashclub-zsync /var/lib/bashclub-zsync 2>/dev/null; then
     pid_start=$(sed 's/.*) //' /proc/$$/stat 2>/dev/null | cut -d' ' -f20)
     { tail -n 10 "$status_lib.history" 2>/dev/null; echo $run_start; } > "$status_lib.history.tmp" \
         && mv -f "$status_lib.history.tmp" "$status_lib.history"
-    trap finish_status EXIT
     status start
 fi
+
+# end of the run (also on errors): release the holds on the source, write the result for the monitoring
+function on_exit() {
+    local code=$?
+    release_snaps
+    if [[ -n $status_file ]]; then finish_status $code; fi
+}
+trap on_exit EXIT
 
 # checked after loading the config, so checkzfs_disabled from the config is respected
 if [[ -n $checkzfs ]]; then
@@ -301,7 +335,7 @@ zsync_sshport=-p$sshport
 config_log="[INFO] Configuration:"
 for setting in target source sshport tag snapshot_filter min_keep zfs_auto_snapshot_keep zfs_auto_snapshot_label \
                zfs_auto_snapshot_engine zfs_auto_snapshot_label_match target_rollback target_rollback_max \
-               bandwidth_limit source_bookmark checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
+               bandwidth_limit source_bookmark source_hold checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
                checkzfs_spool checkzfs_spool_maxage; do
     config_log+="\n\t$setting=${!setting}"
 done
@@ -426,8 +460,9 @@ if [[ $zfs_auto_snapshot_label_match != "strict" ]] && [[ $zfs_auto_snapshot_lab
     log "[WARN] Unknown value zfs_auto_snapshot_label_match=$zfs_auto_snapshot_label_match, using legacy."
     zfs_auto_snapshot_label_match=legacy
 fi
-#### bookmark on the source per backup host and target, e.g. pool/data#zsync_backup1_backup_pve1
+#### bookmark and hold tag on the source per backup host and target, e.g. pool/data#zsync_backup1_backup_pve1
 bookmark_name="zsync_$(hostname -s)_$(tr '/' '_' <<< "$target")"
+hold_tag=$bookmark_name
 
 #### bandwidth limit of the transfer: pv between send and receive on this host, without pv no limit
 throttle_rate=
@@ -535,6 +570,7 @@ for name in "${syncvols[@]}"; do
             status send "$name"
             IFS=$'\n'
             snap=$(remote "zfs list -H -t snapshot -o name -S createtxg $name | grep -E \"$snapshot_regex\" | tail -1")
+            hold_snaps "$snap"
             if [[ -n $snap ]]; then
                 log "[INFO] Start initial replication: $snap => $target/$(echo $name | cut -d'/' -f1)"
                 if remote "zfs send -w -p $debug $snap" | throttle | zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | cut -d'/' -f1); then
@@ -618,6 +654,8 @@ for name in "${syncvols[@]}"; do
                 if [[ -z $delta_snaps ]]; then
                     delta_snaps=$(grep -E "$snapshot_regex" <<< "$source_snaps" | grep --after-context=200 $guid | grep -v $guid | cut -f1)
                 fi
+                # base and all snapshots still to be sent stay on the source until this dataset is done
+                hold_snaps "$last" $delta_snaps
                 for snap in $delta_snaps; do
                     log "[INFO] Replicating delta of $last => $snap to $target/$name"
                     remote "zfs send -w $debug -i $last $snap" | throttle | zfs receive -x $tag -x com.sun:auto-snapshot -F $debug $target/$name \
@@ -677,6 +715,8 @@ for name in "${syncvols[@]}"; do
             ds_detail[$name]="no snapshot on $target/$name"
             log "[ERROR] $name - to keep the empty replica rename it, the next run replicates again:\n\t$(rename_hint $name)"
         fi
+
+        release_snaps
 
         # delete target snapshots older than the oldest source snapshot of each interval, keep at least min_keep
         debug "$name - Start deletion of old snapshots"

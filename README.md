@@ -168,6 +168,11 @@ bandwidth_limit=""
 # 1 = on, 0 = off; existing configurations without this setting keep 0, new configurations get 1
 source_bookmark=1
 
+# hold the snapshots of a dataset on the source (zfs hold) while it is replicated, so the rotation or an admin cannot
+# delete the base or a snapshot that is still to be sent; released at the end of the dataset or of the run
+# 1 = on, 0 = off; existing configurations without this setting keep 0, new configurations get 1
+source_hold=1
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
@@ -208,6 +213,13 @@ To replicate datasets of the same host, e.g. from `rpool` to a backup pool, set 
 
 ### Bookmarks on the source
 If the replication stops longer than the source keeps its snapshots, the rotation deletes the snapshot the replica ends with, and only a full replication would help. With `source_bookmark=1` (default for new configurations) `bashclub-zsync` keeps a ZFS bookmark of the newest replicated snapshot on the source, e.g. `rpool/data#zsync_backup1_backup_pve1` (backup host and target in the name, so several backup servers do not interfere). A bookmark takes no space and holds no data, the rotation can still delete the snapshot. The next run then continues from the bookmark (also raw encrypted). A rollback on the source destroys newer bookmarks (`zfs rollback -r`), so a replica is never appended to a different history; see `target_rollback` for this case. Bookmarks of datasets that are no longer replicated stay on the source (`zfs list -t bookmark`).
+
+### Holds on the source
+ZFS itself only protects the snapshot that is being sent. With `source_hold=1` (default for new configurations) `bashclub-zsync` puts a hold (`zfs hold`, tag per backup host and target like the bookmark) on the base and on all snapshots that are still to be sent, before the transfer of a dataset starts, and releases them when the dataset is done or the run ends. During that time the rotation (`zfs-auto-snapshot`, `remote-snapshot-manager`) or an admin cannot delete them (`dataset is busy`), they are deleted with the next rotation. A hold left over by a killed run is released by the next run of the same configuration; to release it manually:
+~~~
+zfs holds -r <pool> | grep zsync_
+zfs release <tag> <snapshot>
+~~~
 
 ### Bandwidth limit
 `bandwidth_limit` limits the transfer to the given bytes per second, e.g. `bandwidth_limit=10m` (10 MiB/s, about 84 Mbit/s) for an offsite backup over a shared line. The limit is applied on the backup server with `pv` between `zfs send` and `zfs receive`; install it with `apt install pv`. Without `pv` the transfer runs without limit and the log shows a warning.
