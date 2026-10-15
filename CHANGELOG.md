@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- the `refquota` of a filesystem on the target is raised to the value of the source (or removed, if the source has none) before each incremental replication, so a refquota raised on the source no longer makes the replication fail; it is never lowered, `quota` is not changed (#4)
 - Checkmk local check `bashclub_zsync`, linked into the agent if it is installed (also later, via dpkg trigger): one service per configuration, detects a too old last successful run (interval learned from the previous runs, learning phase), failed and aborted runs, phases that take too long, transfers without progress, processes blocked in state D and skipped runs; opt-out with `/etc/bashclub/zsync-checkmk.disabled` (#15)
 - run status for the monitoring in `/run/bashclub-zsync` and `/var/lib/bashclub-zsync` (#15)
 - setting `monitor_max_age` for the age check of the monitoring (#15)

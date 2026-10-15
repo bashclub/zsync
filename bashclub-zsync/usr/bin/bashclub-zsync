@@ -113,6 +113,11 @@ function debug() {
     if [[ $debug == "-v" ]]; then log "[DEBUG] $1"; fi
 }
 
+# bytes in readable form (10737418240 -> 10GiB)
+function size() {
+    numfmt --to=iec-i --suffix=B $1 2>/dev/null || echo "$1 bytes"
+}
+
 # run a command on the source host
 function remote() {
     ssh $controlmaster $controlpath $controlpersist $sshcipher $zsync_sshport $source "$@"
@@ -328,8 +333,12 @@ for zvol in $(remote "zfs get -H -o name,value,source -t filesystem,volume $tag"
     fi
 done
 checkzfs_filter=${checkzfs_filter::-1}
-declare -A fstypes
-while IFS=$'\t' read -r dataset fstype; do fstypes[$dataset]=$fstype; done <<< "$(remote "zfs list -H -o name,type -t filesystem,volume")"
+# type and refquota (bytes, 0 = none, "-" for volumes) of all datasets on the source
+declare -A fstypes refquotas
+while IFS=$'\t' read -r dataset fstype refquota; do
+    fstypes[$dataset]=$fstype
+    refquotas[$dataset]=$refquota
+done <<< "$(remote "zfs list -Hp -o name,type,refquota -t filesystem,volume")"
 log "$include_list"
 log "$exclude_list"
 log "$checkzfs_headline\ncheckzfs_filter=$checkzfs_filter\n"
@@ -460,6 +469,21 @@ for name in "${syncvols[@]}"; do
             fi
             # the initial replication may take long, query the source snapshots again
             source_snaps=$(remote "zfs list -H -o name,guid -s creation -t snapshot $name 2>/dev/null")
+        fi
+
+        # refquota: received only with the initial replication (send -p), a refquota raised on the source later
+        # makes the receive fail with "quota exceeded". Only raise or remove it on the target, never lower it.
+        if [[ $fstype == "filesystem" ]] && [[ ${refquotas[$name]} =~ ^[0-9]+$ ]]; then
+            target_refquota=$(zfs get -Hp -o value refquota $target/$name 2>/dev/null)
+            if [[ $target_refquota =~ ^[0-9]+$ ]] && [ $target_refquota -gt 0 ]; then
+                if [ ${refquotas[$name]} -eq 0 ]; then
+                    log "[INFO] $name - removing refquota $(size $target_refquota) of $target/$name (no refquota on the source)"
+                    zfs set refquota=none $target/$name || { rc=1; log "[ERROR] setting refquota of $target/$name failed."; }
+                elif [ ${refquotas[$name]} -gt $target_refquota ]; then
+                    log "[INFO] $name - raising refquota of $target/$name from $(size $target_refquota) to $(size ${refquotas[$name]}) (refquota of the source)"
+                    zfs set refquota=${refquotas[$name]} $target/$name || { rc=1; log "[ERROR] setting refquota of $target/$name failed."; }
+                fi
+            fi
         fi
 
         # incremental replication: from the newest target snapshot (matched by guid) to all newer source snapshots
