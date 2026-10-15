@@ -5,6 +5,7 @@ side=${ZSIDE:-target}
 # receive erst nach dem Ende des Streams protokollieren, damit die Reihenfolge in Pipes eindeutig ist
 [[ $1 == receive ]] && cat > /dev/null
 echo "$side: zfs $*" >> "$ZTEST_LOG"
+declare -A SNAPS_source_post=() TYPES=()
 source "$ZTEST_SCENARIO"
 
 # Snapshots einer Seite: "<snapshot> <guid>" je Zeile, älteste zuerst.
