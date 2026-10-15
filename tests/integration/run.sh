@@ -210,6 +210,41 @@ case_deleted_during() {
   check "Hinweis im Log" grep -q 'was deleted on the source during the replication' <<< "$(last_run_log)"
 }
 
+# Resume (#8): abgebrochene Erstreplikation und abgebrochenes Delta werden im nächsten Lauf fortgesetzt statt neu
+# übertragen; ein Teilstand, dessen Snapshot auf der Quelle gelöscht wurde, wird verworfen
+interrupt_send() { sleep "$1"; pkill -f '^zfs send'; }
+case_resume() {
+  zfs create -o compression=off "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  write "$ZCI_POOL_SRC/data" 12; snap "$ZCI_POOL_SRC/data" 01
+  config resume "transfer_resume=1
+bandwidth_limit=2m"
+  local start
+  # Erstreplikation nach 3 s abbrechen (12 MiB bei 2 MiB/s dauern 6 s)
+  zsync & local run=$!; interrupt_send 3; wait $run
+  check "abgebrochene Erstreplikation hinterlässt Token" test "$(prop "$ZCI_POOL_DST/resume/$ZCI_POOL_SRC/data" receive_resume_token)" != "-"
+  start=$SECONDS; zsync
+  equal "Erstreplikation fortgesetzt: Exit-Code" 0 "$rc"
+  check "Erstreplikation fortgesetzt" grep -q 'resuming the interrupted transfer' <<< "$(last_run_log)"
+  check "nur der Rest übertragen ($((SECONDS - start)) s statt 6 s)" test $((SECONDS - start)) -lt 6
+  equal "Replikat vollständig" "zfs-auto-snap_daily-01" "$(snaps "$ZCI_POOL_DST/resume/$ZCI_POOL_SRC/data")"
+  equal "Replikat nicht eingehängt" no "$(prop "$ZCI_POOL_DST/resume/$ZCI_POOL_SRC/data" mounted)"
+  # Delta abbrechen und fortsetzen
+  write "$ZCI_POOL_SRC/data" 12 more; snap "$ZCI_POOL_SRC/data" 02
+  zsync & run=$!; interrupt_send 3; wait $run
+  start=$SECONDS; zsync
+  equal "Delta fortgesetzt: Exit-Code" 0 "$rc"
+  check "nur der Rest des Deltas übertragen ($((SECONDS - start)) s statt 6 s)" test $((SECONDS - start)) -lt 6
+  equal "Delta vollständig" "zfs-auto-snap_daily-01 zfs-auto-snap_daily-02" "$(snaps "$ZCI_POOL_DST/resume/$ZCI_POOL_SRC/data")"
+  # Delta abbrechen, Snapshot auf der Quelle löschen: Teilstand verwerfen, mit dem nächsten Snapshot weiter
+  write "$ZCI_POOL_SRC/data" 12 third; snap "$ZCI_POOL_SRC/data" 03
+  zsync & run=$!; interrupt_send 3; wait $run
+  write "$ZCI_POOL_SRC/data" 1 fourth; snap "$ZCI_POOL_SRC/data" 04; zfs destroy "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-03"
+  zsync
+  equal "Teilstand verworfen: Exit-Code" 0 "$rc"
+  check "Hinweis zum verworfenen Teilstand" grep -q 'discarding the partial state' <<< "$(last_run_log)"
+  equal "weiter mit daily-04" "zfs-auto-snap_daily-01 zfs-auto-snap_daily-02 zfs-auto-snap_daily-04" "$(snaps "$ZCI_POOL_DST/resume/$ZCI_POOL_SRC/data")"
+}
+
 # Snapshots verschiedener Labels in derselben Sekunde (#30): Erstreplikation beginnt beim ältesten,
 # das Löschen folgt dem ältesten Snapshot der Quelle
 case_same_second() {
@@ -235,7 +270,7 @@ case_checkmk() {
   check "Statusdatei des Laufs entfernt" test ! -e "$RUN_DIR/$id.state"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during same_second checkmk)
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume same_second checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
 rm -rf /var/log/zsync-ci

@@ -79,6 +79,11 @@ source_bookmark=0
 # 1 = on, 0 = off; keep 0 here for existing configs without this setting, new configs get 1
 source_hold=0
 
+# resumable transfers (zfs receive -s): a transfer interrupted by a network or power failure continues where it
+# stopped in the next run instead of starting again; 1 = on, 0 = off
+# keep 0 here for existing configs without this setting, new configs get 1
+transfer_resume=0
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
@@ -281,6 +286,7 @@ target_rollback_max=$target_rollback_max
 bandwidth_limit=$bandwidth_limit
 source_bookmark=1
 source_hold=1
+transfer_resume=1
 checkzfs_disabled=$checkzfs_disabled
 checkzfs_local=$checkzfs_local
 checkzfs_prefix=$checkzfs_prefix
@@ -335,7 +341,7 @@ zsync_sshport=-p$sshport
 config_log="[INFO] Configuration:"
 for setting in target source sshport tag snapshot_filter min_keep zfs_auto_snapshot_keep zfs_auto_snapshot_label \
                zfs_auto_snapshot_engine zfs_auto_snapshot_label_match target_rollback target_rollback_max \
-               bandwidth_limit source_bookmark source_hold checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
+               bandwidth_limit source_bookmark source_hold transfer_resume checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
                checkzfs_spool checkzfs_spool_maxage; do
     config_log+="\n\t$setting=${!setting}"
 done
@@ -464,6 +470,10 @@ fi
 bookmark_name="zsync_$(hostname -s)_$(tr '/' '_' <<< "$target")"
 hold_tag=$bookmark_name
 
+#### resumable transfers: receive -s keeps the partial state of an interrupted transfer (resume token)
+resumable=
+if [[ $transfer_resume == "1" ]]; then resumable=-s; fi
+
 #### bandwidth limit of the transfer: pv between send and receive on this host, without pv no limit
 throttle_rate=
 if [[ -n $bandwidth_limit ]]; then
@@ -552,6 +562,36 @@ for name in "${syncvols[@]}"; do
         fi
     fi
     if cut -f1 <<< "$source_snaps" | grep -qE "$snapshot_regex"; then
+        # transfer of an earlier run interrupted (receive -s): continue it, otherwise discard the partial state,
+        # it would block every further receive (an interrupted initial replication is removed completely)
+        token=$(zfs get -H -o value receive_resume_token $target/$name 2>/dev/null)
+        if [[ -n $token ]] && [[ $token != "-" ]]; then
+            status send "$name"
+            resumed=0
+            if [[ $transfer_resume == "1" ]]; then
+                log "[INFO] $name - resuming the interrupted transfer to $target/$name"
+                # an interrupted initial replication has no snapshot yet
+                if [[ -z $(zfs list -H -o name -t snapshot $target/$name 2>/dev/null) ]]; then
+                    recv_opts=($mp $cm -x $tag -x com.sun:auto-snapshot)
+                else
+                    recv_opts=(-x $tag -x com.sun:auto-snapshot -F)
+                fi
+                if remote "zfs send $debug -t $token" | throttle | zfs receive -s "${recv_opts[@]}" $debug $target/$name; then
+                    resumed=1
+                    if [[ $fstype == "filesystem" ]] && [[ $(zfs get -H -o value mounted $target/$name) == "yes" ]]; then
+                        zfs unmount $target/$name
+                    fi
+                else
+                    log "[WARN] $name - resuming the transfer failed (e.g. the snapshot was deleted on the source), discarding the partial state."
+                fi
+            else
+                log "[WARN] $name - $target/$name contains the partial state of an interrupted transfer, discarding it (transfer_resume=0)."
+            fi
+            if [ $resumed -eq 0 ]; then
+                zfs receive -A $target/$name || { rc=1; log "[ERROR] discarding the partial state of $target/$name failed."; }
+            fi
+        fi
+
         IFS=$' '
         # initial replication: create the path on the target, then send the oldest matching snapshot
         if ! zfs list -H $target/$name > /dev/null 2>&1 ; then
@@ -573,7 +613,7 @@ for name in "${syncvols[@]}"; do
             hold_snaps "$snap"
             if [[ -n $snap ]]; then
                 log "[INFO] Start initial replication: $snap => $target/$(echo $name | cut -d'/' -f1)"
-                if remote "zfs send -w -p $debug $snap" | throttle | zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | cut -d'/' -f1); then
+                if remote "zfs send -w -p $debug $snap" | throttle | zfs receive $resumable $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | cut -d'/' -f1); then
                     # receive mounts the new filesystem despite canmount=noauto: unmount it, so it does not show
                     # up as mounted filesystem (e.g. in checkmk) until the next reboot
                     if [[ $fstype == "filesystem" ]] && [[ $(zfs get -H -o value mounted $target/$name) == "yes" ]]; then
@@ -658,7 +698,7 @@ for name in "${syncvols[@]}"; do
                 hold_snaps "$last" $delta_snaps
                 for snap in $delta_snaps; do
                     log "[INFO] Replicating delta of $last => $snap to $target/$name"
-                    if ! remote "zfs send -w $debug -i $last $snap" | throttle | zfs receive -x $tag -x com.sun:auto-snapshot -F $debug $target/$name; then
+                    if ! remote "zfs send -w $debug -i $last $snap" | throttle | zfs receive $resumable -x $tag -x com.sun:auto-snapshot -F $debug $target/$name; then
                         # deleted on the source after the snapshots were listed (rotation, no hold): skip it, the next
                         # delta starts at the last received snapshot (an incremental stream can span deleted snapshots)
                         if ! remote "zfs list -H -o name -t snapshot $snap" > /dev/null 2>&1; then
