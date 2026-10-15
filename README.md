@@ -151,6 +151,14 @@ zfs_auto_snapshot_label_match="strict"
 # empty = derived from the start times of the previous runs, 0 = no age check (e.g. removable disks)
 monitor_max_age=""
 
+# newest target snapshot does not exist on the source anymore (rollback or deleted on the source):
+# 1 = roll the target back to the newest common snapshot and continue from there,
+# 0 = no replication of this dataset until it is fixed manually (previous behavior)
+target_rollback=0
+
+# maximum number of target snapshots a rollback may destroy, otherwise only an error is logged
+target_rollback_max=24
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
@@ -185,6 +193,9 @@ If the list is correct, delete them:
 conf=/etc/bashclub/zsync.conf
 ( . "$conf"; ssh -p "$sshport" "$source" "zfs list -H -t snapshot -o name | grep '@zfs-auto-snap_${zfs_auto_snapshot_label}-' | xargs -r -n1 zfs destroy -v" )
 ~~~
+
+### Rollback on the source
+If the newest snapshot of a replica does not exist on the source anymore (rolled back or deleted on the source), the dataset cannot be appended. By default it is not replicated anymore until it is fixed manually; the log and the Checkmk check name the newest common snapshot. With `target_rollback=1` `bashclub-zsync` rolls the replica back to the newest common snapshot (`zfs rollback -r`, the newer snapshots of the replica are destroyed) and continues from there, if it destroys at most `target_rollback_max` snapshots (default 24). Otherwise it logs the command to roll back manually. Rollbacks are listed in the log and as a hint in the Checkmk check.
 
 ### refquota
 The `refquota` of a filesystem is replicated with the initial replication only. If it is raised on the source later, the target keeps the old value and the replication fails with "quota exceeded" as soon as the data exceeds it. Before each incremental replication `bashclub-zsync` therefore raises the `refquota` on the target to the value of the source, or removes it if the source has none. It never lowers it, and `quota` is not changed.

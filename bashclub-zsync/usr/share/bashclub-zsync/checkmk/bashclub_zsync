@@ -214,7 +214,7 @@ for id in $ids; do
 
     #### state per dataset (written by the last run)
     declare -a ds_crit=() ds_risk=() ds_div=() ds_orphan=() ds_failed=()
-    kept=0; nosnap=0; orphan_new=0
+    kept=0; nosnap=0; orphan_new=0; rolled_back=()
     if [[ -f $LIB_DIR/$id.datasets ]]; then
         while IFS=$'\t' read -r ds dstate since detail; do
             age_text=$(duration $((NOW - ${since:-NOW})))
@@ -230,6 +230,7 @@ for id in $ids; do
                         ((orphan_new++))
                     fi ;;
                 orphan_kept) ((kept++)) ;;
+                rolled_back) rolled_back+=("$ds ($detail)") ;;
                 no_snapshots) ((nosnap++)) ;;
             esac
         done < "$LIB_DIR/$id.datasets"
@@ -249,6 +250,7 @@ for id in $ids; do
     if [ ${#ds_failed[@]} -gt 0 ]; then state_text+=("failed: $(shortlist "${ds_failed[@]}")"); fi
     if [ $orphan_new -gt 0 ]; then state_text+=("$orphan_new new datasets only on the target"); fi
     if [ $kept -gt 0 ]; then state_text+=("$kept kept replicas without source"); fi
+    if [ ${#rolled_back[@]} -gt 0 ]; then state_text+=("rolled back by the last run: $(shortlist "${rolled_back[@]}")"); fi
     if [ $nosnap -gt 0 ]; then state_text+=("$nosnap datasets without matching snapshots"); fi
 
     #### age of the last successful run
