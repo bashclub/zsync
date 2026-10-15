@@ -20,3 +20,5 @@ diff -r /tmp/zsync-old /tmp/zsync-new
 
 `checkmk.sh` testet den Checkmk-Check mit Status-Dateien und einem nachgebauten `/proc` (Lernphase, Alter,
 Hänger, D-Zustand, Abbruch, übersprungene Läufe): `tests/checkmk.sh` (ohne root, ohne ZFS).
+
+Echte ZFS-Tests auf einer Test-VM: [integration/README.md](integration/README.md).
