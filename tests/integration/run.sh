@@ -141,6 +141,22 @@ case_bandwidth_lock() {
   check "Replikat vollständig" grep -q 'zfs-auto-snap_daily-01' <<< "$(snaps "$ZCI_POOL_DST/bandwidth_lock/$ZCI_POOL_SRC/data")"
 }
 
+# Snapshots verschiedener Labels in derselben Sekunde (#30): Erstreplikation beginnt beim ältesten,
+# das Löschen folgt dem ältesten Snapshot der Quelle
+case_same_second() {
+  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; write "$ZCI_POOL_SRC/data" 1
+  snaps_same_second "$ZCI_POOL_SRC/data" daily-01 weekly-01
+  equal "zwei Labels in derselben Sekunde" 1 "$(seconds_of "$ZCI_POOL_SRC/data")"
+  config same_second 'snapshot_filter="daily|weekly"'
+  zsync
+  equal "Exit-Code" 0 "$rc"
+  equal "Erstreplikation beginnt beim ältesten" "zfs-auto-snap_daily-01 zfs-auto-snap_weekly-01" "$(snaps "$ZCI_POOL_DST/same_second/$ZCI_POOL_SRC/data")"
+  snap "$ZCI_POOL_SRC/data" 02; zfs destroy "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-01"
+  zsync
+  equal "Exit-Code nach Rotation" 0 "$rc"
+  equal "Ziel rotiert wie die Quelle" "zfs-auto-snap_weekly-01 zfs-auto-snap_daily-02" "$(snaps "$ZCI_POOL_DST/same_second/$ZCI_POOL_SRC/data")"
+}
+
 # Checkmk-Check gegen einen echten erfolgreichen Lauf
 case_checkmk() {
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; snap "$ZCI_POOL_SRC/data" 01
@@ -150,7 +166,7 @@ case_checkmk() {
   check "Statusdatei des Laufs entfernt" test ! -e "$RUN_DIR/$id.state"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock checkmk)
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock same_second checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
 rm -rf /var/log/zsync-ci
