@@ -3,6 +3,9 @@
 ## [Unreleased]
 
 ### Added
+- setting `zfs_auto_snapshot_label_match`: with `strict` only snapshots in the name scheme of the snapshot engine belong to the label, leftovers of another engine or label are neither replicated nor used for deletion; existing configurations without the setting keep the previous behavior (`legacy`), new configurations get `strict` (#3)
+- warning for snapshots that contain the label but do not match the name scheme of the snapshot engine, on the source and on the target (#3)
+- error (exit code 1) if the oldest source snapshot of an interval does not exist on the target, so no target snapshots of this interval would be deleted; previously nothing was deleted silently and the target filled up (#3)
 - a log file in a directory that no logrotate config mentions (e.g. on TrueNAS SCALE) is rotated by bashclub-zsync itself at 10 MiB, 4 compressed old logs are kept
 
 ### Fixed

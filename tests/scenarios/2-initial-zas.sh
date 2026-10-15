@@ -22,7 +22,7 @@ declare -A TYPES=()
 DATASETS_source="tank tank/a tank/b"
 DATASETS_target="backup backup/tank backup/tank/b"
 declare -A SNAPS_source=(
-  [tank/a]=$'tank/a@zfs-auto-snap_backup-01 401\ntank/a@zfs-auto-snap_daily-01 402'
+  [tank/a]=$'tank/a@zfs-auto-snap_backup-2026-10-01-1804 401\ntank/a@zfs-auto-snap_daily-01 402'
   [tank/b]=$'tank/b@zfs-auto-snap_daily-05 505\ntank/b@zfs-auto-snap_daily-06 506'
 )
 declare -A SNAPS_target=(

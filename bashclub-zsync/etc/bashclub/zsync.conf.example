@@ -25,6 +25,10 @@ zfs_auto_snapshot_label="backup"
 # select the zfs auto snapshot engine (zfs-auto-snapshot = "zas" or remote-snapshot-manager = "internal")
 zfs_auto_snapshot_engine="internal"
 
+# snapshots of the label: "strict" = only the name scheme of the snapshot engine
+# (internal: <label>-YYYY-MM-DD-HHMM, zas: zfs-auto-snap_<label>-YYYY-MM-DD-HHMM), "legacy" = any name containing the label
+zfs_auto_snapshot_label_match="strict"
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 

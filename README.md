@@ -142,6 +142,11 @@ zfs_auto_snapshot_label="backup"
 # new configurations use "internal"; existing configurations without this setting keep using "zas"
 zfs_auto_snapshot_engine="internal"
 
+# snapshots of the label: "strict" = only the name scheme of the snapshot engine
+# (internal: <label>-YYYY-MM-DD-HHMM, zas: zfs-auto-snap_<label>-YYYY-MM-DD-HHMM), "legacy" = any name containing the label
+# new configurations use "strict"; existing configurations without this setting keep using "legacy"
+zfs_auto_snapshot_label_match="strict"
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
@@ -159,6 +164,22 @@ checkzfs_spool=0
 
 # set maxmimum age of checkzfs data in seconds (hourly = 3900, daily = 87000)
 checkzfs_spool_maxage=87000
+~~~
+
+### Snapshot label and snapshot engine
+- A label must not contain the label of another configuration on the same source (e.g. `zsync` and `zsync-miyagi`): in `legacy` mode each configuration would treat the snapshots of the other one as its own.
+- With `zfs_auto_snapshot_label_match="strict"` only snapshots in the name scheme of the configured engine belong to the label. Snapshots of the label in another scheme, e.g. `zfs-auto-snap_<label>-…` left over after switching from `zas` to `internal`, are neither replicated nor used to decide which target snapshots are deleted. In `legacy` mode such a snapshot can be the oldest snapshot of the label on the source; if it does not exist on the target, no snapshots of the label are deleted on the target anymore.
+- `bashclub-zsync` lists such snapshots as `[WARN]` (source and target) and reports an `[ERROR]` if the oldest source snapshot of an interval is missing on the target.
+
+To switch an existing configuration from `zas` to `internal`, set both values and remove the remaining `zfs-auto-snapshot` snapshots of the label on the source. The commands read source, port and label from the configuration; the first one only shows what would be deleted:
+~~~
+conf=/etc/bashclub/zsync.conf
+( . "$conf"; ssh -p "$sshport" "$source" "zfs list -H -t snapshot -o name | grep '@zfs-auto-snap_${zfs_auto_snapshot_label}-' | xargs -r -n1 zfs destroy -nv" )
+~~~
+If the list is correct, delete them:
+~~~
+conf=/etc/bashclub/zsync.conf
+( . "$conf"; ssh -p "$sshport" "$source" "zfs list -H -t snapshot -o name | grep '@zfs-auto-snap_${zfs_auto_snapshot_label}-' | xargs -r -n1 zfs destroy -v" )
 ~~~
 
 ### Define a cronjob
