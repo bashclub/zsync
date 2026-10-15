@@ -658,8 +658,15 @@ for name in "${syncvols[@]}"; do
                 hold_snaps "$last" $delta_snaps
                 for snap in $delta_snaps; do
                     log "[INFO] Replicating delta of $last => $snap to $target/$name"
-                    remote "zfs send -w $debug -i $last $snap" | throttle | zfs receive -x $tag -x com.sun:auto-snapshot -F $debug $target/$name \
-                        || { rc=1; log "[ERROR] incremental replication to $target/$name failed."; }
+                    if ! remote "zfs send -w $debug -i $last $snap" | throttle | zfs receive -x $tag -x com.sun:auto-snapshot -F $debug $target/$name; then
+                        # deleted on the source after the snapshots were listed (rotation, no hold): skip it, the next
+                        # delta starts at the last received snapshot (an incremental stream can span deleted snapshots)
+                        if ! remote "zfs list -H -o name -t snapshot $snap" > /dev/null 2>&1; then
+                            log "[WARN] $name - $snap was deleted on the source during the replication, continuing with the next snapshot."
+                            continue
+                        fi
+                        rc=1; log "[ERROR] incremental replication to $target/$name failed."
+                    fi
                     last=$snap
                 done
                 # bookmark of the newest replicated snapshot for the next run (only replaced if it points elsewhere)

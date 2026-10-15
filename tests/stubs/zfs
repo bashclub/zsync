@@ -47,6 +47,10 @@ case $1 in
       while read -r n g; do [[ -n $n ]] && printf '%s\t%s\t%s\n' "$n" "$g" "$g"; done <<< "${!bm}"
       exit 0
     fi
+    # einzelner Snapshot (dataset@name): existiert er?
+    if [[ $ds == *@* ]]; then
+      snaps "${ds%@*}" | awk -v s="$ds" '$1 == s { print $1; f = 1 } END { exit !f }'; exit
+    fi
     if [[ $type != snapshot && -z $ds ]]; then
       # Spalten name, type, refquota (Bytes, 0 = none, "-" für Volumes)
       for d in $(datasets); do

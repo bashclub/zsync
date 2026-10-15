@@ -77,6 +77,7 @@ zsync() {
   echo "===== $(date +%T) bashclub-zsync -c $conf $*" >> "$log"
   bashclub-zsync -c "$conf" "$@" >> "$log" 2>&1
   rc=$?
+  return $rc
 }
 last_run_log() { awk '/^===== /{ buf = "" } { buf = buf $0 "\n" } END { printf "%s", buf }' "$log"; }
 
