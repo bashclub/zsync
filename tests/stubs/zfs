@@ -5,7 +5,7 @@ side=${ZSIDE:-target}
 # receive erst nach dem Ende des Streams protokollieren, damit die Reihenfolge in Pipes eindeutig ist
 [[ $1 == receive ]] && cat > /dev/null
 echo "$side: zfs $*" >> "$ZTEST_LOG"
-declare -A SNAPS_source_post=() TYPES=() REFQUOTA_source=() REFQUOTA_target=()
+declare -A SNAPS_source_post=() TYPES=() REFQUOTA_source=() REFQUOTA_target=() CREATION_source=() ORPHAN_KEEP=()
 source "$ZTEST_SCENARIO"
 
 # Snapshots einer Seite: "<snapshot> <guid>" je Zeile, älteste zuerst.
@@ -19,11 +19,21 @@ datasets() { local v="DATASETS_${side}"; printf '%s\n' ${!v}; }
 
 case $1 in
   list)
-    shift; cols=name; sort=; type=; ds=
+    shift; cols=name; sort=; type=; ds=; rec=
     while (( $# )); do
-      case $1 in -H|-Hp|-p) ;; -o) cols=$2; shift ;; -s) sort=asc; shift ;; -S) sort=desc; shift ;; -t) type=$2; shift ;; *) ds=$1 ;; esac
+      case $1 in -H|-Hp|-p) ;; -r) rec=1 ;; -o) cols=$2; shift ;; -s) sort=asc; shift ;; -S) sort=desc; shift ;; -t) type=$2; shift ;; *) ds=$1 ;; esac
       shift
     done
+    # rekursiv unter einem Dataset: Datasets (name, used) bzw. Snapshots aller Datasets darunter
+    if [[ -n $rec ]]; then
+      for d in $(datasets | grep -E "^$ds(/|\$)"); do
+        if [[ $type == snapshot ]]; then snaps "$d" | cut -d' ' -f1; else
+          line=; IFS=, read -ra c <<< "$cols"
+          for f in "${c[@]}"; do case $f in name) v=$d ;; used) v=1G ;; esac; line+="${line:+$'\t'}$v"; done
+          echo "$line"
+        fi
+      done; exit 0
+    fi
     if [[ $type != snapshot && -z $ds ]]; then
       # Spalten name, type, refquota (Bytes, 0 = none, "-" für Volumes)
       for d in $(datasets); do
@@ -41,7 +51,8 @@ case $1 in
     [[ -z $out ]] && exit 0
     while read -r n g; do
       line=; IFS=, read -ra c <<< "$cols"
-      for f in "${c[@]}"; do case $f in name) v=$n ;; guid) v=$g ;; esac; line+="${line:+$'\t'}$v"; done
+      # creation eines Snapshots = seine guid (Szenarien mit Zeitbezug nutzen Zahlen als guid)
+      for f in "${c[@]}"; do case $f in name) v=$n ;; guid|creation) v=$g ;; esac; line+="${line:+$'\t'}$v"; done
       echo "$line"
     done <<< "$out"
     ;;
@@ -52,6 +63,9 @@ case $1 in
       "get -H -o value,source com.sun:auto-snapshot "*) printf 'false\tlocal\n' ;;
       "get -H -o value canmount "*) echo "${CANMOUNT:-noauto}" ;;
       "get -H -o value mounted "*) echo "${MOUNTED:-yes}" ;;
+      "get -Hp -o value creation "*) echo "${CREATION_source[${@: -1}]:-0}" ;;
+      "get -H -o name,value -r -t filesystem,volume bashclub:zsync-orphan "*)
+        for d in $(datasets | grep -E "^${@: -1}(/|\$)"); do echo "$d"$'\t'"${ORPHAN_KEEP[$d]:--}"; done ;;
       "get -Hp -o value refquota "*) rq="REFQUOTA_${side}[${@: -1}]"; echo "${!rq:-0}" ;;
     esac
     ;;

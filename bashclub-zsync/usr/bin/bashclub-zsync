@@ -402,6 +402,15 @@ function label_leftovers() {
     grep -E "@.*$zfs_auto_snapshot_label" | grep -vE "$label_regex"
 }
 
+# state of each dataset for the monitoring (written to <config>.datasets):
+# ok, failed, at_risk, diverged, broken, empty, no_snapshots, orphan_missing, orphan_unselected, orphan_kept
+declare -A ds_state ds_detail
+
+# fix for a target without a usable snapshot: keep the old replica under a new name, the next run replicates again
+function rename_hint() {
+    echo "zfs rename $target/$1 $target/$1.broken-$(date +%Y-%m-%d)"
+}
+
 #### replication per dataset
 for name in "${syncvols[@]}"; do
     log "[INFO] Replicate $name"
@@ -503,13 +512,52 @@ for name in "${syncvols[@]}"; do
                         || { rc=1; log "[ERROR] incremental replication to $target/$name failed."; }
                     last=$snap
                 done
+                # replication failed: the chain breaks if the base is the oldest snapshot of its interval on the source
+                if [ $rc -ne 0 ]; then
+                    base=$(zfs list -H -o guid,name -s creation -t snapshot $target/$name | tail -1)
+                    for interval in $(sed "s/|/\n/g" <<< "$snapshot_filter"); do
+                        if grep -qE "${interval_regex[$interval]}" <<< "${base#*$'\t'}" \
+                            && [[ $(grep -E "${interval_regex[$interval]}" <<< "$source_snaps" | head -1 | cut -f2) == "${base%%$'\t'*}" ]]; then
+                            ds_state[$name]=at_risk
+                            ds_detail[$name]="base ${base#*@} is the oldest snapshot of interval $interval on the source"
+                            log "[ERROR] $name - the replication failed and its base ${base#*$'\t'} is the oldest snapshot of interval $interval on the source: the next rotation breaks the chain."
+                        fi
+                    done
+                fi
             else
                 log "[ERROR] No matching snapshot (guid: $guid) found on source filesystem. This can be outdated snapshots on target or a previously deleted and new created dataset $name on the source filesystem."
                 if [ $rc -eq 0 ]; then rc=1; fi
+                # newest common snapshot: target snapshots (newest first) whose guid exists on the source
+                common=$(awk -F'\t' 'NR == FNR { g[$2] = 1; next } ($1 in g) { print $2; exit }' \
+                    <(printf '%s\n' "$source_snaps") <(zfs list -H -o guid,name -S creation -t snapshot $target/$name))
+                if [[ -n $common ]]; then
+                    ds_state[$name]=diverged
+                    ds_detail[$name]="newest common snapshot ${common#*@}"
+                    log "[ERROR] $name - the newest snapshot on $target/$name does not exist on the source anymore (rollback or deleted on the source). Newest common snapshot: $common"
+                else
+                    # cause: dataset newer than the replica, or all snapshots of the replica rotated out on the source
+                    target_newest=$(zfs list -Hp -o creation -S creation -t snapshot $target/$name | head -1)
+                    source_times=$(remote "zfs get -Hp -o value creation $name; zfs list -Hp -o creation -s creation -t snapshot $name | head -1")
+                    source_created=$(head -1 <<< "$source_times")
+                    source_oldest=$(tail -1 <<< "$source_times")
+                    if [ ${source_created:-0} -gt ${target_newest:-0} ]; then
+                        cause="the dataset was created again on the source"
+                    elif [ ${source_oldest:-0} -gt ${target_newest:-0} ]; then
+                        cause="all snapshots of the replica were deleted by the rotation on the source"
+                    else
+                        cause="unknown cause"
+                    fi
+                    ds_state[$name]=broken
+                    ds_detail[$name]=$cause
+                    log "[ERROR] $name - no common snapshot with the source: $cause. A full replication is needed, to keep the old replica rename it and the next run replicates again:\n\t$(rename_hint $name)"
+                fi
             fi
         else
             log "[ERROR] No snapshot found on $target/$name to add incremental snapshots to. The target dataset (with all children) needs to be deleted and recreated via replication."
             if [ $rc -eq 0 ]; then rc=1; fi
+            ds_state[$name]=empty
+            ds_detail[$name]="no snapshot on $target/$name"
+            log "[ERROR] $name - to keep the empty replica rename it, the next run replicates again:\n\t$(rename_hint $name)"
         fi
 
         # delete target snapshots older than the oldest source snapshot of each interval, keep at least min_keep
@@ -553,11 +601,59 @@ for name in "${syncvols[@]}"; do
         fi
     else
         debug "$name - No snapshots found with filter $snapshot_filter"
+        ds_state[$name]=no_snapshots
+    fi
+    if [[ -z ${ds_state[$name]} ]]; then
+        if [ $rc -ne 0 ]; then ds_state[$name]=failed; else ds_state[$name]=ok; fi
     fi
     if [ $rc -ne 0 ]; then ((datasets_failed++)); fi
     if [ $rc_before -ne 0 ]; then rc=$rc_before; fi
     log "[INFO] Replication of $name finished."
 done
+
+#### datasets only on the target: deleted or renamed on the source, or no longer selected for replication
+# replicas are target datasets with snapshots (path datasets created by zsync have none); only checked if the
+# datasets of the source are known, a failed query must not turn every replica into an orphan
+# acknowledged with: zfs set bashclub:zsync-orphan=keep <replica>
+if [ ${#fstypes[@]} -gt 0 ]; then
+    status orphans
+    declare -A selected=() kept=() used=()
+    for n in "${syncvols[@]}"; do selected[$n]=1; done
+    while IFS=$'\t' read -r n v; do
+        if [[ -n $n ]] && [[ $v == "keep" ]]; then kept[$n]=1; fi
+    done <<< "$(zfs get -H -o name,value -r -t filesystem,volume bashclub:zsync-orphan $target 2>/dev/null)"
+    while IFS=$'\t' read -r n v; do
+        if [[ -n $n ]]; then used[$n]=$v; fi
+    done <<< "$(zfs list -H -o name,used -r $target 2>/dev/null)"
+    for replica in $(zfs list -H -o name -t snapshot -r $target 2>/dev/null | cut -d'@' -f1 | uniq); do
+        src=${replica#$target/}
+        if [[ $replica == "$target" ]] || [[ -n ${selected[$src]} ]]; then continue; fi
+        if [[ -z ${fstypes[$src]} ]]; then
+            ds_state[$src]=orphan_missing
+            ds_detail[$src]="does not exist on the source"
+        else
+            ds_state[$src]=orphan_unselected
+            ds_detail[$src]="is not selected for replication anymore ($tag)"
+        fi
+        if [[ -n ${kept[$replica]} ]]; then
+            ds_state[$src]=orphan_kept
+            debug "$replica ${ds_detail[$src]}, kept (bashclub:zsync-orphan=keep)"
+        else
+            log "[WARN] $replica ${ds_detail[$src]} and is not replicated anymore (${used[$replica]}). Keep it: zfs set bashclub:zsync-orphan=keep $replica - check the deletion: zfs destroy -rnv $replica"
+        fi
+    done
+fi
+
+# states per dataset, "since" is kept as long as the state of a dataset does not change
+if [[ -n $status_file ]]; then
+    declare -A since=()
+    if [[ -f $status_lib.datasets ]]; then
+        while IFS=$'\t' read -r n st t _; do since["$n|$st"]=$t; done < "$status_lib.datasets"
+    fi
+    for n in "${!ds_state[@]}"; do
+        printf '%s\t%s\t%s\t%s\n' "$n" "${ds_state[$n]}" "${since["$n|${ds_state[$n]}"]:-$run_start}" "${ds_detail[$n]}"
+    done | sort > "$status_lib.datasets.tmp" && mv -f "$status_lib.datasets.tmp" "$status_lib.datasets"
+fi
 
 #### monitoring: checkzfs output into the checkmk spool (local or on the source)
 # the output goes to a temporary file of this run, is copied next to the spool file as dot file
