@@ -44,6 +44,7 @@ case $1 in
       "get -H -o value type "*) echo "${TYPES[${@: -1}]:-filesystem}" ;;
       "get -H -o value,source com.sun:auto-snapshot "*) printf 'false\tlocal\n' ;;
       "get -H -o value canmount "*) echo "${CANMOUNT:-noauto}" ;;
+      "get -H -o value mounted "*) echo "${MOUNTED:-yes}" ;;
     esac
     ;;
   send) touch "$ZTEST_STATE/sent"; echo "STREAM $*" ;;
