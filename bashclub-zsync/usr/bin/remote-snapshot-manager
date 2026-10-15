@@ -100,7 +100,7 @@ fi
 
 # List existing snapshots for the dataset
 debug "Listing existing snapshots for dataset: $dataset"
-existing_snapshots=$($zfs_cmd list -t snapshot -o name -s creation "$dataset" | grep "^${dataset}@${label}-")
+existing_snapshots=$($zfs_cmd list -t snapshot -o name -s createtxg "$dataset" | grep "^${dataset}@${label}-")
 debug "Existing snapshots:\n$existing_snapshots"
 
 # Count the total number of snapshots matching the label

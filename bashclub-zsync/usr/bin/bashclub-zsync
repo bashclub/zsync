@@ -500,7 +500,7 @@ for name in "${syncvols[@]}"; do
     fi
 
     # source snapshots (oldest first), queried directly before the replication of this dataset
-    source_snaps=$(remote "zfs list -H -o name,guid -s creation -t snapshot $name 2>/dev/null")
+    source_snaps=$(remote "zfs list -H -o name,guid -s createtxg -t snapshot $name 2>/dev/null")
     if [ $zfs_auto_snapshot_keep -gt 1 ]; then
         leftovers=$(cut -f1 <<< "$source_snaps" | label_leftovers)
         if [[ -n $leftovers ]]; then
@@ -525,7 +525,7 @@ for name in "${syncvols[@]}"; do
             debug "$name - Start initial replication"
             status send "$name"
             IFS=$'\n'
-            snap=$(remote "zfs list -H -t snapshot -o name -S creation $name | grep -E \"$snapshot_regex\" | tail -1")
+            snap=$(remote "zfs list -H -t snapshot -o name -S createtxg $name | grep -E \"$snapshot_regex\" | tail -1")
             if [[ -n $snap ]]; then
                 log "[INFO] Start initial replication: $snap => $target/$(echo $name | cut -d'/' -f1)"
                 if remote "zfs send -w -p $debug $snap" | throttle | zfs receive $mp $cm -x $tag -x com.sun:auto-snapshot $debug -dF $target/$(echo $name | cut -d'/' -f1); then
@@ -540,7 +540,7 @@ for name in "${syncvols[@]}"; do
                 fi
             fi
             # the initial replication may take long, query the source snapshots again
-            source_snaps=$(remote "zfs list -H -o name,guid -s creation -t snapshot $name 2>/dev/null")
+            source_snaps=$(remote "zfs list -H -o name,guid -s createtxg -t snapshot $name 2>/dev/null")
         fi
 
         # refquota: received only with the initial replication (send -p), a refquota raised on the source later
@@ -561,13 +561,13 @@ for name in "${syncvols[@]}"; do
         # incremental replication: from the newest target snapshot (matched by guid) to all newer source snapshots
         debug "$name - Start incremental replication"
         status send "$name"
-        guid=$(zfs list -H -o guid -s creation -t snapshot $target/$name | tail -1)
+        guid=$(zfs list -H -o guid -s createtxg -t snapshot $target/$name | tail -1)
         if [[ $guid != "" ]]; then
             last=$(grep $guid <<< "$source_snaps" | tail -1 | cut -f1)
             # newest target snapshot missing on the source (rollback or deleted there): with target_rollback=1
             # roll the target back to the newest common snapshot (at most target_rollback_max snapshots destroyed)
             if [[ $last == "" ]] && [[ $target_rollback == "1" ]]; then
-                target_list=$(zfs list -H -o guid,name -S creation -t snapshot $target/$name)
+                target_list=$(zfs list -H -o guid,name -S createtxg -t snapshot $target/$name)
                 common=$(awk -F'\t' 'NR == FNR { g[$2] = 1; next } ($1 in g) { print $2; exit }' \
                     <(printf '%s\n' "$source_snaps") <(printf '%s\n' "$target_list"))
                 if [[ -n $common ]]; then
@@ -578,7 +578,7 @@ for name in "${syncvols[@]}"; do
                         if zfs rollback -r $common; then
                             ds_state[$name]=rolled_back
                             ds_detail[$name]="rolled back to ${common#*@}, $count snapshots destroyed"
-                            guid=$(zfs list -H -o guid -s creation -t snapshot $target/$name | tail -1)
+                            guid=$(zfs list -H -o guid -s createtxg -t snapshot $target/$name | tail -1)
                             last=$(grep $guid <<< "$source_snaps" | tail -1 | cut -f1)
                         else
                             rc=1; log "[ERROR] rollback of $target/$name to $common failed."
@@ -601,7 +601,7 @@ for name in "${syncvols[@]}"; do
                 done
                 # replication failed: the chain breaks if the base is the oldest snapshot of its interval on the source
                 if [ $rc -ne 0 ]; then
-                    base=$(zfs list -H -o guid,name -s creation -t snapshot $target/$name | tail -1)
+                    base=$(zfs list -H -o guid,name -s createtxg -t snapshot $target/$name | tail -1)
                     for interval in $(sed "s/|/\n/g" <<< "$snapshot_filter"); do
                         if grep -qE "${interval_regex[$interval]}" <<< "${base#*$'\t'}" \
                             && [[ $(grep -E "${interval_regex[$interval]}" <<< "$source_snaps" | head -1 | cut -f2) == "${base%%$'\t'*}" ]]; then
@@ -616,15 +616,15 @@ for name in "${syncvols[@]}"; do
                 if [ $rc -eq 0 ]; then rc=1; fi
                 # newest common snapshot: target snapshots (newest first) whose guid exists on the source
                 common=$(awk -F'\t' 'NR == FNR { g[$2] = 1; next } ($1 in g) { print $2; exit }' \
-                    <(printf '%s\n' "$source_snaps") <(zfs list -H -o guid,name -S creation -t snapshot $target/$name))
+                    <(printf '%s\n' "$source_snaps") <(zfs list -H -o guid,name -S createtxg -t snapshot $target/$name))
                 if [[ -n $common ]]; then
                     ds_state[$name]=diverged
                     ds_detail[$name]="newest common snapshot ${common#*@}"
                     log "[ERROR] $name - the newest snapshot on $target/$name does not exist on the source anymore (rollback or deleted on the source). Newest common snapshot: $common"
                 else
                     # cause: dataset newer than the replica, or all snapshots of the replica rotated out on the source
-                    target_newest=$(zfs list -Hp -o creation -S creation -t snapshot $target/$name | head -1)
-                    source_times=$(remote "zfs get -Hp -o value creation $name; zfs list -Hp -o creation -s creation -t snapshot $name | head -1")
+                    target_newest=$(zfs list -Hp -o creation -S createtxg -t snapshot $target/$name | head -1)
+                    source_times=$(remote "zfs get -Hp -o value creation $name; zfs list -Hp -o creation -s createtxg -t snapshot $name | head -1")
                     source_created=$(head -1 <<< "$source_times")
                     source_oldest=$(tail -1 <<< "$source_times")
                     if [ ${source_created:-0} -gt ${target_newest:-0} ]; then
@@ -651,14 +651,14 @@ for name in "${syncvols[@]}"; do
         debug "$name - Start deletion of old snapshots"
         status delete "$name"
         # source snapshots (newest first), queried again after the replication
-        source_snaps=$(remote "zfs list -H -o guid,name -S creation -t snapshot $name")
+        source_snaps=$(remote "zfs list -H -o guid,name -S createtxg -t snapshot $name")
         filter=$(echo -e $snapshot_filter | sed "s/|/\n/g")
         IFS=$'\n'
         for interval in $filter ; do
             debug "$name - Checking interval $interval"
             guid=$(grep -E "${interval_regex[$interval]}" <<< "$source_snaps" | cut -f1 | tail -1)
             if [[ -n $guid ]]; then
-                target_snaps=$(zfs list -H -o name,guid -S creation -t snapshot $target/$name | grep -E "${interval_regex[$interval]}")
+                target_snaps=$(zfs list -H -o name,guid -S createtxg -t snapshot $target/$name | grep -E "${interval_regex[$interval]}")
                 # deletion starts at the oldest source snapshot on the target: without it nothing is deleted
                 if [[ -n $target_snaps ]] && ! grep -q $guid <<< "$target_snaps"; then
                     oldest=$(grep -E "${interval_regex[$interval]}" <<< "$source_snaps" | tail -1 | cut -f2)

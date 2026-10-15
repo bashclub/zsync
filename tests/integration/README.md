@@ -12,7 +12,8 @@ und prüft das Ergebnis am Ziel. Am Ende werden die Pools zerstört.
 | `ci.sh` | CI-Job auf dem Runner mit Label `zfs`: Paket bauen (nfpm), installieren, testen |
 
 Fälle: `replication` (Dateisystem mit Kind, Volume, raw-verschlüsselt), `engine_internal`, `rotation`,
-`refquota`, `rollback`, `broken_chain`, `orphans`, `local_mode`, `bandwidth_lock`, `checkmk`.
+`refquota`, `rollback`, `broken_chain`, `orphans`, `local_mode`, `bandwidth_lock`, `same_second` (zwei Labels
+in derselben Sekunde), `checkmk`.
 
 ## Test-VM einrichten
 Eine **VM** (kein LXC-Container: der teilt das ZFS-Modul des Hosts), Debian 13, zwei leere Platten
@@ -59,5 +60,5 @@ systemd-Credential (`LoadCredential=token:/etc/forgejo-runner/token`, Datei mit 
 `token_url: file:$CREDENTIALS_DIRECTORY/token`. Der Workflow-Job `integration` holt den Stand per git, baut das
 Paket und führt `ci.sh` aus.
 
-Snapshots legen die Tests mit je einer Sekunde Abstand an: `creation` ist sekundengenau, und zsync sortiert
-danach (Gleichstand: #30).
+Snapshots legen die Tests mit je einer Sekunde Abstand an, wie in der Praxis; Snapshots in derselben Sekunde
+prüft `same_second`.

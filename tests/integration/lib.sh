@@ -82,8 +82,15 @@ last_run_log() { awk '/^===== /{ buf = "" } { buf = buf $0 "\n" } END { printf "
 
 # Daten und Snapshots auf der Quelle
 write() { dd if=/dev/urandom of="$(zfs get -H -o value mountpoint "$1")/${3:-file}" bs=1M count=${2:-1} status=none conv=fsync; }
-# eigene Sekunde je Snapshot: creation ist sekundengenau, zsync sortiert nach creation (Gleichstand siehe Ticket)
+# eigene Sekunde je Snapshot (realistische Zeiten); Snapshots in derselben Sekunde prüft case_same_second
 snap() { sleep 1.05; zfs snapshot "$1@zfs-auto-snap_daily-$2"; }
+# Snapshots mit verschiedenen Namen in derselben Sekunde: zu Beginn einer neuen Sekunde ohne Pause anlegen
+snaps_same_second() {
+  local ds=$1 n; shift
+  sleep "$(printf '0.%03d' $((1000 - 10#$(date +%3N))))"
+  for n in "$@"; do zfs snapshot "$ds@zfs-auto-snap_$n"; done
+}
+seconds_of() { zfs list -Hp -o creation -t snapshot "$1" | sort -u | wc -l; }
 # Snapshot-Namen (ohne Dataset) älteste zuerst
 snaps() { zfs list -H -o name -t snapshot -s creation "$1" 2>/dev/null | sed 's/.*@//' | paste -sd' '; }
 guid() { zfs get -H -o value guid "$1" 2>/dev/null; }
