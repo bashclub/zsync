@@ -12,9 +12,10 @@ for sc in "$here"/scenarios/*.sh; do
   n=$(basename "$sc" .sh); w=$(mktemp -d /tmp/zsync-test.XXXX)
   cp "$script" "$w/bashclub-zsync"
   cp "$here"/stubs/{zfs,ssh,scp,remote-snapshot-manager,zfs-auto-snapshot} "$w/"
-  DEBUG=0; CHECKZFS=1; CONF=; unset SNAPS_source_post; declare -A SNAPS_source_post=(); unset -f before_run after_run
+  DEBUG=0; CHECKZFS=1; PV=0; CONF=; unset SNAPS_source_post; declare -A SNAPS_source_post=(); unset -f before_run after_run
   source "$sc"
   [[ $CHECKZFS == 1 ]] && cp "$here/stubs/checkzfs" "$w/"
+  [[ $PV == 1 ]] && cp "$here/stubs/pv" "$w/"
   [[ -n $CONF ]] && printf '%s\n' "$CONF" > "$w/zsync.conf"
   rm -rf /var/lib/check_mk_agent/spool /tmp/*_zsync /tmp/.*_zsync.* /run/bashclub-zsync /var/lib/bashclub-zsync
   : > "$out/$n.calls"

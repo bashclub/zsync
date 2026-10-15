@@ -1,0 +1,5 @@
+#!/bin/bash
+# Stub für pv: reicht den Stream durch und protokolliert erst nach dessen Ende (eindeutige Reihenfolge in Pipes)
+data=$(cat; echo x); data=${data%x}
+echo "pv $*" >> "$ZTEST_LOG"
+printf '%s' "$data"

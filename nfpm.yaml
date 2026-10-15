@@ -21,6 +21,10 @@ recommends:
   - cryptsetup
   - bsd-mailx | mailx
 
+# nur für bandwidth_limit
+suggests:
+  - pv
+
 contents:
   - src: bashclub-zsync/usr/bin/bashclub-zsync
     dst: /usr/bin/bashclub-zsync

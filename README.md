@@ -159,6 +159,10 @@ target_rollback=0
 # maximum number of target snapshots a rollback may destroy, otherwise only an error is logged
 target_rollback_max=24
 
+# bandwidth limit of the transfer in bytes per second with suffix k, m, g (1024 based), e.g. 10m = 10 MiB/s
+# (about 84 Mbit/s); applied on this host with pv (package pv), empty = no limit
+bandwidth_limit=""
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
@@ -193,6 +197,9 @@ If the list is correct, delete them:
 conf=/etc/bashclub/zsync.conf
 ( . "$conf"; ssh -p "$sshport" "$source" "zfs list -H -t snapshot -o name | grep '@zfs-auto-snap_${zfs_auto_snapshot_label}-' | xargs -r -n1 zfs destroy -v" )
 ~~~
+
+### Bandwidth limit
+`bandwidth_limit` limits the transfer to the given bytes per second, e.g. `bandwidth_limit=10m` (10 MiB/s, about 84 Mbit/s) for an offsite backup over a shared line. The limit is applied on the backup server with `pv` between `zfs send` and `zfs receive`; install it with `apt install pv`. Without `pv` the transfer runs without limit and the log shows a warning.
 
 ### Rollback on the source
 If the newest snapshot of a replica does not exist on the source anymore (rolled back or deleted on the source), the dataset cannot be appended. By default it is not replicated anymore until it is fixed manually; the log and the Checkmk check name the newest common snapshot. With `target_rollback=1` `bashclub-zsync` rolls the replica back to the newest common snapshot (`zfs rollback -r`, the newer snapshots of the replica are destroyed) and continues from there, if it destroys at most `target_rollback_max` snapshots (default 24). Otherwise it logs the command to roll back manually. Rollbacks are listed in the log and as a hint in the Checkmk check.
