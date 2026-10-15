@@ -8,6 +8,7 @@
 #   /var/lib/bashclub-zsync/<config>.last    result of the last run and of the last successful run
 #   /var/lib/bashclub-zsync/<config>.history start times of the last runs
 #   /var/lib/bashclub-zsync/<config>.skipped times of runs skipped because of an active run
+#   /var/lib/bashclub-zsync/<config>.datasets state per dataset: dataset, state, since, detail
 #   /var/lib/bashclub-zsync/<config>.check   state of this check (transfer progress, blocked processes)
 #
 # Checks:
@@ -21,6 +22,10 @@
 #   blocked processes                processes of the run in state D (uninterruptible, e.g. waiting for zfs)
 #   aborted run                      status file of a run whose process does not exist anymore
 #   skipped runs                     runs skipped because the previous run is still active
+#   state per dataset                CRIT: no common snapshot with the source or target without snapshots (full
+#                                    replication needed); WARN: base will be rotated out (chain at risk), newest target
+#                                    snapshot missing on the source (diverged), replica without source or not selected
+#                                    anymore (after orphan_grace, acknowledged with bashclub:zsync-orphan=keep)
 
 RUN_DIR=${ZSYNC_RUN_DIR:-/run/bashclub-zsync}
 LIB_DIR=${ZSYNC_LIB_DIR:-/var/lib/bashclub-zsync}
@@ -36,6 +41,7 @@ blocked_warn=300        # process in state D: 5 min
 blocked_crit=900        #                     15 min
 skipped_warn=3          # skipped runs during one active run
 learn_intervals=5       # start intervals needed before the age check can become critical
+orphan_grace=86400      # replicas without source / not selected anymore: WARN after 1 day (renaming, migration)
 CONF_FILE=${ZSYNC_CHECK_CONF:-/etc/bashclub/zsync-checkmk.conf}
 if [ -r "$CONF_FILE" ]; then . "$CONF_FILE"; fi
 
@@ -47,6 +53,16 @@ function duration() {
     elif [ $s -ge 3600 ]; then echo "$((s / 3600))h $((s % 3600 / 60))m"
     elif [ $s -ge 60 ]; then echo "$((s / 60))m"
     else echo "${s}s"; fi
+}
+
+# "a, b, c, d" -> "a, b, c (+1 more)"
+function shortlist() {
+    local -a items=("$@")
+    local text
+    text=$(printf '%s, ' "${items[@]:0:3}")
+    text=${text%, }
+    if [ ${#items[@]} -gt 3 ]; then text+=" (+$((${#items[@]} - 3)) more)"; fi
+    echo "$text"
 }
 
 # 26h, 90m, 2d or seconds -> seconds
@@ -195,6 +211,45 @@ for id in $ids; do
             raise 1 "last run $(duration $((NOW - ${last[end]}))) ago failed (exit code ${last[rc]}, ${last[datasets_failed]:-0} of ${last[datasets]:-0} datasets failed)$(level_mark 1)"
         fi
     fi
+
+    #### state per dataset (written by the last run)
+    declare -a ds_crit=() ds_risk=() ds_div=() ds_orphan=() ds_failed=()
+    kept=0; nosnap=0; orphan_new=0
+    if [[ -f $LIB_DIR/$id.datasets ]]; then
+        while IFS=$'\t' read -r ds dstate since detail; do
+            age_text=$(duration $((NOW - ${since:-NOW})))
+            case $dstate in
+                broken|empty) ds_crit+=("$ds ($detail, since $age_text)") ;;
+                at_risk) ds_risk+=("$ds ($detail)") ;;
+                diverged) ds_div+=("$ds ($detail, since $age_text)") ;;
+                failed) ds_failed+=("$ds (since $age_text)") ;;
+                orphan_missing|orphan_unselected)
+                    if [ $((NOW - ${since:-NOW})) -ge $orphan_grace ]; then
+                        ds_orphan+=("$ds (${detail%% (*}, since $age_text)")
+                    else
+                        ((orphan_new++))
+                    fi ;;
+                orphan_kept) ((kept++)) ;;
+                no_snapshots) ((nosnap++)) ;;
+            esac
+        done < "$LIB_DIR/$id.datasets"
+    fi
+    if [ ${#ds_crit[@]} -gt 0 ]; then
+        raise 2 "full replication needed for ${#ds_crit[@]} datasets: $(shortlist "${ds_crit[@]}")$(level_mark 2)"
+    fi
+    if [ ${#ds_risk[@]} -gt 0 ]; then
+        raise 1 "chain at risk, the next rotation on the source breaks it: $(shortlist "${ds_risk[@]}")$(level_mark 1)"
+    fi
+    if [ ${#ds_div[@]} -gt 0 ]; then
+        raise 1 "newest target snapshot missing on the source: $(shortlist "${ds_div[@]}")$(level_mark 1)"
+    fi
+    if [ ${#ds_orphan[@]} -gt 0 ]; then
+        raise 1 "${#ds_orphan[@]} datasets only on the target: $(shortlist "${ds_orphan[@]}")$(level_mark 1)"
+    fi
+    if [ ${#ds_failed[@]} -gt 0 ]; then state_text+=("failed: $(shortlist "${ds_failed[@]}")"); fi
+    if [ $orphan_new -gt 0 ]; then state_text+=("$orphan_new new datasets only on the target"); fi
+    if [ $kept -gt 0 ]; then state_text+=("$kept kept replicas without source"); fi
+    if [ $nosnap -gt 0 ]; then state_text+=("$nosnap datasets without matching snapshots"); fi
 
     #### age of the last successful run
     max_age=$( (. "$conf" > /dev/null 2>&1; echo "$monitor_max_age") )

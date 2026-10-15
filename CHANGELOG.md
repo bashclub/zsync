@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- state per dataset for the log and the Checkmk check: no common snapshot with the source (cause: rotated out or dataset created again, CRIT), replica without snapshots (CRIT), chain at risk because the base is the oldest snapshot on the source (WARN), newest replica snapshot missing on the source (WARN), replica without source or no longer selected (WARN after one day, acknowledge with `bashclub:zsync-orphan=keep`), each with a copyable fix in the log (#21)
 - the `refquota` of a filesystem on the target is raised to the value of the source (or removed, if the source has none) before each incremental replication, so a refquota raised on the source no longer makes the replication fail; it is never lowered, `quota` is not changed (#4)
 - Checkmk local check `bashclub_zsync`, linked into the agent if it is installed (also later, via dpkg trigger): one service per configuration, detects a too old last successful run (interval learned from the previous runs, learning phase), failed and aborted runs, phases that take too long, transfers without progress, processes blocked in state D and skipped runs; opt-out with `/etc/bashclub/zsync-checkmk.disabled` (#15)
 - run status for the monitoring in `/run/bashclub-zsync` and `/var/lib/bashclub-zsync` (#15)

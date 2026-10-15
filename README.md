@@ -206,10 +206,20 @@ It shows one service `zsync <config>` per configuration and reads only status fi
 | process of the run blocked in state D, e.g. waiting for ZFS (with kernel function) | WARN 5 min, CRIT 15 min |
 | run aborted (killed, crashed, power loss) | WARN until the next run |
 | 3 or more runs skipped during one active run | WARN |
+| dataset without common snapshot with the source, or replica without snapshots (full replication needed) | CRIT, with cause |
+| replication of a dataset failed and its base is the oldest snapshot of its interval on the source (chain at risk) | WARN |
+| newest snapshot of the replica missing on the source (rollback or deleted on the source) | WARN |
+| replica without source dataset, or source no longer selected (after 1 day) | WARN |
 
 The interval is the median of the start intervals of the last 10 runs, so it needs no configuration and manual runs do not change it. Until 5 intervals are known (learning phase) the age check is at most WARN. `monitor_max_age` in the configuration sets the maximum age instead (WARN, CRIT at 3 times the value), `monitor_max_age=0` disables the age check, e.g. for removable disks. All other checks are active from the first run. The thresholds can be changed in `/etc/bashclub/zsync-checkmk.conf`, e.g. `stall_crit=3600` (variables at the top of the check).
 
 The age of the replicated snapshots per dataset is still checked by checkzfs.
+
+### State of the datasets
+`bashclub-zsync` records a state per dataset in `/var/lib/bashclub-zsync/<config>.datasets` and logs a copyable fix:
+- **no common snapshot with the source**: either the rotation on the source has deleted all snapshots of the replica (the replication was stopped longer than the snapshots are kept), or the dataset was created again on the source. Only a full replication helps; rename the replica to keep it, the next run replicates again: `zfs rename <replica> <replica>.broken-<date>`
+- **chain at risk**: the replication of a dataset failed and its base is the oldest snapshot of its interval on the source; with the next rotation there is no common snapshot anymore
+- **replica only on the target**: the dataset was deleted or renamed on the source, or it is no longer selected (`bashclub:zsync`). It is not replicated anymore and never deleted automatically. To keep it as archive without warning: `zfs set bashclub:zsync-orphan=keep <replica>`. One target per source: datasets of another configuration in the same target would count as replicas without source.
 
 ### Define a cronjob
 #### cron.d example

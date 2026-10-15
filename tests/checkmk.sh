@@ -90,6 +90,28 @@ reset; last 0 $((T - 3600)); history 3600 6; state send $((T - 300)) rpool/data;
 proc 100 1 S 999 "bash other"; expect "pid wiederverwendet: WARN abgebrochen" 1 "aborted in phase send"
 # Config gelöscht
 reset; last 0 $((T - 60)); rm "$conf"; expect_none "Config gelöscht: kein Service"
+# Zustand pro Dataset (.datasets: Dataset, Zustand, seit, Detail)
+ds() { printf '%s\t%s\t%s\t%s\n' "$@" >> "$w/lib/$id.datasets"; }
+reset; last 0 $((T - 1800)); history 3600 6; ds pool/ok ok $((T - 99)) ""
+expect "alle Datasets ok: OK" 0 "last successful run 30m ago"
+ds pool/rot broken $((T - 172800)) "all snapshots of the replica were deleted by the rotation on the source"
+expect "Kette gerissen: CRIT mit Ursache" 2 "full replication needed for 1 datasets: pool/rot \(all snapshots of the replica were deleted by the rotation on the source, since 2d 0h\)"
+reset; last 1 $((T - 1800)) $((T - 5400)); history 3600 6; ds pool/e empty $((T - 600)) "no snapshot on backup/pve1/pool/e"
+expect "Ziel ohne Snapshots: CRIT" 2 "full replication needed for 1 datasets: pool/e"
+reset; last 1 $((T - 1800)) $((T - 1800)); history 3600 6; ds pool/r at_risk $((T - 600)) "base zfs-auto-snap_daily-01 is the oldest snapshot of interval daily on the source"
+expect "Kette in Gefahr: WARN" 1 "chain at risk, the next rotation on the source breaks it: pool/r \(base zfs-auto-snap_daily-01"
+reset; last 1 $((T - 1800)) $((T - 1800)); history 3600 6; ds pool/d diverged $((T - 600)) "newest common snapshot daily-01"
+expect "auseinandergelaufen: WARN" 1 "newest target snapshot missing on the source: pool/d"
+reset; last 0 $((T - 1800)); history 3600 6; ds pool/gone orphan_missing $((T - 3600)) "does not exist on the source"
+expect "verwaist seit 1 h (Karenzzeit): OK mit Hinweis" 0 "1 new datasets only on the target"
+reset; last 0 $((T - 1800)); history 3600 6; ds pool/gone orphan_missing $((T - 90000)) "does not exist on the source"
+ds pool/untagged orphan_unselected $((T - 90000)) "is not selected for replication anymore (bashclub:zsync)"
+expect "verwaist seit 25 h: WARN" 1 "2 datasets only on the target: pool/gone \(does not exist on the source, since 1d 1h\), pool/untagged \(is not selected for replication anymore, since 1d 1h\)"
+reset; last 0 $((T - 1800)); history 3600 6; ds pool/kept orphan_kept $((T - 900000)) "does not exist on the source"; ds pool/m no_snapshots $T ""
+expect "quittiert und ohne Snapshots: OK mit Hinweis" 0 "1 kept replicas without source, 1 datasets without matching snapshots"
+reset; last 0 $((T - 1800)); history 3600 6; for x in a b c d e; do ds pool/$x broken $T "x"; done
+expect "lange Liste wird gekürzt" 2 "full replication needed for 5 datasets: pool/a \(x, since 0s\), pool/b \(x, since 0s\), pool/c \(x, since 0s\) \(\+2 more\)"
+
 # Metriken
 reset; last 0 $((T - 1800)) $((T - 1800)) 120; history 3600 6
 out=$(run); ((count++)); if [[ $out == **"last_success_age=1800;4440;10920|last_duration=120|datasets_failed=0 "* ]]; then echo "ok   Metriken"; else echo "FAIL Metriken: $out"; ((failed++)); fi

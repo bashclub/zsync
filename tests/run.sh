@@ -31,6 +31,7 @@ for sc in "$here"/scenarios/*.sh; do
       [ -e "$f" ] || continue
       echo "== ${f##*.} ($(grep -c . "$f") Zeilen)"
       grep -E '^(config|rc|datasets|datasets_failed|phase|ok_end)=' "$f" | sed -E 's/^(ok_end=)[0-9]+$/\1<zeit>/'
+      if [[ $f == *.datasets ]]; then sed -E 's/\t[0-9]+\t/\t<zeit>\t/' "$f"; fi
     done; } 2>/dev/null | sed "s#$w#<dir>#g" > "$out/$n.status"
   cat /var/lib/check_mk_agent/spool/* > "$out/$n.spool" 2>/dev/null
   { ls -A /var/lib/check_mk_agent/spool; ls -A /tmp | grep -E '_zsync'; } 2>/dev/null \
