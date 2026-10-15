@@ -5,7 +5,7 @@ side=${ZSIDE:-target}
 # receive erst nach dem Ende des Streams protokollieren, damit die Reihenfolge in Pipes eindeutig ist
 [[ $1 == receive ]] && cat > /dev/null
 echo "$side: zfs $*" >> "$ZTEST_LOG"
-declare -A SNAPS_source_post=() TYPES=() REFQUOTA_source=() REFQUOTA_target=() CREATION_source=() ORPHAN_KEEP=() BOOKMARKS_source=()
+declare -A SNAPS_source_post=() TYPES=() REFQUOTA_source=() REFQUOTA_target=() CREATION_source=() ORPHAN_KEEP=() BOOKMARKS_source=() RESUME_TOKEN=()
 source "$ZTEST_SCENARIO"
 
 # Snapshots einer Seite: "<snapshot> <guid>" je Zeile, älteste zuerst.
@@ -80,6 +80,7 @@ case $1 in
       "get -H -o value,source com.sun:auto-snapshot "*) printf 'false\tlocal\n' ;;
       "get -H -o value canmount "*) echo "${CANMOUNT:-noauto}" ;;
       "get -H -o value mounted "*) echo "${MOUNTED:-yes}" ;;
+      "get -H -o value receive_resume_token "*) echo "${RESUME_TOKEN[${@: -1}]:--}" ;;
       "get -H -o value guid "*)
         obj=${@: -1}; ds=${obj%%[@#]*}; sv="SNAPS_${side}[$ds]"; bv="BOOKMARKS_${side}[$ds]"
         printf '%s\n%s\n' "${!sv}" "${!bv}" | awk -v o="$obj" '$1 == o { print $2 }' ;;

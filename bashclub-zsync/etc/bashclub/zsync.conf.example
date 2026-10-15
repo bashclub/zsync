@@ -55,6 +55,11 @@ source_bookmark=1
 # 1 = on, 0 = off; existing configurations without this setting keep 0, new configurations get 1
 source_hold=1
 
+# resumable transfers (zfs receive -s): a transfer interrupted by a network or power failure continues where it
+# stopped in the next run instead of starting again; 1 = on, 0 = off
+# existing configurations without this setting keep 0, new configurations get 1
+transfer_resume=1
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 

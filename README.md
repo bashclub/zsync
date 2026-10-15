@@ -173,6 +173,11 @@ source_bookmark=1
 # 1 = on, 0 = off; existing configurations without this setting keep 0, new configurations get 1
 source_hold=1
 
+# resumable transfers (zfs receive -s): a transfer interrupted by a network or power failure continues where it
+# stopped in the next run instead of starting again; 1 = on, 0 = off
+# existing configurations without this setting keep 0, new configurations get 1
+transfer_resume=1
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
@@ -220,6 +225,9 @@ ZFS itself only protects the snapshot that is being sent. With `source_hold=1` (
 zfs holds -r <pool> | grep zsync_
 zfs release <tag> <snapshot>
 ~~~
+
+### Resuming interrupted transfers
+With `transfer_resume=1` (default for new configurations) the replica is received with `zfs receive -s`. If a transfer is interrupted (network, reboot, killed run), ZFS keeps the received part and the next run continues it (`zfs send -t <token>`) instead of sending the whole delta or the initial replication again, also raw encrypted. If the snapshot was deleted on the source in the meantime, or `transfer_resume=0`, the partial state is discarded (`zfs receive -A`) with a warning, otherwise it would block every further receive into the replica.
 
 ### Bandwidth limit
 `bandwidth_limit` limits the transfer to the given bytes per second, e.g. `bandwidth_limit=10m` (10 MiB/s, about 84 Mbit/s) for an offsite backup over a shared line. The limit is applied on the backup server with `pv` between `zfs send` and `zfs receive`; install it with `apt install pv`. Without `pv` the transfer runs without limit and the log shows a warning.
