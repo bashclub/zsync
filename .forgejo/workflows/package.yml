@@ -15,6 +15,7 @@ jobs:
         out=$(bashclub-zsync -h 2>&1)
         echo "$out"
         grep -qE '^bashclub-zsync Version v[0-9]' <<< "$out"
+        test -x /usr/share/bashclub-zsync/checkmk/bashclub_zsync
       test-targets: '["debian-12","debian-13","ubuntu-24.04","ubuntu-26.04"]'
       deb-dists: "bookworm trixie noble resolute"
       formats: deb

@@ -32,6 +32,11 @@ contents:
     dst: /usr/bin/zsync-autorun
     file_info: { mode: 0755 }
 
+  # Checkmk local check, wird von postinst in den Agent verlinkt
+  - src: bashclub-zsync/usr/share/bashclub-zsync/checkmk/bashclub_zsync
+    dst: /usr/share/bashclub-zsync/checkmk/bashclub_zsync
+    file_info: { mode: 0755 }
+
   - src: bashclub-zsync/etc/bashclub/zsync.conf.example
     dst: /etc/bashclub/zsync.conf.example
     file_info: { mode: 0644 }
@@ -52,6 +57,12 @@ contents:
   - src: CHANGELOG.md
     dst: /usr/share/doc/bashclub-zsync/CHANGELOG.md
     file_info: { mode: 0644 }
+
+# postinst läuft erneut, wenn der Checkmk-Agent später installiert wird (Check verlinken)
+deb:
+  triggers:
+    interest_noawait:
+      - /usr/lib/check_mk_agent
 
 scripts:
   preinstall: packaging/scripts/preinst

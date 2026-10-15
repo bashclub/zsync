@@ -1,0 +1,256 @@
+#!/bin/bash
+#
+# Checkmk local check for bashclub-zsync: one service "zsync <config>" per configuration
+# Installed by the package as /usr/lib/check_mk_agent/local/bashclub_zsync (link), if the agent is installed.
+#
+# Reads only the status files written by bashclub-zsync and /proc, never calls zfs (it could hang the same way).
+#   /run/bashclub-zsync/<config>.state       active run: pid, phase, dataset
+#   /var/lib/bashclub-zsync/<config>.last    result of the last run and of the last successful run
+#   /var/lib/bashclub-zsync/<config>.history start times of the last runs
+#   /var/lib/bashclub-zsync/<config>.skipped times of runs skipped because of an active run
+#   /var/lib/bashclub-zsync/<config>.check   state of this check (transfer progress, blocked processes)
+#
+# Checks:
+#   age of the last successful run   interval = median of the start intervals (or monitor_max_age in the config),
+#                                    WARN after interval + max(20 %, 5 min) + duration of the last successful run
+#                                    (or of the active run, if it takes longer),
+#                                    CRIT after 3 intervals + duration; learning phase until 5 intervals: at most WARN
+#   last run failed                  WARN
+#   phase without transfer too long  listing, snapshots, deletion, checkzfs
+#   transfer without progress        bytes read by "zfs receive" do not change
+#   blocked processes                processes of the run in state D (uninterruptible, e.g. waiting for zfs)
+#   aborted run                      status file of a run whose process does not exist anymore
+#   skipped runs                     runs skipped because the previous run is still active
+
+RUN_DIR=${ZSYNC_RUN_DIR:-/run/bashclub-zsync}
+LIB_DIR=${ZSYNC_LIB_DIR:-/var/lib/bashclub-zsync}
+PROC=${ZSYNC_PROC:-/proc}
+NOW=${ZSYNC_NOW:-$(date +%s)}
+
+# thresholds in seconds, can be changed in /etc/bashclub/zsync-checkmk.conf
+phase_warn=900          # phases without transfer: 15 min
+phase_crit=3600         #                          1 h
+stall_warn=600          # transfer without progress: 10 min
+stall_crit=1800         #                            30 min
+blocked_warn=300        # process in state D: 5 min
+blocked_crit=900        #                     15 min
+skipped_warn=3          # skipped runs during one active run
+learn_intervals=5       # start intervals needed before the age check can become critical
+CONF_FILE=${ZSYNC_CHECK_CONF:-/etc/bashclub/zsync-checkmk.conf}
+if [ -r "$CONF_FILE" ]; then . "$CONF_FILE"; fi
+
+# 3725 -> 1h 2m
+function duration() {
+    local s=$1
+    if [ $s -lt 0 ]; then s=0; fi
+    if [ $s -ge 86400 ]; then echo "$((s / 86400))d $((s % 86400 / 3600))h"
+    elif [ $s -ge 3600 ]; then echo "$((s / 3600))h $((s % 3600 / 60))m"
+    elif [ $s -ge 60 ]; then echo "$((s / 60))m"
+    else echo "${s}s"; fi
+}
+
+# 26h, 90m, 2d or seconds -> seconds
+function seconds() {
+    case $1 in
+        *d) echo $(( ${1%d} * 86400 )) ;;
+        *h) echo $(( ${1%h} * 3600 )) ;;
+        *m) echo $(( ${1%m} * 60 )) ;;
+        *s) echo $(( ${1%s} )) ;;
+        *)  echo $(( $1 )) ;;
+    esac
+}
+
+# key=value file into the associative array named $2
+function read_file() {
+    local -n arr=$2
+    local key value
+    arr=()
+    if [[ -f $1 ]]; then
+        while IFS='=' read -r key value; do
+            if [[ -n $key ]]; then arr[$key]=$value; fi
+        done < "$1"
+    fi
+}
+
+# fields of /proc/<pid>/stat after "pid (comm) ": state ppid ... (starttime is field 20)
+function stat_fields() {
+    sed 's/.*) //' "$PROC/$1/stat" 2>/dev/null
+}
+
+# pid and all its descendants (cat continues if a process ends in the meantime)
+function process_tree() {
+    local -A children=()
+    local pid ppid queue
+    while read -r pid ppid; do
+        children[$ppid]+=" $pid"
+    done < <(cat "$PROC"/[0-9]*/stat 2>/dev/null | sed -nE 's/^([0-9]+) \(.*\) . ([0-9]+) .*/\1 \2/p')
+    queue=$1
+    while [[ -n $queue ]]; do
+        pid=${queue%% *}; queue=${queue#"$pid"}; queue=${queue# }
+        echo $pid
+        queue="$queue${children[$pid]}"; queue=${queue# }
+    done
+}
+
+state_level=0
+state_text=()
+function raise() {
+    if [ $1 -gt $state_level ]; then state_level=$1; fi
+    state_text+=("$2")
+}
+function level_mark() { case $1 in 1) echo " (!)" ;; 2) echo " (!!)" ;; esac; }
+
+ids=$( { ls "$RUN_DIR" "$LIB_DIR" 2>/dev/null; } | sed -nE 's/\.(state|last|history)$//p' | sort -u)
+for id in $ids; do
+    declare -A st=() last=() chk=()
+    read_file "$RUN_DIR/$id.state" st
+    read_file "$LIB_DIR/$id.last" last
+    read_file "$LIB_DIR/$id.check" chk
+    conf=${st[config]:-${last[config]}}
+    # configuration removed: no service anymore
+    if [[ -z $conf ]] || [[ ! -f $conf ]]; then continue; fi
+    name=$(basename "$conf" .conf)
+    state_level=0
+    state_text=()
+    metrics=()
+    new_chk=()
+
+    #### active run
+    running=0
+    if [[ -n ${st[pid]} ]]; then
+        fields=$(stat_fields ${st[pid]})
+        if [[ -n $fields ]] && [[ $(cut -d' ' -f20 <<< "$fields") == "${st[pid_start]}" ]]; then
+            running=1
+        elif [[ ${last[start]} != "${st[run_start]}" ]]; then
+            # the run did not write its result (.last of an earlier run): killed, crashed or power loss
+            raise 1 "run started $(duration $((NOW - ${st[run_start]:-NOW}))) ago was aborted in phase ${st[phase]}${st[dataset]:+ (${st[dataset]})}$(level_mark 1)"
+        fi
+    fi
+
+    if [ $running -eq 1 ]; then
+        phase=${st[phase]}
+        phase_age=$((NOW - ${st[phase_since]:-NOW}))
+        state_text+=("running for $(duration $((NOW - ${st[run_start]}))), phase $phase${st[dataset]:+ ${st[dataset]}} since $(duration $phase_age)")
+        tree=$(process_tree ${st[pid]})
+
+        # processes in state D: time since first seen by this check
+        for pid in $tree; do
+            fields=$(stat_fields $pid)
+            if [[ ${fields%% *} == D ]]; then
+                key="blocked_${pid}_$(cut -d' ' -f20 <<< "$fields")"
+                since=${chk[$key]:-$NOW}
+                new_chk+=("$key=$since")
+                blocked=$((NOW - since))
+                cmd=$(tr '\0' ' ' < "$PROC/$pid/cmdline" 2>/dev/null | cut -c1-80)
+                wchan=$(cat "$PROC/$pid/wchan" 2>/dev/null)
+                if [ $blocked -ge $blocked_crit ]; then level=2; elif [ $blocked -ge $blocked_warn ]; then level=1; else level=0; fi
+                if [ $level -gt 0 ]; then
+                    raise $level "process $pid (${cmd% }) blocked for $(duration $blocked) in ${wchan:-?}$(level_mark $level)"
+                fi
+            fi
+        done
+
+        if [[ $phase == send ]]; then
+            # progress: bytes read by all "zfs receive" of the run
+            bytes=0
+            for pid in $tree; do
+                if tr '\0' ' ' < "$PROC/$pid/cmdline" 2>/dev/null | grep -qE '(^|[ /])zfs receive '; then
+                    read_bytes=$(sed -n 's/^rchar: //p' "$PROC/$pid/io" 2>/dev/null)
+                    bytes=$((bytes + ${read_bytes:-0}))
+                fi
+            done
+            # the transfer is identified by dataset and start of the phase
+            progress_key="${st[phase_since]}_${st[dataset]}"
+            if [[ ${chk[progress_key]} != "$progress_key" ]]; then
+                # first check of this transfer: nothing read yet counts from the start of the phase
+                if [ $bytes -eq 0 ]; then progress_since=${st[phase_since]:-$NOW}; else progress_since=$NOW; fi
+            elif [[ ${chk[progress_bytes]} != "$bytes" ]]; then
+                progress_since=$NOW
+            else
+                progress_since=${chk[progress_since]}
+            fi
+            new_chk+=("progress_key=$progress_key" "progress_bytes=$bytes" "progress_since=$progress_since")
+            stalled=$((NOW - progress_since))
+            if [ $stalled -ge $stall_crit ]; then level=2; elif [ $stalled -ge $stall_warn ]; then level=1; else level=0; fi
+            if [ $level -gt 0 ]; then raise $level "no transfer progress for $(duration $stalled)$(level_mark $level)"; fi
+        else
+            if [ $phase_age -ge $phase_crit ]; then level=2; elif [ $phase_age -ge $phase_warn ]; then level=1; else level=0; fi
+            if [ $level -gt 0 ]; then raise $level "phase $phase takes $(duration $phase_age)$(level_mark $level)"; fi
+        fi
+
+        # runs skipped while this run is active
+        skipped=$(awk -v s=${st[run_start]} '$1 >= s' "$LIB_DIR/$id.skipped" 2>/dev/null | grep -c .)
+        if [ $skipped -ge $skipped_warn ]; then
+            raise 1 "$skipped runs skipped while this run is active$(level_mark 1)"
+        elif [ $skipped -gt 0 ]; then
+            state_text+=("$skipped runs skipped while this run is active")
+        fi
+    fi
+    printf '%s\n' "${new_chk[@]}" > "$LIB_DIR/$id.check.tmp" 2>/dev/null && mv -f "$LIB_DIR/$id.check.tmp" "$LIB_DIR/$id.check" 2>/dev/null
+
+    #### last run
+    if [[ -n ${last[rc]} ]]; then
+        metrics+=("last_duration=${last[duration]}" "datasets_failed=${last[datasets_failed]:-0}")
+        if [ ${last[rc]} -ne 0 ]; then
+            raise 1 "last run $(duration $((NOW - ${last[end]}))) ago failed (exit code ${last[rc]}, ${last[datasets_failed]:-0} of ${last[datasets]:-0} datasets failed)$(level_mark 1)"
+        fi
+    fi
+
+    #### age of the last successful run
+    max_age=$( (. "$conf" > /dev/null 2>&1; echo "$monitor_max_age") )
+    if [[ $max_age == 0 ]]; then
+        state_text+=("age check disabled (monitor_max_age=0)")
+    elif [[ -z ${last[ok_end]} ]]; then
+        state_text+=("no successful run yet")
+    else
+        age=$((NOW - ${last[ok_end]}))
+        ok_duration=${last[ok_duration]:-0}
+        # an active run that takes longer than the last one is watched by the phase, progress and D state checks
+        if [ $running -eq 1 ] && [ $((NOW - ${st[run_start]})) -gt $ok_duration ]; then
+            ok_duration=$((NOW - ${st[run_start]}))
+        fi
+        learning=0
+        if [[ -n $max_age ]]; then
+            warn_at=$(seconds "$max_age")
+            crit_at=$((warn_at * 3))
+            source_text="monitor_max_age=$max_age"
+        else
+            # median of the intervals between the start times
+            intervals=$(sort -n "$LIB_DIR/$id.history" 2>/dev/null | awk 'NR > 1 && $1 > p { print $1 - p } { p = $1 }' | sort -n)
+            count=$(grep -c . <<< "$intervals")
+            if [ $count -eq 0 ]; then
+                warn_at=
+                source_text="learning 0/$learn_intervals"
+            else
+                interval=$(awk '{ a[NR] = $1 } END { print (NR % 2) ? a[(NR + 1) / 2] : int((a[NR / 2] + a[NR / 2 + 1]) / 2) }' <<< "$intervals")
+                grace=$((interval / 5))
+                if [ $grace -lt 300 ]; then grace=300; fi
+                warn_at=$((interval + grace + ok_duration))
+                crit_at=$((3 * interval + ok_duration))
+                if [ $crit_at -le $warn_at ]; then crit_at=$((warn_at + grace)); fi
+                if [ $count -lt $learn_intervals ]; then
+                    learning=1
+                    source_text="learning $count/$learn_intervals, preliminary interval $(duration $interval)"
+                else
+                    source_text="interval $(duration $interval) from $count runs"
+                fi
+            fi
+        fi
+        text="last successful run $(duration $age) ago ($source_text)"
+        if [[ -n $warn_at ]]; then
+            metrics=("last_success_age=$age;$warn_at;$crit_at" "${metrics[@]}")
+            if [ $age -ge $crit_at ] && [ $learning -eq 0 ]; then level=2
+            elif [ $age -ge $warn_at ]; then level=1
+            else level=0; fi
+            if [ $level -gt 0 ]; then raise $level "$text$(level_mark $level)"; else state_text+=("$text"); fi
+        else
+            metrics=("last_success_age=$age" "${metrics[@]}")
+            state_text+=("$text")
+        fi
+    fi
+
+    text=$(printf '%s, ' "${state_text[@]}")
+    text=${text%, }
+    perf=$(IFS='|'; echo "${metrics[*]}")
+    echo "$state_level \"zsync $name\" ${perf:--} ${text:-no data}"
+done
