@@ -52,9 +52,12 @@ ZCI_POOL_DST=zci-dst
 `run.sh` prüft vor jedem Lauf, dass beide Platten per by-id existieren und zu keinem fremden Pool gehören.
 
 ## Runner
-forgejo-runner im Host-Modus (die Tests brauchen das ZFS-Modul der VM) mit Label `zfs`, ein Job gleichzeitig,
-läuft als root; dazu `nfpm` für den Paketbau. Registrierung: Token der Organisation in `/root/forgejo-runner-token`,
-dann `/root/forgejo-runner-register.sh`.
+forgejo-runner (ab v13, ohne `register`) im Host-Modus, weil die Tests das ZFS-Modul der VM brauchen; ein Job
+gleichzeitig, läuft als root, dazu `nfpm` für den Paketbau. Die Verbindung steht in
+`/var/lib/forgejo-runner/config.yml` unter `server.connections` (url, uuid, Label `zfs:host`), das Token als
+systemd-Credential (`LoadCredential=token:/etc/forgejo-runner/token`, Datei mit Rechten 600) per
+`token_url: file:$CREDENTIALS_DIRECTORY/token`. Der Workflow-Job `integration` holt den Stand per git, baut das
+Paket und führt `ci.sh` aus.
 
 Snapshots legen die Tests mit je einer Sekunde Abstand an: `creation` ist sekundengenau, und zsync sortiert
 danach (Gleichstand: #30).
