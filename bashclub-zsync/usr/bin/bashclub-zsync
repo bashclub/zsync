@@ -85,6 +85,7 @@ EOF
 	exit $1
 }
 
+args=("$@")
 while getopts "hdc:" opt; do
   case $opt in
     h) usage 0 ;;
@@ -107,6 +108,46 @@ function debug() {
 function remote() {
     ssh $controlmaster $controlpath $controlpersist $sshcipher $zsync_sshport $source "$@"
 }
+
+#### one run per config at a time: the script runs again under flock, a second run is skipped
+# flock -o: the script itself does not hold the lock, so the background ssh master
+# connection (ControlPersist) does not keep the lock after the run has finished
+# only flock from util-linux (Linux): the options -o and -E are not available everywhere
+if [[ -z $ZSYNC_LOCK ]]; then
+    if flock --version 2>/dev/null | grep -q util-linux; then
+        lockdir=/run/lock
+        [ -d $lockdir ] || lockdir=/tmp
+        export ZSYNC_LOCK=$lockdir/bashclub-zsync$(readlink -m "$conf" | tr '/' '_').lock
+        flock -n -o -E 75 "$ZSYNC_LOCK" "$BASH" "$0" "${args[@]}"
+        lock_rc=$?
+        if [ $lock_rc -eq 75 ]; then
+            log "[ERROR] Another run with configuration $conf is still active (pid $(cat "$ZSYNC_LOCK" 2>/dev/null)). Skipping this run."
+            exit 1
+        fi
+        exit $lock_rc
+    fi
+    log "[WARN] flock (util-linux) not found, running without protection against concurrent runs."
+else
+    # pid of the active run for the message above
+    echo $$ > "$ZSYNC_LOCK"
+fi
+
+#### log file without logrotate (e.g. TrueNAS: cron job with ">> /mnt/<pool>/.../bashclub-zsync.log")
+# if the output is appended to a file whose directory no logrotate config mentions,
+# the script rotates it at 10 MiB and keeps 4 compressed old logs
+logfile=$(readlink -f /proc/$$/fd/1 2>/dev/null)
+if [[ -f $logfile ]] && [ $(stat -c %s "$logfile") -gt 10485760 ] \
+    && ! cat /etc/logrotate.conf /etc/logrotate.d/* 2>/dev/null | grep -qF "$(dirname "$logfile")/"; then
+    errfile=$(readlink -f /proc/$$/fd/2 2>/dev/null)
+    for i in 3 2 1; do
+        if [ -f "$logfile.$i.gz" ]; then mv -f "$logfile.$i.gz" "$logfile.$((i+1)).gz"; fi
+    done
+    mv -f "$logfile" "$logfile.1"
+    exec >> "$logfile"
+    if [[ $errfile == "$logfile" ]]; then exec 2>&1; fi
+    gzip -f "$logfile.1"
+    log "[INFO] Log file rotated, previous log: $logfile.1.gz"
+fi
 
 # load config file
 if [ -f $conf ]; then
@@ -247,7 +288,8 @@ if [ $zfs_auto_snapshot_keep -gt 1 ]; then
 
     if [[ $snapshot_filter == "" ]]; then
         snapshot_filter="$zfs_auto_snapshot_label"
-    else
+    elif [[ "|$snapshot_filter|" != *"|$zfs_auto_snapshot_label|"* ]]; then
+        # only if not already in the filter, otherwise each interval is checked twice
         snapshot_filter="$snapshot_filter|$zfs_auto_snapshot_label"
     fi
 fi
@@ -366,9 +408,14 @@ for name in "${syncvols[@]}"; do
 done
 
 #### monitoring: checkzfs output into the checkmk spool (local or on the source)
+# the output goes to a temporary file of this run, is copied next to the spool file as dot file
+# (ignored by the checkmk agent) and then renamed, so the agent never reads a partial file
 if [ $checkzfs_disabled -eq 0 ]; then
     log "[INFO] Running checkzfs..."
-    spoolfile=/tmp/${checkzfs_spool_maxage}_${checkzfs_prefix}
+    spooldir=/var/lib/check_mk_agent/spool
+    spoolname=${checkzfs_spool_maxage}_${checkzfs_prefix}
+    spoolfile=$(mktemp /tmp/.$spoolname.XXXXXX)
+    spooltmp=$spooldir/$(basename $spoolfile)
     echo "<<<local>>>" > $spoolfile
 
     if [[ $checkzfs_local -eq 0 ]]; then
@@ -378,12 +425,15 @@ if [ $checkzfs_disabled -eq 0 ]; then
 
     debug "Command:\n$checkzfs $c_key $c_value --output checkmk --threshold $checkzfs_max_age --maxsnapshots $checkzfs_max_snapshot_count --prefix $checkzfs_prefix --replicafilter "^${target}" --filter \"$checkzfs_filter\" >> $spoolfile"
     $checkzfs $c_key $c_value --output checkmk --threshold $checkzfs_max_age --maxsnapshots $checkzfs_max_snapshot_count --prefix $checkzfs_prefix --replicafilter "^${target}" --filter "$checkzfs_filter" >> $spoolfile
+    # mktemp creates the file with mode 600, keep the previous mode of the spool file
+    chmod 644 $spoolfile
     if [ $checkzfs_spool -eq 0 ] || [ $checkzfs_local -gt 0 ]; then
-        mkdir -p /var/lib/check_mk_agent/spool/
-        mv $spoolfile /var/lib/check_mk_agent/spool/
+        mkdir -p $spooldir
+        mv $spoolfile $spooltmp && mv $spooltmp $spooldir/$spoolname
     else
-        remote "mkdir -p /var/lib/check_mk_agent/spool/"
-        scp -P ${sshport} $spoolfile ${source}:/var/lib/check_mk_agent/spool/
+        remote "mkdir -p $spooldir"
+        scp -P ${sshport} $spoolfile ${source}:$spooltmp && remote "mv $spooltmp $spooldir/$spoolname"
+        rm -f $spoolfile
     fi
 fi
 

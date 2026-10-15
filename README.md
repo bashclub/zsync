@@ -86,9 +86,10 @@ chmod +x bashclub-zsync remote-snapshot-manager checkzfs
 ./bashclub-zsync -c "$dir/zsync.conf"
 
 # prints the command for the cron job
-echo "$dir/bashclub-zsync -c $dir/zsync.conf > $dir/bashclub-zsync.log 2>&1"
+echo "$dir/bashclub-zsync -c $dir/zsync.conf >> $dir/bashclub-zsync.log 2>&1"
 ~~~
 `bashclub-zsync` finds `remote-snapshot-manager` and `checkzfs` in its own directory. Create the cron job in the web UI under *System → Advanced Settings → Cron Jobs* with the command printed by the last line.
+The log is not covered by logrotate there, so `bashclub-zsync` rotates it itself at 10 MiB and keeps 4 compressed old logs (`bashclub-zsync.log.1.gz` … `.4.gz`).
 
 `zfs-auto-snapshot` is not available on TrueNAS, keep `zfs_auto_snapshot_engine="internal"`.
 
@@ -164,14 +165,18 @@ checkzfs_spool_maxage=87000
 #### cron.d example
 File: /etc/cron.d/bashclub-zsync
 ~~~
-00 23 * * * root /usr/bin/bashclub-zsync -c /etc/bashclub/zsync.conf > /var/log/bashclub-zsync/zsync.log
+00 23 * * * root /usr/bin/bashclub-zsync -c /etc/bashclub/zsync.conf >> /var/log/bashclub-zsync/zsync.log
 ~~~
 
 #### cron.{hourly|daily|weekly|monthly}
 File: /etc/cron.hourly/bashclub-zsync
 ~~~
-/usr/bin/bashclub-zsync -c /etc/bashclub/zsync.conf > /var/log/bashclub-zsync/zsync.log
+/usr/bin/bashclub-zsync -c /etc/bashclub/zsync.conf >> /var/log/bashclub-zsync/zsync.log
 ~~~
+
+Only one run per configuration is active at a time, a second run is skipped with an error message.
+Append to the log (`>>`): `>` would empty the log of a run that is still active, even if the new run is skipped.
+Logs in `/var/log/bashclub-zsync/` are rotated weekly by logrotate. A log file in a directory that no logrotate config mentions is rotated by `bashclub-zsync` itself at 10 MiB (4 compressed old logs are kept).
 
 ## Releases
 Packages are built by Forgejo CI on https://code.bashclub.org/bashclub/zsync:
