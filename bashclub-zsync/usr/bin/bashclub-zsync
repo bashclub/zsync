@@ -23,7 +23,7 @@ conf=/etc/bashclub/zsync.conf
 # replication target path on local machine 
 target=pool/dataset
 
-# ssh address of remote machine
+# ssh address of remote machine, "local" = datasets of this machine without ssh (pool to pool)
 source=user@host
 
 # ssh port of remote machine
@@ -139,9 +139,13 @@ function throttle() {
     fi
 }
 
-# run a command on the source host
+# run a command on the source host (source=local: on this host without ssh)
 function remote() {
-    ssh $controlmaster $controlpath $controlpersist $sshcipher $zsync_sshport $source "$@"
+    if [[ $source == "local" ]]; then
+        bash -c "$*"
+    else
+        ssh $controlmaster $controlpath $controlpersist $sshcipher $zsync_sshport $source "$@"
+    fi
 }
 
 #### run status for monitoring (checkmk local check bashclub_zsync), file names from the config path
@@ -283,7 +287,7 @@ else
 fi
 
 if [[ -z $source ]]; then
-    log "[ERROR] source is empty. For local replication use ssh to localhost, e.g. source=root@localhost"
+    log "[ERROR] source is empty. For local replication without ssh use source=local"
     exit 1
 fi
 zsync_sshport=-p$sshport
@@ -304,27 +308,36 @@ controlmaster=-oControlMaster=auto
 controlpath=-oControlPath=~/.ssh/bashclub-zsync-%r@%h-%p
 controlpersist=-oControlPersist=15
 
+if [[ $source == "local" ]]; then
+    log "[INFO] Local mode: replicating datasets of this host without ssh (source=local)"
+    # checkzfs checks the local pools, its output goes to the local spool
+    checkzfs_local=1
+fi
+
 local_os_id=$(grep -E "^ID=" /etc/os-release | cut -d'=' -f2)
-remote_os_id=$(remote "grep -E \"^ID=\" /etc/os-release | cut -d'=' -f2")
+# cipher: aes256-gcm if both hosts support aes (not needed in local mode)
+if [[ $source != "local" ]]; then
+    remote_os_id=$(remote "grep -E \"^ID=\" /etc/os-release | cut -d'=' -f2")
 
-if [[ $local_os_id == "freebsd" ]]; then
-    local_aes=$(grep -o AES /var/run/dmesg.boot | uniq)
-else
-    local_aes=$(grep -m1 -o aes /proc/cpuinfo | uniq)
-fi
+    if [[ $local_os_id == "freebsd" ]]; then
+        local_aes=$(grep -o AES /var/run/dmesg.boot | uniq)
+    else
+        local_aes=$(grep -m1 -o aes /proc/cpuinfo | uniq)
+    fi
 
-if [[ $remote_os_id == "freebsd" ]]; then
-    remote_aes=$(remote "grep -o AES /var/run/dmesg.boot | uniq")
-else
-    remote_aes=$(remote "grep -m1 -o aes /proc/cpuinfo | uniq")
-fi
+    if [[ $remote_os_id == "freebsd" ]]; then
+        remote_aes=$(remote "grep -o AES /var/run/dmesg.boot | uniq")
+    else
+        remote_aes=$(remote "grep -m1 -o aes /proc/cpuinfo | uniq")
+    fi
 
-if [[ $local_aes == "aes" ]] && [[ $remote_aes == "aes" ]]; then
-    debug "Switching to cipher aes256-gcm@openssh.com"
-    sshcipher=-caes256-gcm@openssh.com
-else
-    debug "Using default cipher chacha20-poly1305@openssh.com"
-    sshcipher=-cchacha20-poly1305@openssh.com
+    if [[ $local_aes == "aes" ]] && [[ $remote_aes == "aes" ]]; then
+        debug "Switching to cipher aes256-gcm@openssh.com"
+        sshcipher=-caes256-gcm@openssh.com
+    else
+        debug "Using default cipher chacha20-poly1305@openssh.com"
+        sshcipher=-cchacha20-poly1305@openssh.com
+    fi
 fi
 
 #### datasets to replicate: zfs user property $tag on the source
@@ -338,6 +351,10 @@ IFS=$'\n'
 for zvol in $(remote "zfs get -H -o name,value,source -t filesystem,volume $tag"); do
     # property source: local, received, inherited from <dataset> or default
     IFS=$'\t' read -r name value property_source <<< "$zvol"
+    # local mode: the replicas in the target can inherit the property from a dataset of the same pool
+    if [[ $source == "local" ]] && { [[ $name == "$target" ]] || [[ $name == "$target/"* ]]; }; then
+        continue
+    fi
     if [[ $value == "subvols" ]]; then
         if [[ $property_source != "local" ]] && [[ $property_source != "received" ]]; then
             include_list="${include_list}\t${name}\n"
@@ -474,7 +491,11 @@ for name in "${syncvols[@]}"; do
         if [[ $zfs_auto_snapshot_engine == "internal" ]]; then
             debug "Running remote-snapshot-manager"
             status snapshot "$name"
-            $rsm $debug -d $name -k $zfs_auto_snapshot_keep -l $zfs_auto_snapshot_label -h $source -p $sshport
+            if [[ $source == "local" ]]; then
+                $rsm $debug -d $name -k $zfs_auto_snapshot_keep -l $zfs_auto_snapshot_label
+            else
+                $rsm $debug -d $name -k $zfs_auto_snapshot_keep -l $zfs_auto_snapshot_label -h $source -p $sshport
+            fi
         fi
     fi
 

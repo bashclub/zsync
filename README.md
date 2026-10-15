@@ -117,7 +117,7 @@ The installation package provides `/etc/bashclub/zsync.conf.example` with the de
 # replication target path on local machine 
 target=pool/dataset
 
-# ssh address of remote machine
+# ssh address of remote machine, "local" = datasets of this machine without ssh (pool to pool)
 source=user@host
 
 # ssh port of remote machine
@@ -198,6 +198,9 @@ conf=/etc/bashclub/zsync.conf
 ( . "$conf"; ssh -p "$sshport" "$source" "zfs list -H -t snapshot -o name | grep '@zfs-auto-snap_${zfs_auto_snapshot_label}-' | xargs -r -n1 zfs destroy -v" )
 ~~~
 
+### Local replication (pool to pool)
+To replicate datasets of the same host, e.g. from `rpool` to a backup pool, set `source=local`: the commands run on this host without ssh (no ssh login to localhost needed), `remote-snapshot-manager` and checkzfs work locally. Datasets in the target are never selected, also if the target is in the same pool and inherits `bashclub:zsync`. `source=root@localhost` still works as before.
+
 ### Bandwidth limit
 `bandwidth_limit` limits the transfer to the given bytes per second, e.g. `bandwidth_limit=10m` (10 MiB/s, about 84 Mbit/s) for an offsite backup over a shared line. The limit is applied on the backup server with `pv` between `zfs send` and `zfs receive`; install it with `apt install pv`. Without `pv` the transfer runs without limit and the log shows a warning.
 
@@ -267,7 +270,6 @@ The version shown by `bashclub-zsync -h` is read from the installed package, so 
 # Roadmap
 
 Following features are on the wishlist:
-- Local replication without SSH connections
 - Removable device support (Autostart on connect, remove when finished)
 - E-Mail notifications
 - Internal verification logic for checkzfs replacement
