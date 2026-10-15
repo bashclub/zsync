@@ -199,21 +199,21 @@ checkzfs_headline="[INFO] checkzfs filter:"
 checkzfs_filter=
 IFS=$'\n'
 for zvol in $(remote "zfs get -H -o name,value,source -t filesystem,volume $tag"); do
-    name=$(echo $zvol | cut -f1)
-    value=$(echo $zvol | cut -f2)
+    # property source: local, received, inherited from <dataset> or default
+    IFS=$'\t' read -r name value property_source <<< "$zvol"
     if [[ $value == "subvols" ]]; then
-        if [[ $(echo $zvol | grep -vE "local|received") ]]; then
+        if [[ $property_source != "local" ]] && [[ $property_source != "received" ]]; then
             include_list="${include_list}\t${name}\n"
             syncvols+=("$name")
-        elif [[ $(echo $zvol | grep "local") ]]; then
+        elif [[ $property_source == "local" ]]; then
             checkzfs_filter="#$name/|$checkzfs_filter"
         fi
     elif [[ $value == "all" ]]; then
-        if [[ $(echo $zvol | grep -v received) ]]; then
+        if [[ $property_source != "received" ]]; then
             include_list="${include_list}\t${name}\n"
             syncvols+=("$name")
         fi
-        if [[ $(echo $zvol | grep "local") ]]; then
+        if [[ $property_source == "local" ]]; then
             checkzfs_filter="#$name|$checkzfs_filter"
         fi
     else
