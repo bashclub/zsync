@@ -90,6 +90,6 @@ case $1 in
     [[ -n $RECV_FAIL && "$*" == *$RECV_FAIL* ]] && { echo "cannot receive: simulated failure" >&2; exit 1; }
     ;;
   rollback) echo "${@: -1}" > "$ZTEST_STATE/rollback_$(cut -d@ -f1 <<< "${@: -1}" | tr / _)" ;;
-  create|set|destroy|bookmark) ;;
+  create|set|destroy|bookmark|hold|release) ;;
 esac
 exit 0
