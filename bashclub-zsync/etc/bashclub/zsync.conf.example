@@ -1,7 +1,7 @@
 # replication target path on local machine 
 target=pool/dataset
 
-# ssh address of remote machine
+# ssh address of remote machine, "local" = datasets of this machine without ssh (pool to pool)
 source=user@host
 
 # ssh port of remote machine
