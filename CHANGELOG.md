@@ -27,6 +27,7 @@
 - a log file in a directory that no logrotate config mentions (e.g. on TrueNAS SCALE) is rotated by bashclub-zsync itself at 10 MiB, 4 compressed old logs are kept
 
 ### Fixed
+- security: the Checkmk check (root) no longer runs the configuration named in a status file and uses only numbers from the status files; it reads settings as text and accepts only a configuration of root that no one else may write (status files are writable for the group bashclub-zsync) (#51)
 - `zsync-autorun` powers off the whole disk of the partition also for NVMe names (`nvme0n1p1`), and no longer stops before export and mail if the replication failed without checkzfs output or the power-off fails (#14)
 - the socket of the shared ssh connection is named by its hash (`%C`) and kept in a private directory in `/tmp` for long home directories, so long host names or home directories no longer exceed the limit of a unix socket path (#13)
 - the lock of a configuration is kept in `/run/bashclub-zsync` (group `bashclub-zsync`): in `/run/lock` the kernel (`protected_regular`) refused the lock file of another user, so runs failed after switching a configuration between root and `run_as` (#13)

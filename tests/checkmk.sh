@@ -4,7 +4,7 @@
 here=$(cd "$(dirname "$0")" && pwd)
 check=$(readlink -f "${1:-$here/../bashclub-zsync/usr/share/bashclub-zsync/checkmk/bashclub_zsync}")
 w=$(mktemp -d); trap 'rm -rf "$w"' EXIT
-export ZSYNC_RUN_DIR=$w/run ZSYNC_LIB_DIR=$w/lib ZSYNC_PROC=$w/proc ZSYNC_CHECK_CONF=$w/none ZSYNC_DEFAULT_DIR=$w/default
+export ZSYNC_RUN_DIR=$w/run ZSYNC_LIB_DIR=$w/lib ZSYNC_PROC=$w/proc ZSYNC_CHECK_CONF=$w/none ZSYNC_DEFAULT_DIR=$w/default ZSYNC_CONF_OWNER=$(id -u)
 T=1760000000; id=_etc_bashclub_pve1.conf; conf=$w/etc/pve1.conf
 failed=0; count=0
 
@@ -123,6 +123,19 @@ expect "Rollback im letzten Lauf: OK mit Hinweis" 0 "rolled back by the last run
 reset; last 0 $((T - 1800)); history 3600 6; for x in a b c d e; do ds pool/$x broken $T "x"; done
 expect "lange Liste wird gekürzt" 2 "full replication needed for 5 datasets: pool/a \(x, since 0s\), pool/b \(x, since 0s\), pool/c \(x, since 0s\) \(\+2 more\)"
 
+# manipulierte Status-Dateien (Gruppe bashclub-zsync darf sie schreiben): nichts davon wird ausgeführt
+reset; last 0 $((T - 1800)); history 3600 6
+mkdir -p "$w/evil"; printf 'touch %s/EXECUTED\n' "$w" > "$w/evil/pve1.conf"
+sed -i "s#^config=.*#config=$w/evil/pve1.conf#" "$w/lib/$id.last"; chmod 666 "$w/evil/pve1.conf"
+expect "Config für andere schreibbar: nicht gelesen" 1 "is not a file of root that only root may write"
+chmod 644 "$w/evil/pve1.conf"; run > /dev/null 2>&1; ((count++))
+if [ -e "$w/EXECUTED" ]; then echo "FAIL Config aus Status-Datei wurde ausgeführt"; ((failed++)); else echo "ok   Config aus Status-Datei wird nicht ausgeführt"; fi
+reset; last 0 $((T - 1800)); history 3600 6; sed -i "s#^ok_end=.*#ok_end=a[\$(touch $w/EXECUTED)]#; s#^end=.*#end=b[\$(touch $w/EXECUTED)]#" "$w/lib/$id.last"
+state run 'x[$(touch '"$w"'/EXECUTED)]'; ds pool/x broken 'y[$(touch '"$w"'/EXECUTED)]' "x"
+run > /dev/null 2>&1; ((count++))
+if [ -e "$w/EXECUTED" ]; then echo "FAIL Ausdruck aus Status-Datei wurde ausgewertet"; ((failed++)); else echo "ok   Ausdrücke statt Zahlen werden nicht ausgewertet"; fi
+reset 'monitor_max_age="$(touch '"$w"'/EXECUTED)"'; last 0 $((T - 1800)); history 3600 6
+expect "ungültiges monitor_max_age ignoriert" 0 "invalid monitor_max_age"
 # systemd-Timer der Config: Intervall aus letztem und nächstem Start, keine Lernphase
 cat > "$w/systemctl" << 'EOS'
 #!/bin/bash
