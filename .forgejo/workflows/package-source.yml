@@ -1,4 +1,5 @@
 # Paket bashclub-zsync-source (Quelle), eigener Lauf: bauen, testen, veröffentlichen wie bashclub-zsync
+name: bashclub-zsync-source
 on:
   push:
     branches: [main]
