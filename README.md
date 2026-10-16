@@ -352,20 +352,30 @@ Then continue with block 6 of [Running without root](#running-without-root). On 
 Only `ssh-ed25519` keys are accepted.
 
 ### Run with systemd timers
-Each configuration `/etc/bashclub/<name>.conf` can have its own timer `bashclub-zsync@<name>.timer` (Proxmox VE, Debian, Ubuntu). A run missed while the host was off is started after the next boot, a timer never starts a second run while the previous one is still active, and the output goes to the journal. The Checkmk check takes the interval for the age check from the timer.
+The configuration decides who starts its runs (`trigger`):
+- `cron` – also without the setting: the configuration runs as before from cron (or by hand), nothing is changed by an update
+- `systemd` – a timer `bashclub-zsync@<name>.timer` for `/etc/bashclub/<name>.conf`, created from the settings `schedule` (cron format, several separated by `;`), `run_as` (user, empty = root) and `log_file` (empty = journal)
+- `autorun` – removable disk (`zsync-autorun@`, udev): no timer, no age check in the Checkmk check (unless `monitor_max_age` is set)
 
-Enable the timer of `/etc/bashclub/zsync.conf` (schedule in [systemd.time](https://www.freedesktop.org/software/systemd/man/latest/systemd.time.html) format, e.g. `daily`, `hourly`, `"*-*-* 23:00"`, `"Mon..Fri *-*-* 06..22:00/15"`) and show all configurations, timers and remaining cron jobs:
+A run missed while the host was off is started after the next boot, a timer never starts a second run while the previous one is still active, and the Checkmk check takes the interval for the age check from the timer.
+
+Switch `/etc/bashclub/zsync.conf` to a timer at 23:00 (writes `trigger=systemd` and `schedule` into the configuration and activates it), show all configurations, and read the log:
 ~~~
-bashclub-zsync-timer enable zsync "*-*-* 23:00"
+bashclub-zsync-timer enable zsync "0 23 * * *"
 bashclub-zsync-timer list
 journalctl -u bashclub-zsync@zsync
 ~~~
-Take over existing cron jobs that run `bashclub-zsync -c /etc/bashclub/<name>.conf`, also scripts in `/etc/cron.{hourly,daily,weekly,monthly}`: schedule, user and log file are kept, the cron lines are commented out and the timers enabled. The dry run only shows what would happen; schedules that cannot be converted exactly (e.g. `@reboot`, `6-22/2`) are listed and left as they are:
+After editing `trigger`, `schedule`, `run_as` or `log_file` in a configuration, activate the changes for all configurations; the dry run only shows what would be started, updated or stopped:
+~~~
+bashclub-zsync-timer sync --dry-run
+bashclub-zsync-timer sync
+~~~
+Take over existing cron jobs that run `bashclub-zsync -c /etc/bashclub/<name>.conf`, also scripts in `/etc/cron.{hourly,daily,weekly,monthly}`: schedule, user and log file go into the configuration, the cron lines are commented out and the timers activated. Schedules that systemd cannot run exactly (e.g. `@reboot`) are listed and left as they are:
 ~~~
 bashclub-zsync-timer migrate --dry-run
 bashclub-zsync-timer migrate
 ~~~
-`--user <user>` runs a timer as unprivileged user (see "Running without root"), `--log <file>` appends the output to a file instead of the journal, `bashclub-zsync-timer disable <name>` stops a timer. The package does not migrate anything by itself, it only shows a hint if cron jobs exist. Removable disks keep using `zsync-autorun@` (udev), TrueNAS SCALE keeps using cron.
+`bashclub-zsync-timer enable <name> --user <user> --log <file>` sets `run_as` and `log_file`, `bashclub-zsync-timer disable <name>` writes `trigger=cron` and stops the timer. The timers are generated at boot and with `systemctl daemon-reload` (generator `bashclub-zsync-generator`), so a configuration with `trigger=systemd` also gets its timer after a reboot without `sync`. The package does not change any configuration by itself, it only shows a hint if cron jobs exist. TrueNAS SCALE keeps using cron.
 
 ### Define a cronjob
 #### cron.d example

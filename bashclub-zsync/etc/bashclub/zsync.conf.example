@@ -33,6 +33,20 @@ zfs_auto_snapshot_label_match="strict"
 # empty = derived from the start times of the previous runs, 0 = no age check (e.g. removable disks)
 monitor_max_age=""
 
+# who starts the runs of this configuration: cron (also without this setting), systemd (timer
+# bashclub-zsync@<name>.timer from the settings below, activate with: bashclub-zsync-timer sync)
+# or autorun (removable disk, zsync-autorun: no timer, no age check in the monitoring)
+trigger=systemd
+
+# trigger=systemd: schedule in cron format, several separated by ";", e.g. "*/15 6-22 * * 1-5" or "@daily"
+schedule="@daily"
+
+# trigger=systemd: user of the run (operation without root, see README), empty = root
+run_as=""
+
+# trigger=systemd: append the output to this file, empty = journal (journalctl -u bashclub-zsync@<name>)
+log_file=""
+
 # newest target snapshot does not exist on the source anymore (rollback or deleted on the source):
 # 1 = roll the target back to the newest common snapshot and continue from there,
 # 0 = no replication of this dataset until it is fixed manually (previous behavior)
