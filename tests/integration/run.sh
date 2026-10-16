@@ -350,6 +350,30 @@ case_same_second() {
 }
 
 # Checkmk-Check gegen einen echten erfolgreichen Lauf
+# fehlt der älteste Quell-Snapshot am Ziel, ist nur die Rotation blockiert: Warnung, Exit 0, Status cleanup_blocked
+case_cleanup_blocked() {
+  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  for n in 01 02 03; do write "$ZCI_POOL_SRC/data" 1 f$n; snap "$ZCI_POOL_SRC/data" $n; done
+  config cleanup_blocked; zsync
+  zfs destroy "$ZCI_POOL_DST/cleanup_blocked/$ZCI_POOL_SRC/data@zfs-auto-snap_daily-01"
+  snap "$ZCI_POOL_SRC/data" 04
+  zsync
+  equal "Exit-Code trotz blockierter Rotation" 0 "$rc"
+  equal "Delta repliziert" "zfs-auto-snap_daily-02 zfs-auto-snap_daily-03 zfs-auto-snap_daily-04" "$(snaps "$ZCI_POOL_DST/cleanup_blocked/$ZCI_POOL_SRC/data")"
+  check "Warnung im Log" grep -q "\[WARN\] $ZCI_POOL_SRC/data - the oldest source snapshot of interval daily" <(last_run_log)
+  equal "Status des Datasets" cleanup_blocked "$(state_of "$ZCI_POOL_SRC/data")"
+  check "Checkmk: WARN" grep -qE '^1 "zsync cleanup_blocked" .*rotation on the target blocked' <<< "$(check_output)"
+}
+# Quelle nicht erreichbar: sofort Exit 1, Fehler im Log und im Status, keine Replikation
+case_source_unreachable() {
+  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; snap "$ZCI_POOL_SRC/data" 01
+  config source_unreachable; sed -i 's/^sshport=22$/sshport=1/' "$conf"
+  zsync
+  equal "Exit-Code" 1 "$rc"
+  check "Fehler im Log" grep -q "\[ERROR\] source root@localhost (port 1) is not reachable" <(last_run_log)
+  check "nichts repliziert" not exists "$ZCI_POOL_DST/source_unreachable/$ZCI_POOL_SRC/data"
+  equal "Status: Lauf fehlgeschlagen" "rc=1" "$(grep '^rc=' "$LIB_DIR/$id.last")"
+}
 case_checkmk() {
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; snap "$ZCI_POOL_SRC/data" 01
   config checkmk; zsync
@@ -358,7 +382,7 @@ case_checkmk() {
   check "Statusdatei des Laufs entfernt" test ! -e "$RUN_DIR/$id.state"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second checkmk)
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second cleanup_blocked source_unreachable checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
 rm -rf /var/log/zsync-ci

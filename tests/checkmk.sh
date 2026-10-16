@@ -110,6 +110,8 @@ ds pool/untagged orphan_unselected $((T - 90000)) "is not selected for replicati
 expect "verwaist seit 25 h: WARN" 1 "2 datasets only on the target: pool/gone \(does not exist on the source, since 1d 1h\), pool/untagged \(is not selected for replication anymore, since 1d 1h\)"
 reset; last 0 $((T - 1800)); history 3600 6; ds pool/kept orphan_kept $((T - 900000)) "does not exist on the source"; ds pool/m no_snapshots $T ""
 expect "quittiert und ohne Snapshots: OK mit Hinweis" 0 "1 kept replicas without source, 1 datasets without matching snapshots"
+reset; last 0 $((T - 1800)); history 3600 6; ds pool/b cleanup_blocked $((T - 7200)) "oldest source snapshot zfs-auto-snap_backup-2026-07-20-1051 missing on the target"
+expect "Rotation am Ziel blockiert: WARN, Lauf ok" 1 "rotation on the target blocked: pool/b \(oldest source snapshot zfs-auto-snap_backup-2026-07-20-1051 missing on the target, since 2h 0m\)"
 reset; last 0 $((T - 1800)); history 3600 6; ds pool/x rolled_back $T "rolled back to daily-02, 2 snapshots destroyed"
 expect "Rollback im letzten Lauf: OK mit Hinweis" 0 "rolled back by the last run: pool/x \(rolled back to daily-02, 2 snapshots destroyed\)"
 reset; last 0 $((T - 1800)); history 3600 6; for x in a b c d e; do ds pool/$x broken $T "x"; done
@@ -122,8 +124,8 @@ case $1 in
   is-active) [[ $ZTEST_TIMER == on ]] ;;
   show)
     case "$*" in
-      *"-p LastTriggerUSec "*) if [ "$ZTEST_TIMER_LAST" -gt 0 ]; then date -d "@$ZTEST_TIMER_LAST" '+%a %Y-%m-%d %H:%M:%S %Z'; else echo; fi ;;
-      *"-p NextElapseUSecRealtime "*) date -d "@$ZTEST_TIMER_NEXT" '+%a %Y-%m-%d %H:%M:%S %Z' ;;
+      *"-p LastTriggerUSec "*) if [ "$ZTEST_TIMER_LAST" -gt 0 ]; then LC_ALL=C date -d "@$ZTEST_TIMER_LAST" '+%a %Y-%m-%d %H:%M:%S %Z'; else echo; fi ;;
+      *"-p NextElapseUSecRealtime "*) LC_ALL=C date -d "@$ZTEST_TIMER_NEXT" '+%a %Y-%m-%d %H:%M:%S %Z' ;;
     esac ;;
 esac
 EOS

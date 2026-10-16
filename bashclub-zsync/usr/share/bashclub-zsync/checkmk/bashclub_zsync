@@ -216,7 +216,7 @@ for id in $ids; do
     fi
 
     #### state per dataset (written by the last run)
-    declare -a ds_crit=() ds_risk=() ds_div=() ds_orphan=() ds_failed=()
+    declare -a ds_crit=() ds_risk=() ds_div=() ds_orphan=() ds_failed=() ds_blocked=()
     kept=0; nosnap=0; orphan_new=0; rolled_back=()
     if [[ -f $LIB_DIR/$id.datasets ]]; then
         while IFS=$'\t' read -r ds dstate since detail; do
@@ -224,6 +224,7 @@ for id in $ids; do
             case $dstate in
                 broken|empty) ds_crit+=("$ds ($detail, since $age_text)") ;;
                 at_risk) ds_risk+=("$ds ($detail)") ;;
+                cleanup_blocked) ds_blocked+=("$ds ($detail, since $age_text)") ;;
                 diverged) ds_div+=("$ds ($detail, since $age_text)") ;;
                 failed) ds_failed+=("$ds (since $age_text)") ;;
                 orphan_missing|orphan_unselected)
@@ -246,6 +247,9 @@ for id in $ids; do
     fi
     if [ ${#ds_div[@]} -gt 0 ]; then
         raise 1 "newest target snapshot missing on the source: $(shortlist "${ds_div[@]}")$(level_mark 1)"
+    fi
+    if [ ${#ds_blocked[@]} -gt 0 ]; then
+        raise 1 "rotation on the target blocked: $(shortlist "${ds_blocked[@]}")$(level_mark 1)"
     fi
     if [ ${#ds_orphan[@]} -gt 0 ]; then
         raise 1 "${#ds_orphan[@]} datasets only on the target: $(shortlist "${ds_orphan[@]}")$(level_mark 1)"

@@ -9,5 +9,11 @@ while (( i < ${#args[@]} )); do
   ((i++))
 done
 cmd="${args[*]:i}"
+# Szenario mit SSH_FAIL=1: Quelle nicht erreichbar (wie ssh: Exit 255)
+SSH_FAIL=0; . "$ZTEST_SCENARIO"
+if [[ $SSH_FAIL == 1 ]]; then
+  echo "ssh [unreachable] $host: ${args[*]:i}" >> "$ZTEST_LOG"
+  echo "ssh: connect to host $host port 22: Connection refused" >&2; exit 255
+fi
 echo "ssh [$(printf '%s\n' "${opts[@]}" | sort | tr '\n' ' ')] $host: $cmd" >> "$ZTEST_LOG"
 ZSIDE=source exec bash -c "$cmd"
