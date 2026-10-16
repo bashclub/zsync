@@ -296,39 +296,68 @@ transfer_resume=1"
 # systemd-Timer (#12): echter Timer und Dienst, Checkmk liest das Intervall aus dem Timer, Migration von Cronjobs
 # (die Test-Cronjobs liegen in einem eigenen Verzeichnis, der cron der VM führt sie nicht aus)
 case_timer() {
-  local name=zci-timer tconf=/etc/bashclub/zci-timer.conf crondir=/tmp/zci-cron unit
+  local name=zci-timer tconf=/etc/bashclub/zci-timer.conf lconf=/etc/bashclub/zci-legacy.conf crondir=/tmp/zci-cron unit=bashclub-zsync@zci-timer.timer
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; snap "$ZCI_POOL_SRC/data" 01
-  config timer; cp "$conf" "$tconf"; conf=$tconf; id=$(tr '/' '_' <<< "$conf")
-  check "Timer einschalten" bashclub-zsync-timer enable $name "*-*-* 03:00"
-  equal "Timer eingeschaltet" enabled "$(systemctl is-enabled bashclub-zsync@$name.timer)"
-  check "Zeitplan aus dem Drop-in" grep -q 'OnCalendar=\*-\*-\* 03:00' <<< "$(systemctl show -p TimersCalendar --value bashclub-zsync@$name.timer)"
+  config timer; cp "$conf" "$tconf"; cp "$conf" "$lconf"; conf=$tconf; id=$(tr '/' '_' <<< "$conf")
+  # Bestand: Configs ohne trigger bekommen keinen Timer, auch nicht durch daemon-reload oder sync
+  systemctl daemon-reload
+  check "ohne trigger: kein Timer nach daemon-reload" not systemctl is-active --quiet bashclub-zsync@zci-legacy.timer
+  check "ohne trigger: sync startet nichts" grep -q "no configuration with trigger=systemd" <<< "$(bashclub-zsync-timer sync)"
+  check "ohne trigger: kein Timer nach sync" not systemctl is-active --quiet $unit
+  # enable schreibt die Config, der Generator erzeugt den Timer
+  check "Timer einschalten" bashclub-zsync-timer enable $name "0 3 * * *"
+  check "Config: trigger=systemd" grep -qx 'trigger=systemd' "$tconf"
+  check "Config: schedule im Cron-Format" grep -qx 'schedule="0 3 \* \* \*"' "$tconf"
+  equal "Timer vom Generator" enabled-runtime "$(systemctl is-enabled $unit)"
+  check "Timer aktiv" systemctl is-active --quiet $unit
+  check "Zeitplan umgerechnet" grep -q 'OnCalendar=\*-\*-\* 03:00:00' <<< "$(systemctl show -p TimersCalendar --value $unit)"
   local since; since=$(date '+%Y-%m-%d %H:%M:%S')
   systemctl start bashclub-zsync@$name.service
   equal "Dienst erfolgreich" success "$(systemctl show -p Result --value bashclub-zsync@$name.service)"
   equal "repliziert" "zfs-auto-snap_daily-01" "$(snaps "$ZCI_POOL_DST/timer/$ZCI_POOL_SRC/data")"
   check "Log im Journal" grep -q 'Reading configuration /etc/bashclub/zci-timer.conf' <<< "$(journalctl -u bashclub-zsync@$name.service --since "$since" --no-pager)"
   check "Checkmk: Intervall aus dem Timer" grep -q "from bashclub-zsync@$name.timer" <<< "$(check_output)"
+  # Zeitplan und Benutzer in der Config ändern, sync übernimmt sie
+  sed -i 's/^schedule=.*/schedule="*\/30 * * * *"/' "$tconf"; echo "run_as=nobody" >> "$tconf"
+  check "Probelauf sync" grep -q "plan  update $unit" <<< "$(bashclub-zsync-timer sync --dry-run)"
+  check "sync nach Änderung" bashclub-zsync-timer sync
+  check "neuer Zeitplan" grep -q 'OnCalendar=\*-\*-\* \*:00/30:00' <<< "$(systemctl show -p TimersCalendar --value $unit)"
+  equal "Benutzer aus run_as" nobody "$(systemctl show -p User --value bashclub-zsync@$name.service)"
+  sed -i '/^run_as=/d' "$tconf"
+  sed -i 's/^schedule=.*/schedule="@reboot"/' "$tconf"
+  check "ungültiger Zeitplan: sync meldet Fehler" grep -q "error $name: schedule '@reboot'" <<< "$(bashclub-zsync-timer sync --dry-run)"
+  sed -i 's/^schedule=.*/schedule="0 3 * * *"/' "$tconf"
+  # Wechseldatenträger: list erkennt die Verwendung durch zsync-autorun
+  ln -sfn "$lconf" /etc/default/zsync-autorun@zci-usb
+  check "list: Hinweis auf autorun" grep -q "zci-legacy is used by zsync-autorun@zci-usb: set trigger=autorun" <<< "$(bashclub-zsync-timer list)"
+  rm -f /etc/default/zsync-autorun@zci-usb
+  # disable: trigger=cron, Timer gestoppt
+  check "Timer ausschalten" bashclub-zsync-timer disable $name
+  check "Config: trigger=cron" grep -qx 'trigger=cron' "$tconf"
+  check "Timer gestoppt" not systemctl is-active --quiet $unit
   # Migration: Cronjob mit Benutzer und Logdatei plus cron.daily-Skript derselben Config
   rm -rf "$crondir"; mkdir -p $crondir/cron.d $crondir/cron.daily
   echo "*/15 6-22 * * 1-5 root /usr/bin/bashclub-zsync -c $tconf >> /var/log/bashclub-zsync/zci-timer.log 2>&1" > $crondir/cron.d/zsync
   printf '#!/bin/sh\n/usr/bin/bashclub-zsync -c %s > /dev/null\n' "$tconf" > $crondir/cron.daily/zsync
-  local before; before=$(cat $crondir/cron.d/zsync $crondir/cron.daily/zsync | md5sum)
+  local before; before=$(cat $crondir/cron.d/zsync $crondir/cron.daily/zsync "$tconf" | md5sum)
   local plan; plan=$(ZSYNC_CRON_DIRS="$crondir/cron.d $crondir/cron.daily" bashclub-zsync-timer migrate --dry-run)
-  check "Probelauf: Cron-Zeitplan umgerechnet" grep -qF 'OnCalendar=Mon..Fri *-*-* 6..22:0/15:00' <<< "$plan"
-  check "Probelauf: cron.daily mit Debian-Zeit" grep -qF 'OnCalendar=*-*-* 06:25:00' <<< "$plan"
-  equal "Probelauf ändert nichts" "$before" "$(cat $crondir/cron.d/zsync $crondir/cron.daily/zsync | md5sum)"
+  check "Probelauf: Cron-Zeitplan übernommen" grep -qF 'schedule="*/15 6-22 * * 1-5"' <<< "$plan"
+  check "Probelauf: cron.daily mit Debian-Zeit" grep -qF 'schedule="25 6 * * *"' <<< "$plan"
+  equal "Probelauf ändert nichts" "$before" "$(cat $crondir/cron.d/zsync $crondir/cron.daily/zsync "$tconf" | md5sum)"
   ZSYNC_CRON_DIRS="$crondir/cron.d $crondir/cron.daily" bashclub-zsync-timer migrate > /dev/null
   check "Cron-Zeile auskommentiert" grep -q '^# bashclub-zsync-timer: migrated' $crondir/cron.d/zsync
   check "cron.daily-Zeile auskommentiert" grep -q '^# bashclub-zsync-timer: migrated' $crondir/cron.daily/zsync
-  equal "beide Zeitpläne im Timer" 2 "$(systemctl show -p TimersCalendar --value bashclub-zsync@$name.timer | grep -o OnCalendar= | wc -l)"
-  check "Logdatei übernommen" grep -q 'append:/var/log/bashclub-zsync/zci-timer.log' /etc/systemd/system/bashclub-zsync@$name.service.d/log.conf
+  check "Config: beide Zeitpläne" grep -qE '^schedule="(\*/15 6-22 \* \* 1-5;25 6 \* \* \*|25 6 \* \* \*;\*/15 6-22 \* \* 1-5)"$' "$tconf"
+  check "Config: Logdatei" grep -qx 'log_file=/var/log/bashclub-zsync/zci-timer.log' "$tconf"
+  equal "beide Zeitpläne im Timer" 2 "$(systemctl show -p TimersCalendar --value $unit | grep -o OnCalendar= | wc -l)"
   systemctl start bashclub-zsync@$name.service
   check "Ausgabe in der übernommenen Logdatei" grep -q 'Reading configuration' /var/log/bashclub-zsync/zci-timer.log
   check "erneute Migration findet nichts mehr" grep -q 'no cron jobs' <<< "$(ZSYNC_CRON_DIRS="$crondir/cron.d $crondir/cron.daily" bashclub-zsync-timer migrate --dry-run)"
-  # aufräumen
-  bashclub-zsync-timer disable $name > /dev/null
-  rm -rf /etc/systemd/system/bashclub-zsync@$name.timer.d /etc/systemd/system/bashclub-zsync@$name.service.d "$crondir" "$tconf" /var/log/bashclub-zsync/zci-timer.log
-  systemctl daemon-reload
+  # aufräumen: ohne Config verschwindet der Timer mit sync
+  rm -f "$tconf" "$lconf"
+  bashclub-zsync-timer sync > /dev/null
+  check "Timer ohne Config gestoppt" not systemctl is-active --quiet $unit
+  rm -rf "$crondir" /var/log/bashclub-zsync/zci-timer.log
 }
 
 # Snapshots verschiedener Labels in derselben Sekunde (#30): Erstreplikation beginnt beim ältesten,
@@ -471,6 +500,9 @@ case_checkmk() {
 all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user cleanup_blocked source_unreachable checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
+# ein Lauf zur Zeit (CI und remote.sh teilen sich Platten und Pools): ein zweiter wartet
+exec 9> /run/lock/zsync-ci.lock
+flock 9 || { echo "Sperre /run/lock/zsync-ci.lock nicht erhalten"; exit 2; }
 rm -rf /var/log/zsync-ci
 echo "bashclub-zsync $(dpkg-query -W -f='${Version}' bashclub-zsync 2>/dev/null), $(zfs version | head -1)"
 skipped_cases=()

@@ -7,6 +7,6 @@ ConditionPathExists=/etc/bashclub/%i.conf
 
 [Service]
 Type=oneshot
-# output goes to the journal (journalctl -u bashclub-zsync@<name>), user and log file per configuration:
-# bashclub-zsync-timer enable/migrate writes drop-ins in /etc/systemd/system/bashclub-zsync@<name>.service.d/
+# output goes to the journal (journalctl -u bashclub-zsync@<name>); user (run_as) and log file (log_file) come from
+# the configuration, the generator bashclub-zsync-generator writes them as drop-in
 ExecStart=/usr/bin/bashclub-zsync -c /etc/bashclub/%i.conf

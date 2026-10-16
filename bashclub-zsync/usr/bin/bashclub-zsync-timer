@@ -1,156 +1,184 @@
 #!/bin/bash
 #
 # bashclub-zsync-timer: systemd timers for bashclub-zsync, one per configuration /etc/bashclub/<name>.conf
-# (units bashclub-zsync@<name>.timer / .service; schedule, user and log file as drop-ins)
+# The configuration decides (trigger=systemd, schedule, run_as, log_file), the systemd generator
+# bashclub-zsync-generator creates the timers from it; "sync" activates the changes.
+# Configurations without trigger=systemd are not touched (cron and autorun keep running as before).
 
 PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
 prog=$(basename "$0")
 conf_dir=${ZSYNC_CONF_DIR:-/etc/bashclub}
 unit_dir=${ZSYNC_UNIT_DIR:-/etc/systemd/system}
+default_dir=${ZSYNC_DEFAULT_DIR:-/etc/default}
 cron_dirs=${ZSYNC_CRON_DIRS:-/etc/crontab /etc/cron.d /var/spool/cron/crontabs /etc/cron.hourly /etc/cron.daily /etc/cron.weekly /etc/cron.monthly}
 marker="# bashclub-zsync-timer: migrated to bashclub-zsync@"
+. ${ZSYNC_LIB:-/usr/lib/bashclub-zsync/schedule.sh} || exit 1
 
 usage() {
     cat >&2 << EOF
 usage: $prog list
-       $prog enable <name> [<OnCalendar>] [--user <user>] [--log <file>]
+       $prog enable <name> [<schedule>] [--user <user>] [--log <file>]
        $prog disable <name>
+       $prog sync [--dry-run]
        $prog migrate [--dry-run]
 
     <name>          configuration /etc/bashclub/<name>.conf, timer bashclub-zsync@<name>.timer
-    <OnCalendar>    schedule (systemd.time), e.g. daily, hourly, "*-*-* 23:00", "Mon..Fri *-*-* 06..22:00/15"
-                    default: keep the current schedule, for a new timer daily
-    --user          run as this user instead of root (operation without root, see README)
-    --log           append the output to this file instead of the journal
+    <schedule>      cron format, e.g. "*/15 6-22 * * 1-5", "0 23 * * *" or @daily, several separated by ";"
+                    default: keep the schedule of the configuration, otherwise @daily
+    --user          run as this user instead of root (run_as, operation without root, see README)
+    --log           append the output to this file instead of the journal (log_file)
+    enable          writes trigger=systemd (and the given settings) into the configuration and runs sync
+    disable         writes trigger=cron into the configuration and runs sync (the timer stops)
+    sync            reads all configurations and starts, updates or stops their timers
     migrate         take over cron jobs that run bashclub-zsync -c /etc/bashclub/<name>.conf:
-                    schedule, user and log file, comment out the cron line, enable the timer
+                    schedule, user and log file into the configuration, comment out the cron line, sync
 EOF
     exit 1
 }
 
 die() { echo "$prog: $*" >&2; exit 1; }
 
-# checks a schedule with systemd-analyze (if available)
-valid_calendar() {
-    if command -v systemd-analyze > /dev/null; then
-        systemd-analyze calendar "$1" > /dev/null 2>&1
+#### settings in the configuration: replaced where they are, appended otherwise
+set_conf_value() {
+    local file=$1 key=$2 value=$3 line
+    if [[ $value =~ [[:space:]*\;] ]]; then line="$key=\"$value\""; else line="$key=$value"; fi
+    if grep -qE "^[[:space:]]*$key=" "$file"; then
+        awk -v k="$key" -v l="$line" '$0 ~ "^[[:space:]]*" k "=" { print l; next } { print }' "$file" > "$file.tmp" \
+            && cat "$file.tmp" > "$file" && rm -f "$file.tmp"
+    else
+        printf '%s\n' "$line" >> "$file"
     fi
 }
 
-#### cron schedule (5 fields or @keyword) -> OnCalendar, empty if it cannot be converted exactly
-# fields: minute hour day-of-month month day-of-week; a-b -> a..b, */n -> start/n, lists stay lists
-cron_field() {
-    local value=$1 start=$2 part out=() from to
-    [[ $value == "*" ]] && { echo "*"; return 0; }
-    IFS=',' read -ra parts <<< "$value"
-    for part in "${parts[@]}"; do
-        if [[ $part =~ ^\*/([0-9]+)$ ]]; then out+=("$start/${BASH_REMATCH[1]}")
-        elif [[ $part =~ ^([0-9]+)/([0-9]+)$ ]]; then out+=("${BASH_REMATCH[1]}/${BASH_REMATCH[2]}")
-        elif [[ $part =~ ^([0-9]+)-([0-9]+)$ ]]; then out+=("${BASH_REMATCH[1]}..${BASH_REMATCH[2]}")
-        elif [[ $part =~ ^[0-9]+$ ]]; then out+=("$part")
-        else return 1
+# configuration used by zsync-autorun (/etc/default/zsync-autorun@<pool>, often a link to the configuration)
+autorun_of() {
+    local conf link
+    conf=$(readlink -f "$1")
+    for link in "$default_dir"/zsync-autorun@*; do
+        [[ -e $link ]] || continue
+        if [[ $(readlink -f "$link") == "$conf" ]]; then echo "${link##*/}"; fi
+    done | paste -sd','
+}
+
+timer_state() {
+    systemctl is-enabled "bashclub-zsync@$1.timer" 2> /dev/null || echo "-"
+}
+
+cmd_list() {
+    local conf name trigger schedule user state autorun
+    printf '%-24s %-8s %-30s %-14s %-10s %-6s %s\n' CONFIGURATION TRIGGER SCHEDULE RUN_AS TIMER CRON AUTORUN
+    for conf in "$conf_dir"/*.conf; do
+        [[ -f $conf ]] || continue
+        name=$(basename "$conf" .conf)
+        trigger=$(conf_trigger "$conf")
+        schedule=$(conf_value "$conf" schedule)
+        user=$(conf_value "$conf" run_as)
+        state=$(timer_state "$name")
+        if [[ $trigger == "systemd" ]] && systemctl is-active --quiet "bashclub-zsync@$name.timer" 2> /dev/null; then
+            state="$state,active"
+        fi
+        autorun=$(autorun_of "$conf")
+        printf '%-24s %-8s %-30s %-14s %-10s %-6s %s\n' "$name" "$trigger" "${schedule:--}" "${user:-root}" "$state" \
+            "$(cron_jobs | awk -F'\t' -v c="$conf" '$4 == c' | grep -c .)" "${autorun:--}"
+        if [[ $trigger != "autorun" && -n $autorun ]]; then
+            echo "    $name is used by $autorun: set trigger=autorun (no timer, no age check in the monitoring)"
         fi
     done
-    (IFS=','; echo "${out[*]}")
 }
-cron_dow() {
-    local value=${1,,} part out=() names=(sun mon tue wed thu fri sat sun) a b
-    [[ $value == "*" ]] && return 0
-    IFS=',' read -ra parts <<< "$value"
-    for part in "${parts[@]}"; do
-        for n in 0 1 2 3 4 5 6 7; do part=${part//${names[$n]}/$n}; done
-        if [[ $part =~ ^([0-7])-([0-7])$ ]]; then
-            a=${names[${BASH_REMATCH[1]}]^}; b=${names[${BASH_REMATCH[2]}]^}; out+=("$a..$b")
-        elif [[ $part =~ ^[0-7]$ ]]; then out+=("${names[$part]^}")
-        else return 1
-        fi
+
+# timers written by the first version of this tool (drop-ins in /etc/systemd/system) are replaced by the generator
+remove_old_dropins() {
+    local name=$1 f
+    for f in "$unit_dir/bashclub-zsync@$name.timer.d/schedule.conf" "$unit_dir/bashclub-zsync@$name.service.d/user.conf" \
+        "$unit_dir/bashclub-zsync@$name.service.d/log.conf"; do
+        if grep -q "^# written by bashclub-zsync-timer" "$f" 2> /dev/null; then rm -f "$f"; fi
     done
-    (IFS=','; echo "${out[*]}")
-}
-cron_to_calendar() {
-    case $1 in
-        # scripts in /etc/cron.{hourly,daily,weekly,monthly}: times of run-parts in the Debian /etc/crontab
-        run-parts:hourly) echo "*-*-* *:17:00"; return ;; run-parts:daily) echo "*-*-* 06:25:00"; return ;;
-        run-parts:weekly) echo "Sun *-*-* 06:47:00"; return ;; run-parts:monthly) echo "*-*-01 06:52:00"; return ;;
-        @hourly) echo hourly; return ;; @daily|@midnight) echo daily; return ;; @weekly) echo weekly; return ;;
-        @monthly) echo monthly; return ;; @yearly|@annually) echo yearly; return ;; @*) return 1 ;;
-    esac
-    local min hour dom mon dow d m h mi
-    read -r min hour dom mon dow <<< "$1"
-    mi=$(cron_field "$min" 0) && h=$(cron_field "$hour" 0) && d=$(cron_field "$dom" 1) && m=$(cron_field "$mon" 1) \
-        && dow=$(cron_dow "$dow") || return 1
-    # minutes with two digits for single values (systemd accepts both, the output is easier to read)
-    [[ $mi =~ ^[0-9]$ ]] && mi=0$mi
-    echo "${dow:+$dow }*-$m-$d $h:$mi:00"
-}
-
-#### drop-ins: schedule, user, log file
-write_dropins() {
-    local name=$1 calendars=$2 user=$3 log=$4 c
-    mkdir -p "$unit_dir/bashclub-zsync@$name.timer.d" "$unit_dir/bashclub-zsync@$name.service.d"
-    if [[ -n $calendars ]]; then
-        {
-            echo "# written by $prog"
-            echo "[Timer]"
-            echo "OnCalendar="
-            while read -r c; do [[ -n $c ]] && echo "OnCalendar=$c"; done <<< "$calendars"
-        } > "$unit_dir/bashclub-zsync@$name.timer.d/schedule.conf"
+    rmdir "$unit_dir/bashclub-zsync@$name.timer.d" "$unit_dir/bashclub-zsync@$name.service.d" 2> /dev/null
+    # enabled with systemctl enable by the first version: the generator enables it now
+    if [[ -L $unit_dir/timers.target.wants/bashclub-zsync@$name.timer ]]; then
+        rm -f "$unit_dir/timers.target.wants/bashclub-zsync@$name.timer"
     fi
-    if [[ -n $user ]]; then
-        if [[ $user == root ]]; then
-            rm -f "$unit_dir/bashclub-zsync@$name.service.d/user.conf"
-        else
-            printf '# written by %s\n[Service]\nUser=%s\n' "$prog" "$user" > "$unit_dir/bashclub-zsync@$name.service.d/user.conf"
-        fi
-    fi
-    if [[ -n $log ]]; then
-        printf '# written by %s\n[Service]\nStandardOutput=append:%s\nStandardError=inherit\n' "$prog" "$log" \
-            > "$unit_dir/bashclub-zsync@$name.service.d/log.conf"
-    fi
-}
-
-enable_timer() {
-    local name=$1
-    systemctl daemon-reload
-    systemctl enable --now "bashclub-zsync@$name.timer" > /dev/null 2>&1 || die "enabling bashclub-zsync@$name.timer failed"
-    echo "bashclub-zsync@$name.timer enabled, next run: $(systemctl show -p NextElapseUSecRealtime --value "bashclub-zsync@$name.timer")"
 }
 
 cmd_enable() {
-    local name=$1 calendar= user= log=
+    local name=$1 schedule= user= log= conf
     shift || usage
     while [ $# -gt 0 ]; do
         case $1 in
             --user) user=$2; shift ;;
             --log) log=$2; shift ;;
-            *) calendar=$1 ;;
+            *) schedule=$1 ;;
         esac
         shift
     done
-    [[ -f $conf_dir/$name.conf ]] || die "configuration $conf_dir/$name.conf not found"
-    if [[ -n $calendar ]] && ! valid_calendar "$calendar"; then die "invalid schedule: $calendar"; fi
+    conf=$conf_dir/$name.conf
+    [[ -f $conf ]] || die "configuration $conf not found"
+    valid_name "$name" || die "name '$name' not usable for a unit (letters, digits, _ . -)"
+    [[ -n $schedule ]] || schedule=$(conf_value "$conf" schedule)
+    [[ -n $schedule ]] || schedule=@daily
+    schedule_calendars "$schedule" > /dev/null || die "invalid schedule: $schedule (cron format, e.g. \"0 23 * * *\" or @daily)"
     if [[ -n $user ]] && ! id "$user" > /dev/null 2>&1; then die "user $user does not exist"; fi
-    write_dropins "$name" "$calendar" "$user" "$log"
-    enable_timer "$name"
+    set_conf_value "$conf" trigger systemd
+    set_conf_value "$conf" schedule "$schedule"
+    if [[ $user == "root" ]]; then set_conf_value "$conf" run_as ""
+    elif [[ -n $user ]]; then set_conf_value "$conf" run_as "$user"; fi
+    if [[ -n $log ]]; then set_conf_value "$conf" log_file "$log"; fi
+    remove_old_dropins "$name"
+    cmd_sync
 }
 
 cmd_disable() {
+    local conf=$conf_dir/$1.conf
     [[ -n $1 ]] || usage
-    systemctl disable --now "bashclub-zsync@$1.timer" > /dev/null 2>&1
-    echo "bashclub-zsync@$1.timer disabled (schedule kept in $unit_dir/bashclub-zsync@$1.timer.d/)"
+    [[ -f $conf ]] || die "configuration $conf not found"
+    set_conf_value "$conf" trigger cron
+    remove_old_dropins "$1"
+    cmd_sync
+    echo "$1: trigger=cron, the timer is stopped; without a cron job the configuration does not run anymore"
 }
 
-cmd_list() {
-    local conf name state schedule
-    printf '%-28s %-9s %-40s %s\n' CONFIGURATION TIMER SCHEDULE "CRON JOBS"
+#### sync: generator (daemon-reload), then start/restart the timers of trigger=systemd, stop the others
+cmd_sync() {
+    local dry=0 conf name schedule user problems=0 starts=() stops=() unit
+    [[ $1 == --dry-run ]] && dry=1
     for conf in "$conf_dir"/*.conf; do
         [[ -f $conf ]] || continue
+        [[ $(conf_trigger "$conf") == "systemd" ]] || continue
         name=$(basename "$conf" .conf)
-        state=$(systemctl is-enabled "bashclub-zsync@$name.timer" 2>/dev/null || true)
-        schedule=$(systemctl show -p TimersCalendar --value "bashclub-zsync@$name.timer" 2>/dev/null \
-            | grep -o 'OnCalendar=[^;]*' | sed 's/OnCalendar=//' | paste -sd',')
-        printf '%-28s %-9s %-40s %s\n' "$name" "${state:--}" "${schedule:--}" "$(cron_jobs | awk -F'\t' -v c="$conf" '$4 == c' | grep -vc "^#")"
+        schedule=$(conf_value "$conf" schedule)
+        user=$(conf_value "$conf" run_as)
+        if ! valid_name "$name"; then echo "error $name: name not usable for a unit (letters, digits, _ . -)"; ((problems++)); continue; fi
+        if ! schedule_calendars "${schedule:-@daily}" > /dev/null; then
+            echo "error $name: schedule '$schedule' is not a cron schedule"; ((problems++)); continue
+        fi
+        if [[ -n $user ]] && ! id "$user" > /dev/null 2>&1; then
+            echo "error $name: run_as user $user does not exist"; ((problems++)); continue
+        fi
+        if systemctl is-active --quiet "bashclub-zsync@$name.timer" 2> /dev/null; then
+            echo "$([ $dry -eq 1 ] && echo plan || echo do)  update bashclub-zsync@$name.timer: ${schedule:-@daily}, user ${user:-root}"
+        else
+            echo "$([ $dry -eq 1 ] && echo plan || echo do)  start  bashclub-zsync@$name.timer: ${schedule:-@daily}, user ${user:-root}"
+        fi
+        starts+=("$name")
     done
+    # active timers without trigger=systemd: stop, unless enabled by hand (systemctl enable)
+    for unit in $(systemctl list-units --type=timer --state=active --plain --no-legend 'bashclub-zsync@*.timer' 2> /dev/null | awk '{ print $1 }'); do
+        name=${unit#bashclub-zsync@}; name=${name%.timer}
+        [[ " ${starts[*]} " == *" $name "* ]] && continue
+        [[ $(timer_state "$name") == "enabled" ]] && continue
+        echo "$([ $dry -eq 1 ] && echo plan || echo do)  stop   $unit: $conf_dir/$name.conf has no trigger=systemd"
+        stops+=("$unit")
+    done
+    if [ ${#starts[@]} -eq 0 ] && [ ${#stops[@]} -eq 0 ]; then echo "no configuration with trigger=systemd"; fi
+    if [ $dry -eq 1 ]; then echo "dry run, nothing changed"; return $((problems > 0)); fi
+    systemctl daemon-reload
+    for name in "${starts[@]}"; do
+        # restart: a changed schedule applies at once
+        systemctl restart "bashclub-zsync@$name.timer" || { echo "error starting bashclub-zsync@$name.timer"; ((problems++)); continue; }
+        echo "      bashclub-zsync@$name.timer next run: $(systemctl show -p NextElapseUSecRealtime --value "bashclub-zsync@$name.timer")"
+    done
+    for unit in "${stops[@]}"; do systemctl stop "$unit"; done
+    return $((problems > 0))
 }
 
 #### cron jobs that run bashclub-zsync: file<TAB>line number<TAB>schedule<TAB>config<TAB>user<TAB>log file
@@ -164,8 +192,11 @@ cron_jobs() {
             [[ $line == *bashclub-zsync* ]] || continue
             [[ $line =~ -c[[:space:]]+([^[:space:]]+) ]] || continue
             conf=${BASH_REMATCH[1]}
-            if [[ $file =~ /cron\.(hourly|daily|weekly|monthly)/ ]]; then
-                schedule=run-parts:${BASH_REMATCH[1]}; rest=$line
+            # scripts in /etc/cron.{hourly,daily,weekly,monthly}: times of run-parts in the Debian /etc/crontab
+            if [[ $file =~ /cron\.hourly/ ]]; then schedule="17 * * * *"; rest=$line
+            elif [[ $file =~ /cron\.daily/ ]]; then schedule="25 6 * * *"; rest=$line
+            elif [[ $file =~ /cron\.weekly/ ]]; then schedule="47 6 * * 7"; rest=$line
+            elif [[ $file =~ /cron\.monthly/ ]]; then schedule="52 6 1 * *"; rest=$line
             elif [[ $line =~ ^[[:space:]]*(@[a-z]+)[[:space:]]+(.*)$ ]]; then
                 schedule=${BASH_REMATCH[1]}; rest=${BASH_REMATCH[2]}
             elif [[ $line =~ ^[[:space:]]*([^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+[[:space:]]+[^[:space:]]+)[[:space:]]+(.*)$ ]]; then
@@ -174,7 +205,7 @@ cron_jobs() {
                 continue
             fi
             # system crontabs have a user field, user crontabs are named after the user
-            if [[ $schedule == run-parts:* ]]; then user=root
+            if [[ $file =~ /cron\.(hourly|daily|weekly|monthly)/ ]]; then user=root
             elif [[ $file == /etc/crontab || $file == */cron.d/* ]]; then user=${rest%%[[:space:]]*}
             else user=$(basename "$file"); fi
             log=
@@ -185,46 +216,53 @@ cron_jobs() {
 }
 
 cmd_migrate() {
-    local dry=0 file n schedule conf user log name calendar todo=() names=()
+    local dry=0 file n schedule conf user log name todo=() names=() entry schedules
     [[ $1 == --dry-run ]] && dry=1
     while IFS=$'\t' read -r file n schedule conf user log; do
         name=$(basename "$conf" .conf)
         if [[ $(dirname "$conf") != "$conf_dir" ]]; then
             echo "skip  $file:$n: $conf is not in $conf_dir (the timer needs $conf_dir/<name>.conf)"; continue
         fi
-        if ! calendar=$(cron_to_calendar "$schedule") || ! valid_calendar "$calendar"; then
-            echo "skip  $file:$n: schedule '$schedule' cannot be converted, create the timer manually: $prog enable $name <OnCalendar>"; continue
+        if [[ $(conf_trigger "$conf") == "autorun" ]]; then
+            echo "skip  $file:$n: $conf has trigger=autorun"; continue
         fi
-        echo "$([ $dry -eq 1 ] && echo plan || echo do)  $file:$n -> bashclub-zsync@$name.timer OnCalendar=$calendar user=$user${log:+ log=$log}"
-        todo+=("$file"$'\t'"$n"$'\t'"$name"$'\t'"$calendar"$'\t'"$user"$'\t'"$log")
+        if ! schedule_calendars "$schedule" > /dev/null; then
+            echo "skip  $file:$n: schedule '$schedule' cannot be converted, set it in $conf and run: $prog enable $name"; continue
+        fi
+        echo "$([ $dry -eq 1 ] && echo plan || echo do)  $file:$n -> $conf: trigger=systemd schedule=\"$schedule\" run_as=$user${log:+ log_file=$log}"
+        todo+=("$file"$'\t'"$n"$'\t'"$name"$'\t'"$schedule"$'\t'"$user"$'\t'"$log")
     done < <(cron_jobs)
     if [ ${#todo[@]} -eq 0 ]; then echo "no cron jobs of bashclub-zsync to migrate"; return 0; fi
     [ $dry -eq 1 ] && { echo "dry run, nothing changed"; return 0; }
 
-    # one timer per configuration, several cron lines become several OnCalendar entries
-    local entry calendars
+    # one timer per configuration, several cron lines become several schedules
     for entry in "${todo[@]}"; do
-        IFS=$'\t' read -r file n name calendar user log <<< "$entry"
+        IFS=$'\t' read -r file n name schedule user log <<< "$entry"
         [[ " ${names[*]} " == *" $name "* ]] || names+=("$name")
     done
     for name in "${names[@]}"; do
-        calendars=$(printf '%s\n' "${todo[@]}" | awk -F'\t' -v n="$name" '$3 == n { print $4 }')
+        schedules=$(printf '%s\n' "${todo[@]}" | awk -F'\t' -v n="$name" '$3 == n { print $4 }' | paste -sd';')
         entry=$(printf '%s\n' "${todo[@]}" | awk -F'\t' -v n="$name" '$3 == n' | head -1)
-        IFS=$'\t' read -r file n name calendar user log <<< "$entry"
-        write_dropins "$name" "$calendars" "$user" "$log"
+        IFS=$'\t' read -r file n name schedule user log <<< "$entry"
+        conf=$conf_dir/$name.conf
+        set_conf_value "$conf" trigger systemd
+        set_conf_value "$conf" schedule "$schedules"
+        if [[ $user != "root" ]]; then set_conf_value "$conf" run_as "$user"; fi
+        if [[ -n $log ]]; then set_conf_value "$conf" log_file "$log"; fi
+        remove_old_dropins "$name"
     done
     # comment out the cron lines (from the end, line numbers stay valid)
-    for entry in $(printf '%s\n' "${todo[@]}" | sort -t$'\t' -k1,1 -k2,2nr | tr '\t' '|'); do
-        IFS='|' read -r file n name calendar user log <<< "$entry"
+    while IFS=$'\t' read -r file n name schedule user log; do
         sed -i "${n}s|^|$marker$name.timer: |" "$file"
-    done
-    for name in "${names[@]}"; do enable_timer "$name"; done
+    done < <(printf '%s\n' "${todo[@]}" | sort -t$'\t' -k1,1 -k2,2nr)
+    cmd_sync
 }
 
 case $1 in
     list) cmd_list ;;
     enable) shift; cmd_enable "$@" ;;
     disable) shift; cmd_disable "$@" ;;
+    sync) shift; cmd_sync "$@" ;;
     migrate) shift; cmd_migrate "$@" ;;
     *) usage ;;
 esac

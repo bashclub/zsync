@@ -4,12 +4,12 @@
 here=$(cd "$(dirname "$0")" && pwd)
 check=$(readlink -f "${1:-$here/../bashclub-zsync/usr/share/bashclub-zsync/checkmk/bashclub_zsync}")
 w=$(mktemp -d); trap 'rm -rf "$w"' EXIT
-export ZSYNC_RUN_DIR=$w/run ZSYNC_LIB_DIR=$w/lib ZSYNC_PROC=$w/proc ZSYNC_CHECK_CONF=$w/none
+export ZSYNC_RUN_DIR=$w/run ZSYNC_LIB_DIR=$w/lib ZSYNC_PROC=$w/proc ZSYNC_CHECK_CONF=$w/none ZSYNC_DEFAULT_DIR=$w/default
 T=1760000000; id=_etc_bashclub_pve1.conf; conf=$w/etc/pve1.conf
 failed=0; count=0
 
 reset() {
-  rm -rf "$w"/{run,lib,proc,etc}; mkdir -p "$w"/{run,lib,proc,etc}
+  rm -rf "$w"/{run,lib,proc,etc,default}; mkdir -p "$w"/{run,lib,proc,etc,default}
   printf 'target=backup/pve1\nsource=root@pve1\n%s\n' "${1:-}" > "$conf"
   # Config-Pfad in den Status-Dateien zeigt auf die Test-Config
 }
@@ -55,6 +55,12 @@ reset; last 0 $((T - 36000)); history 3600 3; expect "Lernphase überfällig: h�
 reset; last 0 $((T - 1800)); history 3600 6; expect "scharf, im Intervall: OK" 0 "interval 1h 0m from 5 runs"
 reset; last 0 $((T - 5000)); history 3600 6; expect "scharf, ein Lauf verpasst: WARN" 1 "last successful run 1h 23m ago"
 reset; last 0 $((T - 12000)); history 3600 6; expect "scharf, drei Intervalle: CRIT" 2 "last successful run 3h 20m ago"
+# Wechseldatenträger: keine Altersprüfung (trigger=autorun oder Link aus /etc/default/zsync-autorun@), außer mit monitor_max_age
+reset "trigger=autorun"; last 0 $((T - 864000)); history 3600 6; expect "autorun: keine Altersprüfung" 0 "no age check for a removable disk"
+reset; ln -s "$conf" "$w/default/zsync-autorun@usb1"; last 0 $((T - 864000)); history 3600 6
+expect "Link aus zsync-autorun@ ohne trigger: keine Altersprüfung" 0 "no age check for a removable disk"
+reset "trigger=autorun
+monitor_max_age=7d"; last 0 $((T - 864000)); history 3600 6; expect "autorun mit monitor_max_age: WARN" 1 "last successful run 10d 0h ago"
 # 5 Minuten: mindestens 5 min Puffer
 reset; last 0 $((T - 500)); history 300 6; expect "5-Minuten-Intervall, 8 min: OK (Puffer 5 min)" 0 "interval 5m"
 reset; last 0 $((T - 700)); history 300 6; expect "5-Minuten-Intervall, 11 min: WARN" 1 "interval 5m"

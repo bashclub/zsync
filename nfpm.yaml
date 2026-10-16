@@ -35,6 +35,13 @@ contents:
   - src: bashclub-zsync/usr/bin/bashclub-zsync-timer
     dst: /usr/bin/bashclub-zsync-timer
     file_info: { mode: 0755 }
+  - src: bashclub-zsync/usr/lib/bashclub-zsync/schedule.sh
+    dst: /usr/lib/bashclub-zsync/schedule.sh
+    file_info: { mode: 0644 }
+  # timers from the configurations with trigger=systemd (at boot and with daemon-reload)
+  - src: bashclub-zsync/usr/lib/systemd/system-generators/bashclub-zsync-generator
+    dst: /usr/lib/systemd/system-generators/bashclub-zsync-generator
+    file_info: { mode: 0755 }
   - src: bashclub-zsync/usr/lib/systemd/system/bashclub-zsync@.service
     dst: /usr/lib/systemd/system/bashclub-zsync@.service
     file_info: { mode: 0644 }

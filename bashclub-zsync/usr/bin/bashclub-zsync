@@ -57,6 +57,20 @@ zfs_auto_snapshot_label_match="legacy"
 # empty = derived from the start times of the previous runs, 0 = no age check (e.g. removable disks)
 monitor_max_age=""
 
+# who starts the runs of this configuration: cron (also without this setting, as before), systemd (timer
+# bashclub-zsync@<name>.timer, activate with: bashclub-zsync-timer sync) or autorun (removable disk, zsync-autorun:
+# no timer, no age check in the monitoring)
+trigger=""
+
+# trigger=systemd: schedule in cron format, several separated by ";", e.g. "*/15 6-22 * * 1-5" or "@daily"
+schedule=""
+
+# trigger=systemd: user of the run (operation without root), empty = root
+run_as=""
+
+# trigger=systemd: append the output to this file, empty = journal (journalctl -u bashclub-zsync@<name>)
+log_file=""
+
 # newest target snapshot does not exist on the source anymore (rollback or deleted on the source):
 # 1 = roll the target back to the newest common snapshot and continue from there,
 # 0 = no replication of this dataset until it is fixed manually (previous behavior)
@@ -294,6 +308,10 @@ checkzfs_max_age=$checkzfs_max_age
 checkzfs_max_snapshot_count=$checkzfs_max_snapshot_count
 checkzfs_spool=$checkzfs_spool
 checkzfs_spool_maxage=$checkzfs_spool_maxage
+trigger=$trigger
+schedule="$schedule"
+run_as=$run_as
+log_file=$log_file
 EOF
     log "[INFO] Initial config file created. Please adjust and restart script. Exiting..."
     usage 0
@@ -345,7 +363,7 @@ config_log="[INFO] Configuration:"
 for setting in target source sshport tag snapshot_filter min_keep zfs_auto_snapshot_keep zfs_auto_snapshot_label \
                zfs_auto_snapshot_engine zfs_auto_snapshot_label_match target_rollback target_rollback_max \
                bandwidth_limit source_bookmark source_hold transfer_resume checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
-               checkzfs_spool checkzfs_spool_maxage; do
+               checkzfs_spool checkzfs_spool_maxage trigger schedule run_as log_file; do
     config_log+="\n\t$setting=${!setting}"
 done
 log "$config_log\n"

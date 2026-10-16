@@ -12,7 +12,8 @@
 #   /var/lib/bashclub-zsync/<config>.check   state of this check (transfer progress, blocked processes)
 #
 # Checks:
-#   age of the last successful run   interval = from the systemd timer bashclub-zsync@<name>.timer, otherwise the
+#   age of the last successful run   not for removable disks (trigger=autorun or zsync-autorun@) without monitor_max_age;
+#                                    interval = from the systemd timer bashclub-zsync@<name>.timer, otherwise the
 #                                    median of the start intervals (or monitor_max_age in the config),
 #                                    WARN after interval + max(20 %, 5 min) + duration of the last successful run
 #                                    (or of the active run, if it takes longer),
@@ -33,6 +34,7 @@ LIB_DIR=${ZSYNC_LIB_DIR:-/var/lib/bashclub-zsync}
 PROC=${ZSYNC_PROC:-/proc}
 SYSTEMCTL=${ZSYNC_SYSTEMCTL:-systemctl}
 CONF_DIR=${ZSYNC_CONF_DIR:-/etc/bashclub}
+DEFAULT_DIR=${ZSYNC_DEFAULT_DIR:-/etc/default}
 NOW=${ZSYNC_NOW:-$(date +%s)}
 
 # thresholds in seconds, can be changed in /etc/bashclub/zsync-checkmk.conf
@@ -262,8 +264,17 @@ for id in $ids; do
 
     #### age of the last successful run
     max_age=$( (. "$conf" > /dev/null 2>&1; echo "$monitor_max_age") )
+    # removable disk (trigger=autorun or used by zsync-autorun@): runs only when the disk is connected
+    autorun=$( (. "$conf" > /dev/null 2>&1; echo "$trigger") )
+    if [[ $autorun != "autorun" ]]; then
+        for link in "$DEFAULT_DIR"/zsync-autorun@*; do
+            if [[ -e $link ]] && [[ $(readlink -f "$link") == "$(readlink -f "$conf")" ]]; then autorun=autorun; fi
+        done
+    fi
     if [[ $max_age == 0 ]]; then
         state_text+=("age check disabled (monitor_max_age=0)")
+    elif [[ -z $max_age ]] && [[ $autorun == "autorun" ]]; then
+        state_text+=("no age check for a removable disk (autorun), set monitor_max_age for one")
     elif [[ -z ${last[ok_end]} ]]; then
         state_text+=("no successful run yet")
     else
