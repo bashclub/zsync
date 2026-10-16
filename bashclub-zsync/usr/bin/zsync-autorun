@@ -60,7 +60,7 @@ Started: $timestamp
 Finished: $(date +%Y-%m-%d-%H%M)
 
 Checkzfs output (warning or critical):
-$(grep -E "^1.*(vm|subvol)" /var/lib/check_mk_agent/spool/${checkzfs_spool_maxage}_${checkzfs_prefix})
+$(grep -E "^1.*(vm|subvol)" /var/lib/check_mk_agent/spool/${checkzfs_spool_maxage}_${checkzfs_prefix} || true)
 "
 fi
 
@@ -88,7 +88,13 @@ if [ $luks -gt 0 ]; then
 fi
 
 echo "Ejecting disk"
-udisksctl power-off --block-device ${disk::-1}
+# whole disk of the partition (also nvme0n1p1 -> nvme0n1), as before if lsblk does not know it
+parent=$(lsblk -no PKNAME "$disk" 2> /dev/null | head -1 || true)
+if [[ -n $parent ]]; then
+  udisksctl power-off --block-device /dev/$parent || echo "Power-off failed, the pool is exported, the disk can be removed"
+else
+  udisksctl power-off --block-device ${disk::-1} || echo "Power-off failed, the pool is exported, the disk can be removed"
+fi
 
 echo "$success" | mail -s "$subject" root@localhost
 

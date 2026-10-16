@@ -21,7 +21,7 @@ check() { local desc=$1; shift; if "$@"; then ok "$desc"; else fail "$desc"; fi;
 skip() { echo "  skip $*"; case_skipped=1; }
 not() { ! "$@"; }
 # equal <beschreibung> <erwartet> <ist>
-equal() { if [[ $2 == "$3" ]]; then ok "$1"; else fail "$1: erwartet '$2', ist '$3'"; fi; }
+equal() { if [[ $2 == "$3" ]]; then ok "$1"; else fail "$1: erwartet '$2', ist '$3'"; return 1; fi; }
 
 # Sicherheitsprüfung: Pools mit Präfix zci-, Platten per by-id und nicht in fremden Pools
 safety() {
@@ -83,6 +83,21 @@ zsync() {
   bashclub-zsync -c "$conf" "$@" >> "$log" 2>&1
   rc=$?
   return $rc
+}
+# Setting in einer Config ersetzen oder anhängen: set_conf <datei> <name> <wert>
+set_conf() { grep -q "^$2=" "$1" && sed -i "s|^$2=.*|$2=$3|" "$1" || echo "$2=$3" >> "$1"; }
+# Timer von Test-Configs sicher entfernen: erst abschalten und laufende Dienste stoppen, dann die Configs löschen
+# (ein Lauf ohne Config legt sonst das Template wieder an), Zeitstempel weg (Persistent=true startet sonst sofort)
+remove_timer_configs() {
+  local c n
+  for c in "$@"; do [[ -f $c ]] && set_conf "$c" trigger cron; done
+  bashclub-zsync-timer sync > /dev/null
+  for c in "$@"; do
+    n=$(basename "$c" .conf)
+    systemctl stop "bashclub-zsync@$n.timer" "bashclub-zsync@$n.service" 2> /dev/null
+    rm -f "$c" "/var/lib/systemd/timers/stamp-bashclub-zsync@$n.timer"
+  done
+  bashclub-zsync-timer sync > /dev/null
 }
 last_run_log() { awk '/^===== /{ buf = "" } { buf = buf $0 "\n" } END { printf "%s", buf }' "$log"; }
 

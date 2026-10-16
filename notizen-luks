@@ -1,63 +1,49 @@
-# currently no script, just a guide to format you removable disk
+# Removable disk for zsync-autorun, step by step
+# The script bashclub-zsync-disk does all of this with checks (see README, "Removable disks"):
+#   bashclub-zsync-disk list
+#   bashclub-zsync-disk create <disk> <label> --luks --passphrase --config <name>
+# The manual steps below are the same, for reference.
 
-# please fill the variables:
-
-disk=/dev/sdj
+# whole disk (see bashclub-zsync-disk list) and the name of the pool
+disk=/dev/disk/by-id/usb-...
 label=usb-backup3
 
-# ensure required packages are installed
+# required packages
+apt install cryptsetup udisks2 zfsutils-linux yubikey-manager
 
-apt install cryptsetup yubikey-manager udisks2 zfsutils-linux
-
-# wipe disk, create new partition table and partition
+# wipe the disk, GPT with one partition
 wipefs -a ${disk}
-sgdisk --zap-all ${disk}
-sgdisk -o ${disk}
-sgdisk -n 1:0:0 -t 1:8300 ${disk}
+echo -e 'label: gpt\n,,L' | sfdisk ${disk}
+udevadm settle
+part=$(lsblk -lnpo NAME,TYPE $(readlink -f ${disk}) | awk '$2 == "part" { print $1; exit }')
 
-# create encryption key
-dd if=/dev/urandom of=/etc/bashclub/${label}.key bs=1 count=64
-chmod 600 /etc/bashclub/${label}.key
+# key file (keep a copy outside of this host)
+(umask 077; dd if=/dev/urandom of=/etc/bashclub/${label}.key bs=64 count=1)
 
-# create luks partition
-cryptsetup luksFormat ${disk} --label=${label} --key-file=/etc/bashclub/${label}.key
+# LUKS2 on the partition (not on the whole disk), the LUKS label is the pool name
+cryptsetup luksFormat --type luks2 --label ${label} --key-file /etc/bashclub/${label}.key ${part}
 
-# decrypt luks partition
-cryptsetup open ${disk} backup_crypt --key-file /etc/bashclub/${label}.key
+# optional: YubiKey with a static password as second key (slot 2: press the button for 2 seconds),
+# then press the button when asked for the new passphrase (twice)
+ykman otp static --generate 2
+cryptsetup luksAddKey --key-file /etc/bashclub/${label}.key ${part}
 
-# create zpool
-zpool create -o ashift=12 -O com.sun:auto-snapshot=false ${label} /dev/mapper/${label}
+# open with the name of the pool, zsync-autorun opens it the same way
+cryptsetup open --key-file /etc/bashclub/${label}.key ${part} ${label}
 
-# export zpool
+# pool, then export it and close LUKS
+zpool create -o ashift=12 -m none -O com.sun:auto-snapshot=false -O compression=lz4 ${label} /dev/mapper/${label}
 zpool export ${label}
+cryptsetup close ${label}
 
-# unmount luks
-cryptsetup close ${disk}
-
-# power-off disk
-udisksctl power-off --block-device ${disk}
-
-
-### add keys to luks partition (max. 8)
-
-# yubikey mit static password konfigurieren
-# slot 1 or 2
-# slot 1 = push button short
-# slot 2 = push button for at least 2 seconds
-# -g = generate
-ykman otp static -g 1
-
-# add yubikey password as luks key to your disk
-cryptsetup luksAddKey ${disk} --key-file /etc/bashclub/${label}.key
-# insert yubikey and push button to set password (2 times)
-
-
-#### create udev rule
-
-
-guid=$(blkid | grep ${label})
-
-
-cat << EOF > /etc/udev/rules.d/90-automount-zsync-${label}.rules
-KERNEL=="sd?1", ACTION=="add", SUBSYSTEMS=="block", ENV{ID_FS_UUID}=="<zfs pool guid>", ENV{SYSTEMD_WANTS}+="zsync-autorun@%E{ID_FS_LABEL}.service"
+# udev rule with the UUID of the LUKS partition: connecting the disk starts zsync-autorun@<label>
+cat << EOF > /etc/udev/rules.d/90-zsync-autorun-${label}.rules
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="$(blkid -s UUID -o value ${part})", ENV{SYSTEMD_WANTS}+="zsync-autorun@${label}.service"
 EOF
+udevadm control --reload
+
+# configuration of the replication (target in the pool <label>), used by zsync-autorun
+ln -sfn /etc/bashclub/<name>.conf /etc/default/zsync-autorun@${label}
+
+# power off the disk
+udisksctl power-off --block-device $(readlink -f ${disk})

@@ -32,6 +32,8 @@ usage: $prog [options] <name>
     --label <label>         snapshot label (zsync-<this host>)
     --login auto|zsync|root login on the source to set it up (auto: zsync, then root)
     --root                  no job users: replicate as root with root@<source> (as before 2.0)
+    --autorun               removable disk (bashclub-zsync-disk, zsync-autorun runs it as root): trigger=autorun,
+                            no timer, the job user on the source gets the key of root
     --run                   start the first run right away (systemctl start bashclub-zsync@<name>)
     -y, --yes               no questions, defaults for everything not given
 EOF
@@ -61,7 +63,7 @@ job_name() {
     echo "${job:0:26}"
 }
 
-source= port= target= tag= tag_datasets= schedule= keep= label= login=auto as_root=0 run=0 yes=0 name=
+source= port= target= tag= tag_datasets= schedule= keep= label= login=auto as_root=0 autorun=0 run=0 yes=0 name=
 while [ $# -gt 0 ]; do
     case $1 in
         -s|--source) source=$2; shift ;;
@@ -74,6 +76,7 @@ while [ $# -gt 0 ]; do
         --label) label=$2; shift ;;
         --login) login=$2; shift ;;
         --root) as_root=1 ;;
+        --autorun) autorun=1 ;;
         --run) run=1 ;;
         -y|--yes) yes=1 ;;
         -h|--help) usage ;;
@@ -100,8 +103,10 @@ if [[ $source != "local" ]]; then ask port "ssh port of $source" 22; fi
 ask target "Target dataset on $host" "${first_pool:+$first_pool/zsync/$name}"
 [[ -n $target ]] || die "no target given (no pool found on this host)"
 ask tag "Tag of the datasets to replicate on the source" bashclub:zsync
-ask schedule "Schedule (cron format)" "*/15 * * * *"
-schedule_calendars "$schedule" > /dev/null || die "invalid schedule '$schedule' (cron format, e.g. \"*/15 * * * *\" or @hourly)"
+if [ $autorun -eq 0 ]; then
+    ask schedule "Schedule (cron format)" "*/15 * * * *"
+    schedule_calendars "$schedule" > /dev/null || die "invalid schedule '$schedule' (cron format, e.g. \"*/15 * * * *\" or @hourly)"
+fi
 ask keep "Snapshots to keep per label on the source" 14
 [[ $keep =~ ^[0-9]+$ ]] || die "invalid number of snapshots '$keep'"
 ask label "Snapshot label" "zsync-$host"
@@ -118,8 +123,11 @@ echo
 echo "configuration  $conf"
 if [[ $source == "local" ]]; then echo "source         local, datasets with $tag"; else echo "source         $source (port $port), datasets with $tag"; fi
 echo "target         $target"
-echo "schedule       $schedule, snapshots $label (keep $keep)"
-if [ $as_root -eq 1 ]; then echo "users          root"; else echo "users          $user on $host, $source_user on $source"; fi
+if [ $autorun -eq 1 ]; then echo "schedule       removable disk (zsync-autorun), snapshots $label (keep $keep)"
+else echo "schedule       $schedule, snapshots $label (keep $keep)"; fi
+if [ $as_root -eq 1 ]; then echo "users          root"
+elif [ $autorun -eq 1 ]; then echo "users          root on $host, $source_user on $source"
+else echo "users          $user on $host, $source_user on $source"; fi
 if [ $yes -eq 0 ]; then
     read -r -p "Set up? [y/N] " answer
     [[ $answer =~ ^[yYjJ] ]] || die "nothing changed"
@@ -165,17 +173,34 @@ set_conf_value "$conf" sshport "$port"
 set_conf_value "$conf" tag "$tag"
 set_conf_value "$conf" zfs_auto_snapshot_keep "$keep"
 set_conf_value "$conf" zfs_auto_snapshot_label "$label"
-set_conf_value "$conf" trigger systemd
-set_conf_value "$conf" schedule "$schedule"
+if [ $autorun -eq 1 ]; then
+    set_conf_value "$conf" trigger autorun
+else
+    set_conf_value "$conf" trigger systemd
+    set_conf_value "$conf" schedule "$schedule"
+fi
 
-#### target with the permissions of the job user
+#### target (removable disk: only if its pool is imported, otherwise the first run creates it)
 if ! zfs list "$target" > /dev/null 2>&1; then
-    step "target $target"
-    zfs create -p -o canmount=noauto -o com.sun:auto-snapshot=false "$target" || die "creating $target failed"
+    if [ $autorun -eq 1 ] && ! zpool list "${target%%/*}" > /dev/null 2>&1; then
+        echo "pool ${target%%/*} is not imported, the first run creates $target"
+    else
+        step "target $target"
+        zfs create -p -o canmount=noauto -o com.sun:auto-snapshot=false "$target" || die "creating $target failed"
+    fi
 fi
 
 if [ $as_root -eq 1 ]; then
     if [[ $source == "local" ]]; then set_conf_value "$conf" source local; else set_conf_value "$conf" source "root@$source"; fi
+    set_conf_value "$conf" run_as ""
+    run_cmd=()
+elif [ $autorun -eq 1 ]; then
+    # zsync-autorun runs as root: the key of root goes to the job user on the source
+    if [[ ! -f /root/.ssh/id_ed25519 ]]; then
+        install -d -m 700 /root/.ssh
+        ssh-keygen -q -t ed25519 -N "" -C "root@$host" -f /root/.ssh/id_ed25519 || die "ssh-keygen for root failed"
+    fi
+    key=$(cat /root/.ssh/id_ed25519.pub)
     set_conf_value "$conf" run_as ""
     run_cmd=()
 else
@@ -196,10 +221,14 @@ else
     zfs allow -u "$user" "$target_permissions" "$target" || die "zfs allow on $target failed"
     # checkzfs output into the local checkmk spool (group bashclub-zsync)
     if [[ -d /var/lib/check_mk_agent ]]; then install -d -m 2775 -g bashclub-zsync /var/lib/check_mk_agent/spool; fi
-
-    #### source: job user with key, address and permissions (bashclub-zsync-job-user)
-    step "user $source_user on $source"
     key=$(cat "$home/.ssh/id_ed25519.pub")
+    set_conf_value "$conf" run_as "$user"
+    run_cmd=(runuser -u "$user" --)
+fi
+
+#### source: job user with key, address and permissions (bashclub-zsync-job-user)
+if [ $as_root -eq 0 ]; then
+    step "user $source_user on $source"
     # from: the address of this host as the source sees it (SSH_CLIENT of the setup connection)
     "${ssh_setup[@]}" /usr/sbin/bashclub-zsync-job-user add "$source_job" '"${SSH_CLIENT%% *}"' "$key" || die "setting up $source_user on $source failed"
     if [[ -n $tag_datasets ]]; then
@@ -210,14 +239,12 @@ else
     fi
     "${ssh_setup[@]}" /usr/sbin/bashclub-zsync-job-user allow "$source_job" "$tag" || die "permissions for $source_user on $source failed"
     set_conf_value "$conf" source "$source_user@$source"
-    set_conf_value "$conf" run_as "$user"
-    run_cmd=(runuser -u "$user" --)
 fi
 
 #### connection test and the datasets that will be replicated
 if [[ $source != "local" ]]; then
     remote_user=$(sed -n 's/^source=//p' "$conf" | cut -d@ -f1)
-    step "connection test as ${run_cmd:+$user }to $remote_user@$source"
+    step "connection test as $([ ${#run_cmd[@]} -gt 0 ] && echo "$user" || echo root) to $remote_user@$source"
     tagged=$("${run_cmd[@]}" ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -p "$port" \
         "$remote_user@$source" zfs get -H -o name,value,source -t filesystem,volume "$tag") || die "connection test failed"
     selected=$(awk -F'\t' '($2 == "all" || $2 == "subvols") && $3 !~ /^received/ { print "    " $1 " (" $2 ", " $3 ")" }' <<< "$tagged")
@@ -229,10 +256,14 @@ if [[ $source != "local" ]]; then
     fi
 fi
 
-#### timer
-step "timer bashclub-zsync@$name.timer"
-bashclub-zsync-timer sync | grep -F "bashclub-zsync@$name.timer"
-if [ $run -eq 1 ]; then
+#### timer (removable disk: zsync-autorun when the disk is connected)
+if [ $autorun -eq 1 ]; then
+    echo "removable disk: prepare it with  bashclub-zsync-disk create <disk> ${target%%/*} --luks --config $name"
+else
+    step "timer bashclub-zsync@$name.timer"
+    bashclub-zsync-timer sync | grep -F "bashclub-zsync@$name.timer"
+fi
+if [ $run -eq 1 ] && [ $autorun -eq 0 ]; then
     step "first run (journalctl -u bashclub-zsync@$name -f)"
     systemctl start --no-block "bashclub-zsync@$name.service"
 fi

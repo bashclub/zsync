@@ -389,6 +389,19 @@ bashclub-zsync-timer migrate
 ~~~
 `bashclub-zsync-timer enable <name> --user <user> --log <file>` sets `run_as` and `log_file`, `bashclub-zsync-timer disable <name>` writes `trigger=cron` and stops the timer. The timers are generated at boot and with `systemctl daemon-reload` (generator `bashclub-zsync-generator`), so a configuration with `trigger=systemd` also gets its timer after a reboot without `sync`. The package does not change any configuration by itself, it only shows a hint if cron jobs exist. TrueNAS SCALE keeps using cron.
 
+### Removable disks
+`bashclub-zsync-disk` prepares a removable disk, connecting it later starts `zsync-autorun@<label>`: it imports the pool (and opens LUKS with the key file), replicates with the configuration of the disk, exports the pool, powers off the disk and mails the result to root. The disk must not be mounted or used (pool, LVM, RAID, LUKS) and its serial number has to be typed to confirm.
+
+Show the disks that can be used:
+~~~
+bashclub-zsync-disk list
+~~~
+Create the configuration of the disk first, its target has to be in the pool of the disk: `bashclub-zsync-setup --autorun --target usb-backup1/pve1 usb-backup1` (no timer, `zsync-autorun` runs it as root, the job user on the source gets the key of root). Then prepare the disk with LUKS2 (key file `/etc/bashclub/<label>.key`, keep a copy outside of the host), optionally a passphrase as second key (e.g. a YubiKey with a static password: `ykman otp static --generate 2`) and the configuration of the disk (linked as `/etc/default/zsync-autorun@<label>`, `trigger=autorun`):
+~~~
+bashclub-zsync-disk create /dev/disk/by-id/usb-... usb-backup1 --luks --passphrase --config usb-backup1
+~~~
+The udev rule `/etc/udev/rules.d/90-zsync-autorun-<label>.rules` matches the UUID of this disk only. A configuration with `trigger=autorun` gets no timer and no age check in the monitoring. The manual steps are in [notizen-luks](notizen-luks).
+
 ### Define a cronjob
 #### cron.d example
 File: /etc/cron.d/bashclub-zsync

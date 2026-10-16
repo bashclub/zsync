@@ -357,6 +357,7 @@ case_timer() {
   rm -f "$tconf" "$lconf"
   bashclub-zsync-timer sync > /dev/null
   check "Timer ohne Config gestoppt" not systemctl is-active --quiet $unit
+  systemctl stop bashclub-zsync@$name.service 2> /dev/null; rm -f "$tconf" /var/lib/systemd/timers/stamp-bashclub-zsync@$name.timer
   rm -rf "$crondir" /var/log/bashclub-zsync/zci-timer.log
 }
 
@@ -502,15 +503,75 @@ case_setup() {
   check "Fragen: Zeitplan übernommen" grep -q "schedule       0 5 \* \* \*, snapshots zsync-$host (keep 7)" <<< "$out"
   check "Fragen: Abbruch ändert nichts" not test -e /etc/bashclub/zci-setup5.conf
   # --root im lokalen Modus: keine Jobbenutzer
-  check "Setup lokal als root" bashclub-zsync-setup -y -s local -t "$ZCI_POOL_DST/setup4" zci-setup4
+  out=$(bashclub-zsync-setup -y -s local -t "$ZCI_POOL_DST/setup4" zci-setup4 2>&1); rc=$?
+  equal "Setup lokal als root" 0 "$rc" || echo "$out" | tail -5 | sed 's/^/       /'
   check "lokal: source=local, run_as leer" grep -qx 'source=local' /etc/bashclub/zci-setup4.conf
   # aufräumen
-  rm -f /var/lib/zsync/.ssh/authorized_keys /etc/bashclub/zci-setup*.conf
-  bashclub-zsync-timer sync > /dev/null
+  rm -f /var/lib/zsync/.ssh/authorized_keys
+  remove_timer_configs /etc/bashclub/zci-setup*.conf
   for n in zci-setup zci-setup2 zci-setup3; do
     bashclub-zsync-job-user remove "$(echo "$host-$n" | tr 'A-Z_.' 'a-z--' | cut -c1-26)" > /dev/null 2>&1
     id "zsync-$n" > /dev/null 2>&1 && { pkill -u "zsync-$n"; sleep 1; userdel -r "zsync-$n"; }
   done
+}
+# Wechseldatenträger: Zielplatte vorbereiten (Auswahl, LUKS, Pool, udev-Regel, Config-Link), Anschließen mit
+# zsync-autorun wie der Dienst (mail und udisksctl als Stubs: die Platte der VM wird nicht abgeschaltet)
+case_disk() {
+  local label=zci-usb uconf=/etc/bashclub/zci-usb.conf stub=/tmp/zci-stub rule=/etc/udev/rules.d/90-zsync-autorun-zci-usb.rules
+  local key=/etc/bashclub/zci-usb.key real serial out part
+  zpool destroy "$ZCI_POOL_DST"
+  real=$(readlink -f "$ZCI_DISK_DST"); serial=$(lsblk -dno SERIAL "$real" | tr -d ' ')
+  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; snap "$ZCI_POOL_SRC/data" 01
+  # Config wie im README: Setup für einen Wechseldatenträger (kein Timer, Jobbenutzer auf der Quelle mit dem Schlüssel von root)
+  check "Setup --autorun" bashclub-zsync-setup -y --autorun -s localhost --login root -t $label/backup $label
+  check "Setup: trigger=autorun" grep -qx 'trigger=autorun' "$uconf"
+  check "Setup: kein Timer" not systemctl is-active --quiet bashclub-zsync@$label.timer
+  set_conf "$uconf" checkzfs_disabled 1
+  out=$(bashclub-zsync-disk list)
+  check "list: freie Platte" grep -q "^$ZCI_DISK_DST " <<< "$out"
+  check "list: Platte im Pool fehlt" not grep -q "^$ZCI_DISK_SRC " <<< "$out"
+  check "Platte im Pool abgewiesen" not bashclub-zsync-disk create "$ZCI_DISK_SRC" zci-x --yes --serial x
+  check "falsche Seriennummer abgewiesen" not bashclub-zsync-disk create "$ZCI_DISK_DST" $label --yes --serial falsch
+  check "falsche Bestätigung abgewiesen" not bashclub-zsync-disk create "$ZCI_DISK_DST" $label <<< "falsch"
+  check "Abbruch ändert nichts" not test -e $rule
+  check "Ziel der Config muss im Pool liegen" not bashclub-zsync-disk create "$ZCI_DISK_DST" zci-other --config zci-usb --yes --serial "$serial"
+  # Passphrase (z. B. YubiKey) ohne Terminal aus der Eingabe
+  check "Platte mit LUKS und Passphrase anlegen" bashclub-zsync-disk create "$ZCI_DISK_DST" $label --luks --passphrase --config zci-usb --yes --serial "$serial" <<< "zsync-ci-pass"
+  part=$(lsblk -lnpo NAME,TYPE "$real" | awk '$2 == "part" { print $1; exit }')
+  equal "LUKS2 mit Label" "crypto_LUKS $label" "$(blkid -s TYPE -o value "$part") $(blkid -s LABEL -o value "$part")"
+  equal "Schlüsseldatei nur für root" 600 "$(stat -c %a $key)"
+  check "Passphrase öffnet LUKS" cryptsetup open --test-passphrase "$part" <<< "zsync-ci-pass"
+  check "udev-Regel mit UUID der Partition" grep -qF "ENV{ID_FS_UUID}==\"$(blkid -s UUID -o value "$part")\", ENV{SYSTEMD_WANTS}+=\"zsync-autorun@$label.service\"" $rule
+  equal "Config verlinkt" "$uconf" "$(readlink /etc/default/zsync-autorun@$label)"
+  check "Config: trigger=autorun" grep -qx 'trigger=autorun' "$uconf"
+  check "Pool exportiert" not zpool list $label
+  check "LUKS geschlossen" not test -e /dev/mapper/$label
+  # Anschließen: zsync-autorun wie zsync-autorun@zci-usb.service
+  rm -rf "$stub"; mkdir -p "$stub"
+  printf '#!/bin/sh\necho "udisksctl $*" >> %s/calls\n' "$stub" > "$stub/udisksctl"
+  printf '#!/bin/sh\necho "mail $*" >> %s/calls\ncat > /dev/null\n' "$stub" > "$stub/mail"
+  chmod +x "$stub/udisksctl" "$stub/mail"
+  echo "===== $(date +%T) zsync-autorun" >> /var/log/zsync-ci/disk.log
+  PATH=$stub:$PATH zsync-autorun /etc/default/zsync-autorun@$label >> /var/log/zsync-ci/disk.log 2>&1; rc=$?
+  equal "zsync-autorun: Exit-Code" 0 "$rc"
+  check "Mail: Replikation erfolgreich" grep -q "^mail -s zsync-autorun - Replication succeeded for $label" "$stub/calls"
+  check "Abschalten der ganzen Platte (nicht der Partition)" grep -qx "udisksctl power-off --block-device $real" "$stub/calls"
+  check "Pool nach dem Lauf exportiert" not zpool list $label
+  check "LUKS nach dem Lauf geschlossen" not test -e /dev/mapper/$label
+  cryptsetup open --key-file $key "$part" $label && zpool import $label
+  check "auf die Platte repliziert" test "$(zfs list -H -o name -t snapshot "$label/backup/$ZCI_POOL_SRC/data" 2>/dev/null | wc -l)" -ge 1
+  zpool export $label; cryptsetup close $label
+  # ohne LUKS: Regel mit der UUID des Pools
+  rm -f $rule /etc/default/zsync-autorun@$label; udevadm control --reload
+  check "Platte ohne LUKS anlegen" bashclub-zsync-disk create "$ZCI_DISK_DST" $label --yes --serial "$serial"
+  part=$(lsblk -lnpo NAME,TYPE "$real" | awk '$2 == "part" { print $1; exit }')
+  equal "Pool direkt auf der Partition" zfs_member "$(blkid -s TYPE -o value "$part")"
+  check "udev-Regel mit UUID des Pools" grep -qF "ENV{ID_FS_UUID}==\"$(blkid -s UUID -o value "$part")\"" $rule
+  # aufräumen: Regel zuerst, damit beim Löschen nichts startet
+  rm -f $rule /etc/default/zsync-autorun@$label "$uconf" $key; udevadm control --reload
+  bashclub-zsync-job-user remove "$(echo "$(hostname -s)-$label" | tr 'A-Z_.' 'a-z--' | cut -c1-26)" > /dev/null
+  rm -rf "$stub"
+  wipefs -qa "$part" "$real"
 }
 # fehlt der älteste Quell-Snapshot am Ziel, ist nur die Rotation blockiert: Warnung, Exit 0, Status cleanup_blocked
 case_cleanup_blocked() {
@@ -544,7 +605,7 @@ case_checkmk() {
   check "Statusdatei des Laufs entfernt" test ! -e "$RUN_DIR/$id.state"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup cleanup_blocked source_unreachable checkmk)
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten und Pools): ein zweiter wartet
