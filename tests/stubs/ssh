@@ -16,4 +16,6 @@ if [[ $SSH_FAIL == 1 ]]; then
   echo "ssh: connect to host $host port 22: Connection refused" >&2; exit 255
 fi
 echo "ssh [$(printf '%s\n' "${opts[@]}" | sort | tr '\n' ' ')] $host: $cmd" >> "$ZTEST_LOG"
+# mit ZTEST_WRAPPER läuft der Befehl wie mit command= in authorized_keys über bashclub-zsync-remote
+if [[ -n ${ZTEST_WRAPPER-} ]]; then SSH_ORIGINAL_COMMAND=$cmd ZSIDE=source exec "$ZTEST_WRAPPER"; fi
 ZSIDE=source exec bash -c "$cmd"

@@ -915,7 +915,8 @@ if [ $checkzfs_disabled -eq 0 ]; then
         fi
     else
         remote "mkdir -p $spooldir"
-        scp -P ${sshport} $spoolfile ${source}:$spooltmp && remote "mv $spooltmp $spooldir/$spoolname"
+        # over the ssh connection of the run (no scp: works with the forced command bashclub-zsync-remote)
+        remote "cat > $spooltmp" < $spoolfile && remote "mv $spooltmp $spooldir/$spoolname"
         rm -f $spoolfile
     fi
 fi

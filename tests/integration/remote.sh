@@ -8,8 +8,10 @@ repo=$(cd "$(dirname "$0")/../.." && pwd)
 version=$(git -C "$repo" describe --tags --match 'v[0-9]*' --long | sed -E 's/^v//; s/-([0-9]+)-g([0-9a-f]+)$/+git\1.\2/')
 git -C "$repo" diff --quiet HEAD || version="$version.dirty"
 dist=$(mktemp -d); trap 'rm -rf "$dist"' EXIT
-podman run --rm -e VERSION="$version" -v "$repo:/src:ro,Z" -v "$dist:/dist:Z" -w /src docker.io/goreleaser/nfpm \
-  pkg -f nfpm.yaml -p deb -t /dist/ > /dev/null
+for f in nfpm.yaml nfpm-source.yaml; do
+  podman run --rm -e VERSION="$version" -v "$repo:/src:ro,Z" -v "$dist:/dist:Z" -w /src docker.io/goreleaser/nfpm \
+    pkg -f $f -p deb -t /dist/ > /dev/null
+done
 ssh "$host" 'rm -rf /root/zsync-ci && mkdir -p /root/zsync-ci'
 scp -q "$dist"/*.deb "$host":/root/zsync-ci/
 scp -qr "$repo/tests/integration" "$host":/root/zsync-ci/
