@@ -1,0 +1,239 @@
+#!/bin/bash
+#
+# bashclub-zsync-setup: set up a replication /etc/bashclub/<name>.conf on this backup server (as root)
+#   - user zsync-<job> on this host (run_as) with its own ssh-ed25519 key, ZFS permissions only on its target
+#   - user zsync-<backup host>-<job> on the source (package bashclub-zsync-source): key restricted to the address
+#     of this host and to the commands of bashclub-zsync, permissions only on the datasets with the tag
+#   - configuration with the defaults of new configurations, systemd timer (trigger=systemd, schedule)
+# Asks for each setting (default in brackets), or takes them from the options (--yes: no questions).
+# The source is set up over ssh as its management user zsync (sudo bashclub-zsync-job-user) or as root.
+
+PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
+prog=$(basename "$0")
+conf_dir=${ZSYNC_CONF_DIR:-/etc/bashclub}
+jobs_home=/var/lib/bashclub-zsync/jobs
+. ${ZSYNC_LIB:-/usr/lib/bashclub-zsync/schedule.sh} || exit 1
+
+# permissions of the job user on its target: replication plus all properties zfs send -p can bring along
+# (except sharenfs/sharesmb), see README "Running without root"
+target_permissions=create,receive,mount,destroy,rollback,hold,release,userprop,aclinherit,aclmode,acltype,atime,canmount,checksum,compression,context,copies,dedup,defcontext,devices,dnodesize,exec,filesystem_limit,fscontext,logbias,mountpoint,nbmand,overlay,primarycache,quota,readonly,recordsize,redundant_metadata,refquota,refreservation,relatime,reservation,rootcontext,secondarycache,setuid,snapdev,snapdir,snapshot_limit,special_small_blocks,sync,volmode,volsize,vscan,xattr
+
+usage() {
+    cat >&2 << EOF
+usage: $prog [options] <name>
+    <name>                  configuration /etc/bashclub/<name>.conf (letters, digits, _ . -)
+    -s, --source <host>     source host (address or name), "local" for pools of this host
+    -p, --port <port>       ssh port of the source (22)
+    -t, --target <dataset>  target dataset on this host (<first pool>/zsync/<name>)
+    --tag <property>        tag of the datasets to replicate on the source (bashclub:zsync)
+    --tag-datasets "<ds>…"  set the tag (all) on these datasets of the source (only with --login root)
+    --schedule "<cron>"     schedule in cron format (*/15 * * * *)
+    --keep <n>              snapshots to keep per label on the source (internal snapshot engine) (14)
+    --label <label>         snapshot label (zsync-<this host>)
+    --login auto|zsync|root login on the source to set it up (auto: zsync, then root)
+    --root                  no job users: replicate as root with root@<source> (as before 2.0)
+    --run                   start the first run right away (systemctl start bashclub-zsync@<name>)
+    -y, --yes               no questions, defaults for everything not given
+EOF
+    exit 2
+}
+
+die() { echo "$prog: $*" >&2; exit 1; }
+step() { echo "==> $*"; }
+
+# ask <variable> <question> [default]: the answer, the default with an empty answer or with --yes
+ask() {
+    local var=$1 question=$2 default=$3 answer
+    if [[ -n ${!var} ]]; then return; fi
+    if [ $yes -eq 1 ]; then
+        printf -v "$var" '%s' "$default"
+        return
+    fi
+    read -r -p "$question${default:+ [$default]}: " answer
+    printf -v "$var" '%s' "${answer:-$default}"
+}
+
+# job name for user names: lower case letters, digits, -; at most 26 characters (user name at most 32)
+job_name() {
+    local job=${1,,}
+    job=${job//[._]/-}
+    job=${job//[^a-z0-9-]/}
+    echo "${job:0:26}"
+}
+
+source= port= target= tag= tag_datasets= schedule= keep= label= login=auto as_root=0 run=0 yes=0 name=
+while [ $# -gt 0 ]; do
+    case $1 in
+        -s|--source) source=$2; shift ;;
+        -p|--port) port=$2; shift ;;
+        -t|--target) target=$2; shift ;;
+        --tag) tag=$2; shift ;;
+        --tag-datasets) tag_datasets=$2; shift ;;
+        --schedule) schedule=$2; shift ;;
+        --keep) keep=$2; shift ;;
+        --label) label=$2; shift ;;
+        --login) login=$2; shift ;;
+        --root) as_root=1 ;;
+        --run) run=1 ;;
+        -y|--yes) yes=1 ;;
+        -h|--help) usage ;;
+        -*) usage ;;
+        *) [[ -z $name ]] || usage; name=$1 ;;
+    esac
+    shift
+done
+
+[ "$(id -u)" -eq 0 ] || die "must run as root"
+[[ -n $name ]] || usage
+valid_name "$name" || die "name '$name': letters, digits, _ . - only (it becomes the timer bashclub-zsync@$name)"
+conf=$conf_dir/$name.conf
+[[ -e $conf ]] && die "$conf exists already; change it there (bashclub-zsync-timer sync activates a changed schedule)"
+[[ $login =~ ^(auto|zsync|root)$ ]] || die "--login: auto, zsync or root"
+
+#### settings
+host=$(hostname -s)
+first_pool=$(zpool list -H -o name 2> /dev/null | head -1)
+ask source "Source host (address or name, local = pools of this host)" ""
+[[ -n $source ]] || die "no source given"
+source=${source#*@}
+if [[ $source != "local" ]]; then ask port "ssh port of $source" 22; fi
+ask target "Target dataset on $host" "${first_pool:+$first_pool/zsync/$name}"
+[[ -n $target ]] || die "no target given (no pool found on this host)"
+ask tag "Tag of the datasets to replicate on the source" bashclub:zsync
+ask schedule "Schedule (cron format)" "*/15 * * * *"
+schedule_calendars "$schedule" > /dev/null || die "invalid schedule '$schedule' (cron format, e.g. \"*/15 * * * *\" or @hourly)"
+ask keep "Snapshots to keep per label on the source" 14
+[[ $keep =~ ^[0-9]+$ ]] || die "invalid number of snapshots '$keep'"
+ask label "Snapshot label" "zsync-$host"
+[[ $port =~ ^[0-9]*$ ]] || die "invalid port '$port'"
+port=${port:-22}
+[[ $source == "local" ]] && as_root=1
+
+job=$(job_name "$name")
+user=zsync-$job
+source_job=$(job_name "$host-$name")
+source_user=zsync-$source_job
+
+echo
+echo "configuration  $conf"
+if [[ $source == "local" ]]; then echo "source         local, datasets with $tag"; else echo "source         $source (port $port), datasets with $tag"; fi
+echo "target         $target"
+echo "schedule       $schedule, snapshots $label (keep $keep)"
+if [ $as_root -eq 1 ]; then echo "users          root"; else echo "users          $user on $host, $source_user on $source"; fi
+if [ $yes -eq 0 ]; then
+    read -r -p "Set up? [y/N] " answer
+    [[ $answer =~ ^[yYjJ] ]] || die "nothing changed"
+fi
+
+#### source: how to log in for the setup (management user zsync with sudo, or root)
+ssh_setup=()
+if [[ $source != "local" ]]; then
+    ssh_opts=(-o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -p "$port")
+    if [ $as_root -eq 1 ]; then
+        ssh "${ssh_opts[@]}" "root@$source" true || die "no ssh login as root@$source"
+    else
+        for try in zsync root; do
+            [[ $login == "auto" || $login == "$try" ]] || continue
+            if [[ $try == "zsync" ]]; then
+                if ssh "${ssh_opts[@]}" "zsync@$source" "sudo -n /usr/sbin/bashclub-zsync-job-user list" > /dev/null 2>&1; then
+                    ssh_setup=(ssh "${ssh_opts[@]}" "zsync@$source" sudo -n); break
+                fi
+            elif ssh "${ssh_opts[@]}" "root@$source" true 2> /dev/null; then
+                if ! ssh "${ssh_opts[@]}" "root@$source" "command -v bashclub-zsync-job-user" > /dev/null; then
+                    step "installing bashclub-zsync-source on $source"
+                    ssh "${ssh_opts[@]}" "root@$source" "apt-get install -y bashclub-zsync-source > /dev/null" \
+                        || die "bashclub-zsync-source could not be installed on $source (bashclub package source there?); without it: --root"
+                fi
+                ssh_setup=(ssh "${ssh_opts[@]}" "root@$source"); break
+            fi
+        done
+        [ ${#ssh_setup[@]} -gt 0 ] || die "no login on $source to set it up: as zsync (key of root of this host in ~zsync/.ssh/authorized_keys, package bashclub-zsync-source) or as root"
+    fi
+fi
+
+if [[ -n $tag_datasets ]] && [[ ${ssh_setup[*]} != *"root@$source"* ]]; then
+    die "--tag-datasets needs a login as root on $source (--login root), the management user zsync may not set properties"
+fi
+
+#### configuration from the template of bashclub-zsync (defaults of new configurations)
+step "configuration $conf"
+mkdir -p "$conf_dir"
+bashclub-zsync -c "$conf" > /dev/null 2>&1
+[[ -f $conf ]] || die "creating $conf with bashclub-zsync failed"
+set_conf_value "$conf" target "$target"
+set_conf_value "$conf" sshport "$port"
+set_conf_value "$conf" tag "$tag"
+set_conf_value "$conf" zfs_auto_snapshot_keep "$keep"
+set_conf_value "$conf" zfs_auto_snapshot_label "$label"
+set_conf_value "$conf" trigger systemd
+set_conf_value "$conf" schedule "$schedule"
+
+#### target with the permissions of the job user
+if ! zfs list "$target" > /dev/null 2>&1; then
+    step "target $target"
+    zfs create -p -o canmount=noauto -o com.sun:auto-snapshot=false "$target" || die "creating $target failed"
+fi
+
+if [ $as_root -eq 1 ]; then
+    if [[ $source == "local" ]]; then set_conf_value "$conf" source local; else set_conf_value "$conf" source "root@$source"; fi
+    set_conf_value "$conf" run_as ""
+    run_cmd=()
+else
+    #### job user on this host: own key, permissions only on its target
+    home=$jobs_home/$job
+    if getent passwd "$user" > /dev/null; then
+        [[ $(getent passwd "$user" | cut -d: -f6) == "$home" ]] || die "user $user exists, but is not a job user of $prog"
+    else
+        step "user $user"
+        install -d -m 755 "$jobs_home"
+        useradd --system --home-dir "$home" --create-home --shell /bin/bash --groups bashclub-zsync \
+            --comment "bashclub-zsync job $name" "$user" || die "useradd $user failed"
+    fi
+    if [[ ! -f $home/.ssh/id_ed25519 ]]; then
+        runuser -u "$user" -- bash -c 'install -d -m 700 ~/.ssh && ssh-keygen -q -t ed25519 -N "" -C "$(id -un)@$(hostname -s)" -f ~/.ssh/id_ed25519' \
+            || die "ssh-keygen for $user failed"
+    fi
+    zfs allow -u "$user" "$target_permissions" "$target" || die "zfs allow on $target failed"
+    # checkzfs output into the local checkmk spool (group bashclub-zsync)
+    if [[ -d /var/lib/check_mk_agent ]]; then install -d -m 2775 -g bashclub-zsync /var/lib/check_mk_agent/spool; fi
+
+    #### source: job user with key, address and permissions (bashclub-zsync-job-user)
+    step "user $source_user on $source"
+    key=$(cat "$home/.ssh/id_ed25519.pub")
+    # from: the address of this host as the source sees it (SSH_CLIENT of the setup connection)
+    "${ssh_setup[@]}" /usr/sbin/bashclub-zsync-job-user add "$source_job" '"${SSH_CLIENT%% *}"' "$key" || die "setting up $source_user on $source failed"
+    if [[ -n $tag_datasets ]]; then
+        for ds in $tag_datasets; do
+            step "tag $tag=all on $source:$ds"
+            "${ssh_setup[@]}" zfs set "$tag=all" "$ds" || die "zfs set $tag=all $ds on $source failed"
+        done
+    fi
+    "${ssh_setup[@]}" /usr/sbin/bashclub-zsync-job-user allow "$source_job" "$tag" || die "permissions for $source_user on $source failed"
+    set_conf_value "$conf" source "$source_user@$source"
+    set_conf_value "$conf" run_as "$user"
+    run_cmd=(runuser -u "$user" --)
+fi
+
+#### connection test and the datasets that will be replicated
+if [[ $source != "local" ]]; then
+    remote_user=$(sed -n 's/^source=//p' "$conf" | cut -d@ -f1)
+    step "connection test as ${run_cmd:+$user }to $remote_user@$source"
+    tagged=$("${run_cmd[@]}" ssh -o BatchMode=yes -o ConnectTimeout=10 -o StrictHostKeyChecking=accept-new -p "$port" \
+        "$remote_user@$source" zfs get -H -o name,value,source -t filesystem,volume "$tag") || die "connection test failed"
+    selected=$(awk -F'\t' '($2 == "all" || $2 == "subvols") && $3 !~ /^received/ { print "    " $1 " (" $2 ", " $3 ")" }' <<< "$tagged")
+    if [[ -n $selected ]]; then
+        echo "datasets with $tag on $source:"; echo "$selected"
+    else
+        echo "no dataset on $source has $tag set yet, e.g. as root on $source: zfs set $tag=all <dataset>"
+        [ $as_root -eq 0 ] && echo "then on $source: bashclub-zsync-job-user allow $source_job $tag"
+    fi
+fi
+
+#### timer
+step "timer bashclub-zsync@$name.timer"
+bashclub-zsync-timer sync | grep -F "bashclub-zsync@$name.timer"
+if [ $run -eq 1 ]; then
+    step "first run (journalctl -u bashclub-zsync@$name -f)"
+    systemctl start --no-block "bashclub-zsync@$name.service"
+fi
+echo "done: $conf"
