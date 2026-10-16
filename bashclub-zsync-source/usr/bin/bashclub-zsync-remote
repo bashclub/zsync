@@ -1,0 +1,183 @@
+#!/bin/bash
+# Forced command for the user of bashclub-zsync on the source (authorized_keys):
+#   restrict,from="<backup server>",command="/usr/bin/bashclub-zsync-remote" ssh-ed25519 AAAA...
+# Runs only the commands bashclub-zsync, remote-snapshot-manager and checkzfs send to the source. The command
+# from SSH_ORIGINAL_COMMAND is matched against these forms and executed without a shell: names of datasets,
+# snapshots and bookmarks are checked, a pipe, a loop or a condition is only possible in the fixed forms below.
+# Denied commands are logged to syslog (auth) and end with exit code 126.
+# Test without ssh: SSH_ORIGINAL_COMMAND='zfs list -H -o name' bashclub-zsync-remote
+prog=bashclub-zsync-remote
+spooldir=/var/lib/check_mk_agent/spool
+cmd=${SSH_ORIGINAL_COMMAND-}
+
+#### names (ZFS allows more characters, bashclub-zsync quotes none of them)
+ds='[A-Za-z0-9][A-Za-z0-9_.:/-]*'
+part='[A-Za-z0-9_.:-]+'
+snap="$ds@$part"
+mark="$ds#$part"
+prop='[A-Za-z0-9_.:-]+'
+props='[A-Za-z0-9_.:,-]+'
+types='(filesystem|volume|snapshot|bookmark|all)(,(filesystem|volume|snapshot|bookmark|all))*'
+token='[A-Za-z0-9-]+'
+spoolfile="$spooldir/\.?[A-Za-z0-9_][A-Za-z0-9_.-]*"
+
+function deny() {
+    logger -t $prog -p auth.warning "denied for $(id -un) from ${SSH_CLIENT%% *}: $cmd" 2> /dev/null
+    echo "$prog: command not allowed: $cmd" >&2
+    exit 126
+}
+
+function is() {
+    [[ $2 =~ ^$1$ ]]
+}
+
+#### single zfs command: zfs <subcommand> with the options bashclub-zsync, remote-snapshot-manager and checkzfs use
+function zfs_command() {
+    local sub=$1 arg operands=()
+    shift
+    local args=("$@") i=0
+    case $sub in
+        list|get|send|snapshot|destroy|hold|release|bookmark) ;;
+        *) deny ;;
+    esac
+    while [ $i -lt ${#args[@]} ]; do
+        arg=${args[$i]}
+        case $sub:$arg in
+            list:-H|list:-p|list:-Hp|get:-H|get:-p|get:-Hp|send:-w|send:-p|send:-v|send:-wp|send:-pw) ;;
+            list:-o|get:-o)
+                ((i++)); is "$props" "${args[$i]}" || deny ;;
+            list:-s|list:-S)
+                ((i++)); is "$prop" "${args[$i]}" || deny ;;
+            list:-t|get:-t)
+                ((i++)); is "$types" "${args[$i]}" || deny ;;
+            send:-i)
+                ((i++)); is "($snap|$mark)" "${args[$i]}" || deny ;;
+            send:-t)
+                ((i++)); is "$token" "${args[$i]}" || deny ;;
+            *:-*) deny ;;
+            *) operands+=("$arg") ;;
+        esac
+        ((i++))
+    done
+    # operands per subcommand
+    case $sub in
+        list)
+            for arg in "${operands[@]}"; do is "($ds|$snap|$mark)" "$arg" || deny; done ;;
+        get)
+            [ ${#operands[@]} -ge 1 ] && is "$props" "${operands[0]}" || deny
+            for arg in "${operands[@]:1}"; do is "($ds|$snap|$mark)" "$arg" || deny; done ;;
+        send)
+            if [[ " ${args[*]} " == *" -t "* ]]; then
+                [ ${#operands[@]} -eq 0 ] || deny
+            else
+                [ ${#operands[@]} -eq 1 ] && is "$snap" "${operands[0]}" || deny
+            fi ;;
+        snapshot)
+            [ ${#operands[@]} -eq 1 ] && is "$snap" "${operands[0]}" || deny ;;
+        destroy)
+            # only snapshots and bookmarks, never a dataset
+            [ ${#operands[@]} -eq 1 ] && is "($snap|$mark)" "${operands[0]}" || deny ;;
+        hold|release)
+            [ ${#operands[@]} -ge 2 ] && is "$part" "${operands[0]}" || deny
+            for arg in "${operands[@]:1}"; do is "$snap" "$arg" || deny; done ;;
+        bookmark)
+            [ ${#operands[@]} -eq 2 ] && is "$snap" "${operands[0]}" && is "$mark" "${operands[1]}" || deny ;;
+    esac
+}
+
+#### value of a "..." argument as bash would pass it: \$ \" \\ \` are unescaped, an expansion is denied
+function unquote() {
+    local raw=$1
+    local expansion='\$[A-Za-z0-9_{(!@#?*-]' unescaped='(^|[^\])[`"]'
+    [[ $raw =~ $expansion ]] && deny
+    [[ $raw =~ $unescaped ]] && deny
+    raw=${raw//\\\$/\$}
+    raw=${raw//\\\"/\"}
+    raw=${raw//\\\`/\`}
+    raw=${raw//\\\\/\\}
+    printf '%s' "$raw"
+}
+
+[[ $cmd == *$'\n'* ]] && deny
+
+#### fixed forms with pipe, loop or condition (bashclub-zsync), as regular expressions of the whole command
+form_holds='^for s in ([^;]*); do zfs (hold|release) ('"$part"') \$s 2>/dev/null; done; true$'
+form_newest='^zfs list -H -t snapshot -o name -S createtxg ('"$ds"') \| grep -E "(.*)" \| tail -1$'
+form_times='^zfs get -Hp -o value creation ('"$ds"'); zfs list -Hp -o creation -s createtxg -t snapshot ('"$ds"') \| head -1$'
+form_bookmark='^if \[ "\$\(zfs get -H -o value guid ('"$mark"') 2>/dev/null\)" != "\$\(zfs get -H -o value guid ('"$snap"')\)" \]; then zfs destroy ('"$mark"') 2>/dev/null; zfs bookmark ('"$snap"') ('"$mark"'); fi$'
+form_zas='^which zfs-auto-snapshot > /dev/null \|\| exit 0 ; zfs-auto-snapshot --quiet --syslog --label=('"$part"') --keep=([0-9]+) //$'
+
+if [[ $cmd =~ $form_holds ]]; then
+    # hold/release of several snapshots, errors are ignored
+    action=${BASH_REMATCH[2]}; tag=${BASH_REMATCH[3]}
+    read -ra list <<< "${BASH_REMATCH[1]}"
+    for s in "${list[@]}"; do is "$snap" "$s" || deny; done
+    for s in "${list[@]}"; do zfs $action "$tag" "$s" 2> /dev/null; done
+    exit 0
+elif [[ $cmd =~ $form_newest ]]; then
+    # newest snapshot matching the snapshot names of the configuration
+    name=${BASH_REMATCH[1]}; regex=$(unquote "${BASH_REMATCH[2]}") || exit 126
+    zfs list -H -t snapshot -o name -S createtxg "$name" | grep -E -- "$regex" | tail -1
+    exit $?
+elif [[ $cmd =~ $form_times ]] && [[ ${BASH_REMATCH[1]} == "${BASH_REMATCH[2]}" ]]; then
+    # creation of the dataset and of its oldest snapshot
+    name=${BASH_REMATCH[1]}
+    zfs get -Hp -o value creation "$name"
+    zfs list -Hp -o creation -s createtxg -t snapshot "$name" | head -1
+    exit $?
+elif [[ $cmd =~ $form_bookmark ]] && [[ ${BASH_REMATCH[1]} == "${BASH_REMATCH[3]}" && ${BASH_REMATCH[1]} == "${BASH_REMATCH[5]}" \
+    && ${BASH_REMATCH[2]} == "${BASH_REMATCH[4]}" ]]; then
+    # move the bookmark of this backup server to the newest replicated snapshot
+    mark_name=${BASH_REMATCH[1]}; snap_name=${BASH_REMATCH[2]}
+    if [ "$(zfs get -H -o value guid "$mark_name" 2> /dev/null)" != "$(zfs get -H -o value guid "$snap_name")" ]; then
+        zfs destroy "$mark_name" 2> /dev/null
+        zfs bookmark "$snap_name" "$mark_name"
+    fi
+    exit $?
+elif [[ $cmd =~ $form_zas ]]; then
+    # snapshot engine zas
+    command -v zfs-auto-snapshot > /dev/null || exit 0
+    exec zfs-auto-snapshot --quiet --syslog --label="${BASH_REMATCH[1]}" --keep="${BASH_REMATCH[2]}" //
+fi
+
+# fixed commands without arguments
+case $cmd in
+    exit|true)
+        # connection test of remote-snapshot-manager
+        exit 0 ;;
+    "grep -E \"^ID=\" /etc/os-release | cut -d'=' -f2")
+        grep -E "^ID=" /etc/os-release | cut -d'=' -f2; exit $? ;;
+    "grep -m1 -o aes /proc/cpuinfo | uniq")
+        grep -m1 -o aes /proc/cpuinfo | uniq; exit $? ;;
+    "grep -o AES /var/run/dmesg.boot | uniq")
+        grep -o AES /var/run/dmesg.boot | uniq; exit $? ;;
+esac
+
+# checkzfs output for the checkmk agent on the source (checkzfs_spool=1): only in the spool directory
+form_cat='^cat > ('"$spoolfile"')$'
+form_mv='^mv ('"$spoolfile"') ('"$spoolfile"')$'
+if [[ $cmd == "mkdir -p $spooldir" ]]; then
+    exec mkdir -p "$spooldir"
+elif [[ $cmd =~ $form_cat ]]; then
+    exec cat > "${BASH_REMATCH[1]}"
+elif [[ $cmd =~ $form_mv ]]; then
+    exec mv "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+fi
+
+# single zfs command, optionally with stderr discarded
+quiet=0
+if [[ $cmd == *" 2>/dev/null" ]]; then
+    quiet=1
+    cmd_words=${cmd% 2>/dev/null}
+else
+    cmd_words=$cmd
+fi
+plain='^[A-Za-z0-9_.:/@#, -]+$'
+[[ $cmd_words =~ $plain ]] || deny
+read -ra words <<< "$cmd_words"
+[[ ${words[0]} == "zfs" ]] && [ ${#words[@]} -ge 2 ] || deny
+zfs_command "${words[@]:1}"
+if [ $quiet -eq 1 ]; then
+    exec zfs "${words[@]:1}" 2> /dev/null
+fi
+exec zfs "${words[@]:1}"

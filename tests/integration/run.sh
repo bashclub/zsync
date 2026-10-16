@@ -350,6 +350,53 @@ case_same_second() {
 }
 
 # Checkmk-Check gegen einen echten erfolgreichen Lauf
+# Benutzer auf der Quelle mit command=bashclub-zsync-remote (restrict): Replikation mit allen Funktionen,
+# eine Shell wird abgewiesen
+case_restricted() {
+  local user=zsync-ci-r home=/var/lib/zsync-ci-r
+  id $user > /dev/null 2>&1 || useradd --system --create-home --home-dir $home --shell /bin/bash $user
+  usermod -aG bashclub-zsync $user
+  if [ ! -f $home/.ssh/id_ed25519 ]; then
+    su - $user -c 'install -d -m 700 ~/.ssh && ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519'
+  fi
+  echo "restrict,from=\"127.0.0.1,::1\",command=\"/usr/bin/bashclub-zsync-remote\" $(cat $home/.ssh/id_ed25519.pub)" > $home/.ssh/authorized_keys
+  chown $user: $home/.ssh/authorized_keys; chmod 600 $home/.ssh/authorized_keys
+  su - $user -c 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new localhost exit'
+  # Spool auf der Quelle (checkzfs_spool=1) für die Gruppe beschreibbar
+  install -d -m 2775 -g bashclub-zsync /var/lib/check_mk_agent/spool
+  zfs create "$ZCI_POOL_SRC/data"; zfs create -V 64M "$ZCI_POOL_SRC/vol"
+  zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/vol"
+  write "$ZCI_POOL_SRC/data" 2
+  zfs allow -u $user send,snapshot,destroy,mount,hold,release,bookmark "$ZCI_POOL_SRC"
+  zfs create -o canmount=noauto -o com.sun:auto-snapshot=false "$ZCI_POOL_DST/restricted"
+  zfs allow -u $user "create,receive,mount,destroy,rollback,hold,release,userprop,$ZCI_RECV_PROPS" "$ZCI_POOL_DST/restricted"
+  config restricted "source=$user@localhost
+snapshot_filter=\"\"
+zfs_auto_snapshot_keep=3
+source_hold=1
+source_bookmark=1
+transfer_resume=1
+checkzfs_disabled=0
+checkzfs_spool=1"
+  local out
+  out=$(su - $user -c 'ssh -o BatchMode=yes localhost id' 2>&1); rc=$?
+  equal "Shell abgewiesen: Exit-Code" 126 "$rc"
+  check "Shell abgewiesen: Meldung" grep -q "command not allowed: id" <<< "$out"
+  for n in 1 2; do
+    echo "===== $(date +%T) als $user (command=)" >> "$log"
+    su - $user -c "bashclub-zsync -c $conf" >> "$log" 2>&1; rc=$?
+    equal "Lauf $n: Exit-Code" 0 "$rc"
+    [ $n -eq 1 ] && sleep 61   # eigener Snapshot-Name pro Minute (remote-snapshot-manager)
+  done
+  check "nichts abgewiesen" not grep -q "command not allowed" "$log"
+  for d in data vol; do
+    equal "$d: zwei Snapshots repliziert" 2 "$(zfs list -H -o name -t snapshot "$ZCI_POOL_DST/restricted/$ZCI_POOL_SRC/$d" | wc -l)"
+  done
+  equal "Bookmarks angelegt" 2 "$(zfs list -H -o name -t bookmark -r "$ZCI_POOL_SRC" | grep -c zsync_)"
+  equal "keine Holds übrig" "" "$(zfs list -H -o name -t snapshot -r "$ZCI_POOL_SRC" | xargs zfs holds -H | grep zsync_)"
+  check "checkzfs-Ausgabe im Spool der Quelle" grep -q "<<<local>>>" /var/lib/check_mk_agent/spool/87000_zsync
+  rm -f /var/lib/check_mk_agent/spool/87000_zsync
+}
 # fehlt der älteste Quell-Snapshot am Ziel, ist nur die Rotation blockiert: Warnung, Exit 0, Status cleanup_blocked
 case_cleanup_blocked() {
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
@@ -382,7 +429,7 @@ case_checkmk() {
   check "Statusdatei des Laufs entfernt" test ! -e "$RUN_DIR/$id.state"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second cleanup_blocked source_unreachable checkmk)
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted cleanup_blocked source_unreachable checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
 rm -rf /var/log/zsync-ci

@@ -3,6 +3,8 @@
 ## [Unreleased]
 
 ### Added
+- package `bashclub-zsync-source` with `bashclub-zsync-remote`, a forced command for `authorized_keys` on the source (`restrict,from=…,command=…`): runs only the commands of bashclub-zsync, remote-snapshot-manager and checkzfs without a shell, destroys only snapshots and bookmarks, writes only into the checkmk spool, logs denied commands to syslog; README with a copyable block (#39)
+- exit code rule: a failing dataset never stops the run, errors are collected and returned at the end; README section *Exit code* (#42)
 - systemd timers per configuration (`bashclub-zsync@<name>.timer` / `.service`) and the tool `bashclub-zsync-timer` (`enable` with schedule, user and log file as drop-ins, `disable`, `list`, `migrate [--dry-run]` for cron jobs incl. `/etc/cron.{hourly,daily,weekly,monthly}`, keeping schedule, user and log file); the package only shows a hint if cron jobs exist; the Checkmk check takes the interval from the timer (#12)
 - operation without root on the backup server and the source with delegated ZFS permissions (`zfs allow`): replicas are received without mounting (`zfs receive -u`), the package creates the group `bashclub-zsync` and makes `/var/log/bashclub-zsync`, `/var/lib/bashclub-zsync` and `/run/bashclub-zsync` (tmpfiles.d) writable for it, missing write access to the run status or the checkmk spool only logs a warning; README with copyable commands for user, permissions and source (#11)
 - setting `transfer_resume`: transfers are received with `zfs receive -s`, an interrupted initial replication or delta continues in the next run (`zfs send -t`), also raw encrypted; a partial state that cannot be resumed (snapshot deleted on the source, or `transfer_resume=0`) is discarded; existing configurations without the setting keep `0`, new configurations get `1` (#8)
@@ -18,10 +20,12 @@
 - setting `monitor_max_age` for the age check of the monitoring (#15)
 - setting `zfs_auto_snapshot_label_match`: with `strict` only snapshots in the name scheme of the snapshot engine belong to the label, leftovers of another engine or label are neither replicated nor used for deletion; existing configurations without the setting keep the previous behavior (`legacy`), new configurations get `strict` (#3)
 - warning for snapshots that contain the label but do not match the name scheme of the snapshot engine, on the source and on the target (#3)
-- error (exit code 1) if the oldest source snapshot of an interval does not exist on the target, so no target snapshots of this interval would be deleted; previously nothing was deleted silently and the target filled up (#3)
+- warning and dataset state `cleanup_blocked` (Checkmk WARN) if the oldest source snapshot of an interval does not exist on the target, so no target snapshots of this interval are deleted; previously nothing was deleted silently and the target filled up. The exit code stays 0, the replication itself succeeded (#3, #42)
 - a log file in a directory that no logrotate config mentions (e.g. on TrueNAS SCALE) is rotated by bashclub-zsync itself at 10 MiB, 4 compressed old logs are kept
 
 ### Fixed
+- a source that cannot be reached (or where `zfs get` fails) stops the run at once with an error and exit code 1; previously no dataset was replicated and the run ended with exit code 0 (#42)
+- the checkzfs output for the spool on the source is sent over the ssh connection of the run instead of `scp` (#39)
 - a snapshot deleted on the source during the replication (rotation without `source_hold`) is skipped with a warning and the next delta starts at the last received snapshot; previously this delta and all following deltas of the dataset failed (#7)
 - snapshots are ordered by `createtxg` instead of `creation`: snapshots of different labels created in the same second were ordered ambiguously, so the initial replication could start with the newest of them and the deletion could use the wrong oldest snapshot (#30)
 - only one run per configuration at a time: a second run with the same configuration is skipped with an error message instead of creating snapshots and replicating at the same time (#2)

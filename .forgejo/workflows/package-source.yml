@@ -1,0 +1,38 @@
+# Paket bashclub-zsync-source (Quelle), eigener Lauf: bauen, testen, veröffentlichen wie bashclub-zsync
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  package:
+    uses: bashclub/ci-tools/.forgejo/workflows/package.yml@v1
+    with:
+      nfpm-config: nfpm-source.yaml
+      # erlaubter Befehl läuft, eine Shell wird abgewiesen (Exit 126)
+      smoke-test: |
+        SSH_ORIGINAL_COMMAND=exit bashclub-zsync-remote
+        rc=0; SSH_ORIGINAL_COMMAND=id bashclub-zsync-remote || rc=$?
+        test $rc -eq 126
+      test-targets: '["debian-12","debian-13","ubuntu-24.04","ubuntu-26.04"]'
+      deb-dists: "bookworm trixie noble resolute"
+      formats: deb
+      upgrade-test: true
+      test-prepare: |
+        set -euo pipefail
+        echo 'APT::Install-Recommends "false";' > /etc/apt/apt.conf.d/99no-recommends
+        # contrib (zfsutils-linux) für Debian-Quellen ergänzen, falls nicht vorhanden
+        for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.list; do
+          [ -f "$f" ] || continue
+          sed -Ei '/^[[:space:]]*deb(-src)?[[:space:]].*debian\.org/{/[[:space:]]contrib([[:space:]]|$)/!s/[[:space:]]*$/ contrib/}' "$f"
+        done
+        for f in /etc/apt/sources.list.d/*.sources; do
+          [ -f "$f" ] || continue
+          awk 'BEGIN { RS = ""; ORS = "\n\n" }
+               /URIs:[^\n]*debian\.org/ && !/Components:[^\n]*[ \t]contrib([ \t\n]|$)/ { sub(/Components:[^\n]*/, "& contrib") }
+               { print }' "$f" > "$f.tmp" && mv "$f.tmp" "$f"
+        done
+        apt-get update -qq
+    secrets: inherit

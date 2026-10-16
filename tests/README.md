@@ -21,4 +21,14 @@ diff -r /tmp/zsync-old /tmp/zsync-new
 `checkmk.sh` testet den Checkmk-Check mit Status-Dateien und einem nachgebauten `/proc` (Lernphase, Alter,
 Hänger, D-Zustand, Abbruch, übersprungene Läufe): `tests/checkmk.sh` (ohne root, ohne ZFS).
 
+`remote.sh` testet `bashclub-zsync-remote` (command= auf der Quelle) mit einem zfs-Stub: erlaubte Befehle
+und abgewiesene Versuche (Shell, Datasets löschen, fremde Optionen und Pfade). Dass jeder Befehl von
+`bashclub-zsync` durchgeht, zeigt `run.sh` mit `ZTEST_WRAPPER`: der ssh-Stub führt dann alles über den Wrapper
+aus, das Ergebnis muss mit dem Lauf ohne Wrapper übereinstimmen:
+```
+podman run --rm -v "$PWD:/src:ro,Z" -v /tmp:/out:Z docker.io/library/debian:13 bash -c \
+  '/src/tests/run.sh /src/bashclub-zsync/usr/bin/bashclub-zsync /out/zsync-plain && ZTEST_WRAPPER=/src/bashclub-zsync-source/usr/bin/bashclub-zsync-remote /src/tests/run.sh /src/bashclub-zsync/usr/bin/bashclub-zsync /out/zsync-wrapped'
+diff -r /tmp/zsync-plain /tmp/zsync-wrapped
+```
+
 Echte ZFS-Tests auf einer Test-VM: [integration/README.md](integration/README.md).

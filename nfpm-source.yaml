@@ -1,0 +1,25 @@
+# Paket für die Quelle: ohne die Programme des Backupservers (Timer, Check, logrotate)
+name: bashclub-zsync-source
+arch: all
+platform: linux
+version: ${VERSION}
+version_schema: none
+section: admin
+priority: optional
+maintainer: Thorsten Spille <kontakt@spille-it.de>
+description: Source side of bashclub-zsync ${VERSION} maintained from bashclub (restricted ssh access for the replication).
+homepage: https://code.bashclub.org/bashclub/zsync
+
+depends:
+  - openssh-server
+  - zfsutils-linux
+
+contents:
+  # forced command (command= in authorized_keys) for the user of the backup server
+  - src: bashclub-zsync-source/usr/bin/bashclub-zsync-remote
+    dst: /usr/bin/bashclub-zsync-remote
+    file_info: { mode: 0755 }
+
+  - src: LICENSE
+    dst: /usr/share/doc/bashclub-zsync-source/copyright/LICENSE
+    file_info: { mode: 0644 }

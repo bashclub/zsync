@@ -302,12 +302,21 @@ test -f /var/lib/zsync/.ssh/id_ed25519 || su - zsync -c 'install -d -m 700 ~/.ss
     chown zsync: /var/lib/zsync/.ssh/authorized_keys; chmod 600 /var/lib/zsync/.ssh/authorized_keys
     for p in \$(zpool list -H -o name); do zfs allow -u zsync send,snapshot,destroy,mount,hold,release,bookmark \$p; done" )
 ~~~
-4. Switch the configuration to the user and test the connection:
+4. Restrict the key to the commands of bashclub-zsync (`command=`) and to the address of this backup server (`from=`, as the source sees it). Installs the package `bashclub-zsync-source` on the source, which needs the bashclub package source there as for `bashclub-zsync`:
+~~~
+( . "$conf"; key=$(cat /var/lib/zsync/.ssh/id_ed25519.pub)
+  ssh -p "$sshport" "$source" "apt-get install -y bashclub-zsync-source > /dev/null || exit 1
+    keys=/var/lib/zsync/.ssh/authorized_keys
+    grep -vF '${key#* }' \$keys > \$keys.new
+    echo \"restrict,from=\\\"\${SSH_CLIENT%% *}\\\",command=\\\"/usr/bin/bashclub-zsync-remote\\\" $key\" >> \$keys.new
+    chown zsync: \$keys.new; chmod 600 \$keys.new; mv \$keys.new \$keys; grep -F '${key#* }' \$keys" )
+~~~
+5. Switch the configuration to the user and test the connection:
 ~~~
 ( . "$conf"; sed -i "s|^source=.*|source=zsync@${source#*@}|" "$conf"
   su - zsync -c "ssh -p $sshport -o StrictHostKeyChecking=accept-new zsync@${source#*@} zfs list -H -o name" | head -n 3 )
 ~~~
-5. Logs of earlier root runs writable for the group, the timer or the cron job runs as `zsync`:
+6. Logs of earlier root runs writable for the group, the timer or the cron job runs as `zsync`:
 ~~~
 chgrp bashclub-zsync /var/log/bashclub-zsync/*.log 2> /dev/null; chmod g+w /var/log/bashclub-zsync/*.log 2> /dev/null
 sed -i -E 's#^([^#].*[[:space:]])root([[:space:]]+/usr/bin/bashclub-zsync)#\1zsync\2#' /etc/cron.d/bashclub-zsync 2> /dev/null
@@ -318,6 +327,8 @@ The checkzfs output goes to the checkmk spool `/var/lib/check_mk_agent/spool` (w
 install -d -m 2775 -g bashclub-zsync /var/lib/check_mk_agent/spool
 ~~~
 The snapshot engine `zas` (zfs-auto-snapshot on the source) also works as user `zsync` with these permissions.
+
+With `command=` the user `zsync` on the source cannot open a shell: `bashclub-zsync-remote` runs only the commands bashclub-zsync, remote-snapshot-manager and checkzfs send (zfs list/get/send/snapshot/hold/release/bookmark, destroy only of snapshots and bookmarks, the checkzfs spool), without a shell. Denied commands end with exit code 126 and are logged to syslog: `journalctl -t bashclub-zsync-remote`.
 
 ### Run with systemd timers
 Each configuration `/etc/bashclub/<name>.conf` can have its own timer `bashclub-zsync@<name>.timer` (Proxmox VE, Debian, Ubuntu). A run missed while the host was off is started after the next boot, a timer never starts a second run while the previous one is still active, and the output goes to the journal. The Checkmk check takes the interval for the age check from the timer.
