@@ -25,7 +25,7 @@ declare -A SNAPS_target=([backup/zsync/pool/x]=$'backup/zsync/pool/x@zfs-auto-sn
 
 # Sperre wie das Skript bilden und halten, die Datei enthält die pid des aktiven Laufs
 before_run() {
-  local lockdir=/run/lock; [ -d $lockdir ] || lockdir=/tmp
+  local lockdir=/run/bashclub-zsync; [ -d $lockdir ] && [ -w $lockdir ] || lockdir=/run/lock; [ -d $lockdir ] || lockdir=/tmp
   lockfile=$lockdir/bashclub-zsync$(readlink -m "$1/zsync.conf" | tr '/' '_').lock
   exec {lockfd}> "$lockfile"; flock -n $lockfd; echo 4242 > "$lockfile"
 }

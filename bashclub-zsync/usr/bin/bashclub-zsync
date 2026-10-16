@@ -240,7 +240,11 @@ function finish_status() {
 # only flock from util-linux (Linux): the options -o and -E are not available everywhere
 if [[ -z $ZSYNC_LOCK ]]; then
     if flock --version 2>/dev/null | grep -q util-linux; then
-        lockdir=/run/lock
+        # /run/bashclub-zsync (group bashclub-zsync, not sticky): root and the users of the group share the lock of
+        # a configuration; in sticky directories like /run/lock the kernel (protected_regular) refuses to open a lock
+        # file of another user, e.g. after switching a configuration from root to run_as
+        lockdir=/run/bashclub-zsync
+        [ -d $lockdir ] && [ -w $lockdir ] || lockdir=/run/lock
         [ -d $lockdir ] || lockdir=/tmp
         export ZSYNC_LOCK=$lockdir/bashclub-zsync$(readlink -m "$conf" | tr '/' '_').lock
         flock -n -o -E 75 "$ZSYNC_LOCK" "$BASH" "$0" "${args[@]}"
@@ -258,7 +262,8 @@ if [[ -z $ZSYNC_LOCK ]]; then
     log "[WARN] flock (util-linux) not found, running without protection against concurrent runs."
 else
     # pid of the active run for the message above
-    echo $$ > "$ZSYNC_LOCK" 2>/dev/null
+    # the lock file may belong to another user (e.g. root before switching to run_as): only the message is lost
+    { echo $$ > "$ZSYNC_LOCK"; } 2> /dev/null
 fi
 
 #### log file without logrotate (e.g. TrueNAS: cron job with ">> /mnt/<pool>/.../bashclub-zsync.log")
@@ -372,7 +377,19 @@ status prepare
 
 #### ssh connection: shared master connection, aes cipher if both hosts support it
 controlmaster=-oControlMaster=auto
-controlpath=-oControlPath=~/.ssh/bashclub-zsync-%r@%h-%p
+# socket: %C (hash of host, port and user, 40 characters) keeps the path below the limit of 107 characters;
+# with a long home directory (e.g. users of bashclub-zsync-setup) in a private directory in /tmp (sticky, owner
+# checked), without it the connections are not shared
+controlpath=-oControlPath=~/.ssh/zsync-%C
+if [ ${#HOME} -gt 38 ]; then
+    ctl_dir=/tmp/bashclub-zsync-$(id -u)
+    mkdir -m 700 "$ctl_dir" 2> /dev/null
+    if [ -d "$ctl_dir" ] && [ ! -L "$ctl_dir" ] && [ -O "$ctl_dir" ] && [[ $(stat -c %a "$ctl_dir" 2> /dev/null) == "700" ]]; then
+        controlpath=-oControlPath=$ctl_dir/%C
+    else
+        controlmaster=-oControlMaster=no
+    fi
+fi
 controlpersist=-oControlPersist=15
 
 if [[ $source == "local" ]]; then

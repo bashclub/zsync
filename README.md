@@ -109,6 +109,18 @@ checkzfs --help
 [DOCUMENTATION_DE.md](DOCUMENTATION_DE.md)
 
 
+## Guided setup
+`bashclub-zsync-setup` sets up a new replication on the backup server (as root) and asks for each setting, the default in brackets:
+- configuration `/etc/bashclub/<name>.conf` with the defaults of new configurations and a systemd timer (`trigger=systemd`, schedule in cron format)
+- user `zsync-<name>` on the backup server (`run_as`) with its own ssh-ed25519 key, ZFS permissions only on its target
+- user `zsync-<backup host>-<name>` on the source (package `bashclub-zsync-source`): its key only works from the address of the backup server and only for the commands of bashclub-zsync, it may only read the datasets with the tag (see [Users per replication job on the source](#users-per-replication-job-on-the-source))
+
+The source is set up over ssh, as its management user `zsync` (no root access needed: the key of root of the backup server in `/var/lib/zsync/.ssh/authorized_keys` on the source) or as root (installs `bashclub-zsync-source` if missing). Set up the configuration `/etc/bashclub/zsync.conf`, the questions start with the source:
+~~~
+bashclub-zsync-setup zsync
+~~~
+For automation every question has an option, `--yes` takes the defaults for the rest, e.g. (source, datasets and name are examples) `bashclub-zsync-setup --yes --source pve1 --login root --tag-datasets "rpool/data" --run pve1`. All options: `bashclub-zsync-setup --help`. `--source local` replicates pools of the backup server, `--root` sets up a replication as root without job users (as before 2.0). An existing configuration is never overwritten.
+
 ## Configuration
 After first execution bashclub-zsync will create `/etc/bashclub/zsync.conf` if no configuration parameter is given and file not exists.
 The installation package provides `/etc/bashclub/zsync.conf.example` with the default values.

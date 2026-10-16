@@ -1,5 +1,5 @@
-# Settings of a configuration and its schedule in cron format, used by bashclub-zsync-timer and the systemd
-# generator bashclub-zsync-generator (sourced, no output of its own)
+# Settings of a configuration and its schedule in cron format, used by bashclub-zsync-timer, bashclub-zsync-setup
+# and the systemd generator bashclub-zsync-generator (sourced, no output of its own)
 
 # value of a setting without running the configuration: last line key=..., quotes removed
 conf_value() {
@@ -11,6 +11,18 @@ conf_value() {
     elif [[ $value == \'* ]]; then value=${value#\'}; value=${value%%\'*}
     else value=${value%%[[:space:]]*}; fi
     printf '%s\n' "$value"
+}
+
+# write a setting: replaced where it is, appended otherwise (quoted if it contains spaces, * or ;)
+set_conf_value() {
+    local file=$1 key=$2 value=$3 line
+    if [[ $value =~ [[:space:]*\;] ]]; then line="$key=\"$value\""; else line="$key=$value"; fi
+    if grep -qE "^[[:space:]]*$key=" "$file"; then
+        awk -v k="$key" -v l="$line" '$0 ~ "^[[:space:]]*" k "=" { print l; next } { print }' "$file" > "$file.tmp" \
+            && cat "$file.tmp" > "$file" && rm -f "$file.tmp"
+    else
+        printf '%s\n' "$line" >> "$file"
+    fi
 }
 
 # trigger of a configuration: systemd, autorun or cron (also without the setting: legacy)

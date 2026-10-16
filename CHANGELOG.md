@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- guided setup `bashclub-zsync-setup` (interactive or with options and `--yes`): configuration with the defaults of new configurations and a systemd timer, job user `zsync-<name>` on the backup server with its own ssh-ed25519 key and permissions only on its target, job user on the source via the management user `zsync` or root (`bashclub-zsync-source`), optional tagging, connection test with the selected datasets, first run (#13)
 - users per replication job on the source (package `bashclub-zsync-source`): `bashclub-zsync-job-user add|allow|remove|list` creates `zsync-<job>` with a root-owned key restricted to the address of the backup server and to `bashclub-zsync-remote`, ZFS permissions only on the datasets with the tag of the configuration (removed from all others); only `ssh-ed25519` keys; the package creates the management user `zsync` (if missing), which may only run `bashclub-zsync-job-user` with sudo; README with a copyable block (#43)
 - package `bashclub-zsync-source` with `bashclub-zsync-remote`, a forced command for `authorized_keys` on the source (`restrict,from=…,command=…`): runs only the commands of bashclub-zsync, remote-snapshot-manager and checkzfs without a shell, destroys only snapshots and bookmarks, writes only into the checkmk spool, logs denied commands to syslog; README with a copyable block (#39)
 - exit code rule: a failing dataset never stops the run, errors are collected and returned at the end; README section *Exit code* (#42)
@@ -25,6 +26,8 @@
 - a log file in a directory that no logrotate config mentions (e.g. on TrueNAS SCALE) is rotated by bashclub-zsync itself at 10 MiB, 4 compressed old logs are kept
 
 ### Fixed
+- the socket of the shared ssh connection is named by its hash (`%C`) and kept in a private directory in `/tmp` for long home directories, so long host names or home directories no longer exceed the limit of a unix socket path (#13)
+- the lock of a configuration is kept in `/run/bashclub-zsync` (group `bashclub-zsync`): in `/run/lock` the kernel (`protected_regular`) refused the lock file of another user, so runs failed after switching a configuration between root and `run_as` (#13)
 - a source that cannot be reached (or where `zfs get` fails) stops the run at once with an error and exit code 1; previously no dataset was replicated and the run ended with exit code 0 (#42)
 - the checkzfs output for the spool on the source is sent over the ssh connection of the run instead of `scp` (#39)
 - a snapshot deleted on the source during the replication (rotation without `source_hold`) is skipped with a warning and the next delta starts at the last received snapshot; previously this delta and all following deltas of the dataset failed (#7)

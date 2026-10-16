@@ -38,18 +38,6 @@ EOF
 
 die() { echo "$prog: $*" >&2; exit 1; }
 
-#### settings in the configuration: replaced where they are, appended otherwise
-set_conf_value() {
-    local file=$1 key=$2 value=$3 line
-    if [[ $value =~ [[:space:]*\;] ]]; then line="$key=\"$value\""; else line="$key=$value"; fi
-    if grep -qE "^[[:space:]]*$key=" "$file"; then
-        awk -v k="$key" -v l="$line" '$0 ~ "^[[:space:]]*" k "=" { print l; next } { print }' "$file" > "$file.tmp" \
-            && cat "$file.tmp" > "$file" && rm -f "$file.tmp"
-    else
-        printf '%s\n' "$line" >> "$file"
-    fi
-}
-
 # configuration used by zsync-autorun (/etc/default/zsync-autorun@<pool>, often a link to the configuration)
 autorun_of() {
     local conf link

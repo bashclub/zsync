@@ -465,6 +465,53 @@ source_bookmark=1"
   check "Benutzer entfernt" not id zsync-cij
   check "Rechte entfernt" not grep -q zsync-cij <<< "$(zfs allow "$ZCI_POOL_SRC/data")"
 }
+# geführtes Setup: Jobbenutzer auf beiden Seiten, Config, Timer, erster Lauf; Einrichtung der Quelle als root und
+# als Verwaltungsbenutzer zsync, dazu --root im lokalen Modus
+case_setup() {
+  local name=zci-setup conf_s=/etc/bashclub/zci-setup.conf host; host=$(hostname -s)
+  local sjob; sjob=$(echo "$host-zci-setup" | tr 'A-Z_.' 'a-z--' | cut -c1-26)
+  zfs create "$ZCI_POOL_SRC/data"; zfs create "$ZCI_POOL_SRC/other"; write "$ZCI_POOL_SRC/data" 1
+  check "Setup als root" bashclub-zsync-setup -y -s localhost -t "$ZCI_POOL_DST/setup" --schedule "0 4 * * *" --keep 3 \
+    --login root --tag-datasets "$ZCI_POOL_SRC/data" $name
+  conf=$conf_s; id=$(tr '/' '_' <<< "$conf"); log=/var/log/zsync-ci/setup.log
+  check "Config: trigger=systemd" grep -qx 'trigger=systemd' "$conf"
+  check "Config: Jobbenutzer als run_as" grep -qx 'run_as=zsync-zci-setup' "$conf"
+  check "Config: Quelle mit Jobbenutzer" grep -qx "source=zsync-$sjob@localhost" "$conf"
+  check "Config: neue Defaults (strict)" grep -qx 'zfs_auto_snapshot_label_match=strict' "$conf"
+  equal "Tag gesetzt" all "$(prop "$ZCI_POOL_SRC/data" bashclub:zsync)"
+  check "Jobbenutzer auf der Quelle mit command=" grep -q 'command="/usr/bin/bashclub-zsync-remote"' "/var/lib/bashclub-zsync-source/$sjob/.ssh/authorized_keys"
+  check "Rechte nur auf dem Ziel" grep -q "user zsync-zci-setup " <<< "$(zfs allow "$ZCI_POOL_DST/setup")"
+  check "Timer aktiv" systemctl is-active --quiet bashclub-zsync@$name.timer
+  systemctl start bashclub-zsync@$name.service
+  equal "erster Lauf erfolgreich" success "$(systemctl show -p Result --value bashclub-zsync@$name.service)"
+  equal "Lauf als Jobbenutzer" zsync-zci-setup "$(systemctl show -p User --value bashclub-zsync@$name.service)"
+  equal "ein Snapshot repliziert" 1 "$(zfs list -H -o name -t snapshot "$ZCI_POOL_DST/setup/$ZCI_POOL_SRC/data" 2>/dev/null | wc -l)"
+  check "nicht getaggtes Dataset nicht repliziert" not exists "$ZCI_POOL_DST/setup/$ZCI_POOL_SRC/other"
+  check "vorhandene Config wird nicht überschrieben" not bashclub-zsync-setup -y -s localhost $name
+  # Verwaltungsbenutzer zsync: Schlüssel von root eintragen, Einrichtung ohne root auf der Quelle
+  local rootkey; rootkey=$(cat /root/.ssh/id_ed25519.pub)
+  install -d -m 700 -o zsync -g zsync /var/lib/zsync/.ssh
+  echo "from=\"127.0.0.1,::1\" $rootkey" > /var/lib/zsync/.ssh/authorized_keys; chown zsync: /var/lib/zsync/.ssh/authorized_keys
+  check "Setup als Verwaltungsbenutzer" bashclub-zsync-setup -y -s localhost -t "$ZCI_POOL_DST/setup2" --login zsync zci-setup2
+  check "Jobbenutzer über zsync angelegt" id "zsync-$(echo "$host-zci-setup2" | tr 'A-Z_.' 'a-z--' | cut -c1-26)"
+  check "--tag-datasets nur als root" not bashclub-zsync-setup -y -s localhost -t "$ZCI_POOL_DST/setup3" --login zsync --tag-datasets "$ZCI_POOL_SRC/other" zci-setup3
+  check "--tag-datasets abgewiesen, bevor etwas angelegt wird" not test -e /etc/bashclub/zci-setup3.conf
+  # Fragen: Antworten aus der Eingabe, Abbruch bei der Bestätigung ändert nichts
+  local out; out=$(printf 'localhost\n2222\n\n\n0 5 * * *\n7\n\nn\n' | bashclub-zsync-setup zci-setup5 2>&1)
+  check "Fragen: Antworten übernommen" grep -q "source         localhost (port 2222)" <<< "$out"
+  check "Fragen: Zeitplan übernommen" grep -q "schedule       0 5 \* \* \*, snapshots zsync-$host (keep 7)" <<< "$out"
+  check "Fragen: Abbruch ändert nichts" not test -e /etc/bashclub/zci-setup5.conf
+  # --root im lokalen Modus: keine Jobbenutzer
+  check "Setup lokal als root" bashclub-zsync-setup -y -s local -t "$ZCI_POOL_DST/setup4" zci-setup4
+  check "lokal: source=local, run_as leer" grep -qx 'source=local' /etc/bashclub/zci-setup4.conf
+  # aufräumen
+  rm -f /var/lib/zsync/.ssh/authorized_keys /etc/bashclub/zci-setup*.conf
+  bashclub-zsync-timer sync > /dev/null
+  for n in zci-setup zci-setup2 zci-setup3; do
+    bashclub-zsync-job-user remove "$(echo "$host-$n" | tr 'A-Z_.' 'a-z--' | cut -c1-26)" > /dev/null 2>&1
+    id "zsync-$n" > /dev/null 2>&1 && { pkill -u "zsync-$n"; sleep 1; userdel -r "zsync-$n"; }
+  done
+}
 # fehlt der älteste Quell-Snapshot am Ziel, ist nur die Rotation blockiert: Warnung, Exit 0, Status cleanup_blocked
 case_cleanup_blocked() {
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
@@ -497,7 +544,7 @@ case_checkmk() {
   check "Statusdatei des Laufs entfernt" test ! -e "$RUN_DIR/$id.state"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user cleanup_blocked source_unreachable checkmk)
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup cleanup_blocked source_unreachable checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten und Pools): ein zweiter wartet
