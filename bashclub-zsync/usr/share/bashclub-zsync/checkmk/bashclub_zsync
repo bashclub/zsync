@@ -4,6 +4,9 @@
 # Installed by the package as /usr/lib/check_mk_agent/local/bashclub_zsync (link), if the agent is installed.
 #
 # Reads only the status files written by bashclub-zsync and /proc, never calls zfs (it could hang the same way).
+# The status files are written by the runs, also by unprivileged users: they are data, never code. The check
+# reads settings from the configuration as text (never runs it), accepts only a configuration file that
+# belongs to root and that no one else may write, and uses only numbers that are numbers.
 #   /run/bashclub-zsync/<config>.state       active run: pid, phase, dataset
 #   /var/lib/bashclub-zsync/<config>.last    result of the last run and of the last successful run
 #   /var/lib/bashclub-zsync/<config>.history start times of the last runs
@@ -35,6 +38,7 @@ PROC=${ZSYNC_PROC:-/proc}
 SYSTEMCTL=${ZSYNC_SYSTEMCTL:-systemctl}
 CONF_DIR=${ZSYNC_CONF_DIR:-/etc/bashclub}
 DEFAULT_DIR=${ZSYNC_DEFAULT_DIR:-/etc/default}
+CONF_OWNER=${ZSYNC_CONF_OWNER:-0}
 NOW=${ZSYNC_NOW:-$(date +%s)}
 
 # thresholds in seconds, can be changed in /etc/bashclub/zsync-checkmk.conf
@@ -81,16 +85,42 @@ function seconds() {
     esac
 }
 
-# key=value file into the associative array named $2
+# key=value file into the associative array named $2; keys with numbers (times, pids, counts) keep their value
+# only if it is a number (bash would evaluate other content in arithmetic expressions)
 function read_file() {
     local -n arr=$2
     local key value
     arr=()
     if [[ -f $1 ]]; then
         while IFS='=' read -r key value; do
-            if [[ -n $key ]]; then arr[$key]=$value; fi
+            if [[ -z $key ]]; then continue; fi
+            if [[ $key =~ ^(config|phase|dataset|progress_key)$ ]] || [[ $value =~ ^[0-9]+$ ]]; then arr[$key]=$value; fi
         done < "$1"
     fi
+}
+
+# number or empty
+function number() {
+    if [[ $1 =~ ^[0-9]+$ ]]; then echo "$1"; fi
+}
+
+# configuration of a status file: a regular file *.conf of root, not writable for group and others
+function trusted_conf() {
+    [[ $1 == /*.conf ]] && [[ -f $1 ]] && [[ ! -L $1 ]] || return 1
+    [[ $(stat -c '%u' "$1" 2>/dev/null) == "$CONF_OWNER" ]] || return 1
+    [[ $(( 8#$(stat -c '%a' "$1") & 8#022 )) -eq 0 ]]
+}
+
+# value of a setting without running the configuration (last line key=..., quotes removed)
+function conf_value() {
+    local line value
+    line=$(grep -E "^[[:space:]]*$2=" "$1" 2>/dev/null | tail -1)
+    [[ -n $line ]] || return 0
+    value=${line#*=}
+    if [[ $value == \"* ]]; then value=${value#\"}; value=${value%%\"*}
+    elif [[ $value == \'* ]]; then value=${value#\'}; value=${value%%\'*}
+    else value=${value%%[[:space:]]*}; fi
+    printf '%s\n' "$value"
 }
 
 # fields of /proc/<pid>/stat after "pid (comm) ": state ppid ... (starttime is field 20)
@@ -128,8 +158,12 @@ for id in $ids; do
     read_file "$LIB_DIR/$id.last" last
     read_file "$LIB_DIR/$id.check" chk
     conf=${st[config]:-${last[config]}}
-    # configuration removed: no service anymore
+    # configuration removed: no service anymore; a configuration that is not trusted is not read
     if [[ -z $conf ]] || [[ ! -f $conf ]]; then continue; fi
+    if ! trusted_conf "$conf"; then
+        echo "1 \"zsync $(basename "$conf" .conf)\" - configuration $conf is not a file of root that only root may write, not checked"
+        continue
+    fi
     name=$(basename "$conf" .conf)
     state_level=0
     state_text=()
@@ -159,7 +193,7 @@ for id in $ids; do
             fields=$(stat_fields $pid)
             if [[ ${fields%% *} == D ]]; then
                 key="blocked_${pid}_$(cut -d' ' -f20 <<< "$fields")"
-                since=${chk[$key]:-$NOW}
+                since=$(number "${chk[$key]}"); since=${since:-$NOW}
                 new_chk+=("$key=$since")
                 blocked=$((NOW - since))
                 cmd=$(tr '\0' ' ' < "$PROC/$pid/cmdline" 2>/dev/null | cut -c1-80)
@@ -222,6 +256,7 @@ for id in $ids; do
     kept=0; nosnap=0; orphan_new=0; rolled_back=()
     if [[ -f $LIB_DIR/$id.datasets ]]; then
         while IFS=$'\t' read -r ds dstate since detail; do
+            since=$(number "$since")
             age_text=$(duration $((NOW - ${since:-NOW})))
             case $dstate in
                 broken|empty) ds_crit+=("$ds ($detail, since $age_text)") ;;
@@ -263,9 +298,13 @@ for id in $ids; do
     if [ $nosnap -gt 0 ]; then state_text+=("$nosnap datasets without matching snapshots"); fi
 
     #### age of the last successful run
-    max_age=$( (. "$conf" > /dev/null 2>&1; echo "$monitor_max_age") )
+    max_age=$(conf_value "$conf" monitor_max_age)
+    if [[ -n $max_age ]] && ! [[ $max_age =~ ^[0-9]+[dhms]?$ ]]; then
+        state_text+=("invalid monitor_max_age=$max_age ignored")
+        max_age=
+    fi
     # removable disk (trigger=autorun or used by zsync-autorun@): runs only when the disk is connected
-    autorun=$( (. "$conf" > /dev/null 2>&1; echo "$trigger") )
+    autorun=$(conf_value "$conf" trigger)
     if [[ $autorun != "autorun" ]]; then
         for link in "$DEFAULT_DIR"/zsync-autorun@*; do
             if [[ -e $link ]] && [[ $(readlink -f "$link") == "$(readlink -f "$conf")" ]]; then autorun=autorun; fi
