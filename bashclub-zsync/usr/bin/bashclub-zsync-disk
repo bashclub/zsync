@@ -1,0 +1,202 @@
+#!/bin/bash
+#
+# bashclub-zsync-disk: prepare a removable disk for bashclub-zsync (zsync-autorun@<label> starts the replication
+# when the disk is connected)
+#   - safe choice of the disk: no mounted, used (pool, LVM, RAID, LUKS) or system disk, the serial number
+#     has to be typed to confirm
+#   - one partition, optional LUKS2 with a key file /etc/bashclub/<label>.key (and a passphrase, e.g. YubiKey)
+#   - pool <label>, exported again
+#   - udev rule for this disk (UUID) and /etc/default/zsync-autorun@<label> -> configuration (trigger=autorun)
+
+PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
+prog=$(basename "$0")
+conf_dir=${ZSYNC_CONF_DIR:-/etc/bashclub}
+rules_dir=${ZSYNC_RULES_DIR:-/etc/udev/rules.d}
+default_dir=${ZSYNC_DEFAULT_DIR:-/etc/default}
+. ${ZSYNC_LIB:-/usr/lib/bashclub-zsync/schedule.sh} || exit 1
+
+usage() {
+    cat >&2 << EOF
+usage: $prog list
+       $prog create <disk> <label> [--luks] [--passphrase] [--config <name>] [--yes --serial <serial>]
+
+    list            disks that can be used: not mounted, not in a pool, no LVM, RAID or LUKS on it
+    <disk>          whole disk, e.g. /dev/disk/by-id/usb-WD_Elements_25A3_5758... (see list)
+    <label>         name of the pool (and of the LUKS volume), e.g. usb-backup1
+    --luks          encrypt with LUKS2, key file $conf_dir/<label>.key (keep a copy outside of this host)
+    --passphrase    add a passphrase as second key (LUKS), e.g. a YubiKey with a static password:
+                    ykman otp static --generate 2   (slot 2: press the button for 2 seconds)
+    --config <name> configuration $conf_dir/<name>.conf of this disk: linked as $default_dir/zsync-autorun@<label>
+                    and set to trigger=autorun (its target has to be in the pool <label>)
+    --yes --serial  no questions, the serial number given has to match the disk
+EOF
+    exit 2
+}
+
+die() { echo "$prog: $*" >&2; exit 1; }
+step() { echo "==> $*"; }
+
+# whole disk and all its partitions (and devices on them)
+devices_of() {
+    lsblk -lnpo NAME "$1" 2> /dev/null
+}
+
+# reason why a disk must not be used, empty if it can be used
+not_usable() {
+    local disk=$1 dev name
+    [[ $(lsblk -dno TYPE "$disk" 2> /dev/null) == "disk" ]] || { echo "not a whole disk"; return; }
+    if lsblk -lno MOUNTPOINTS "$disk" 2> /dev/null | grep -q .; then echo "mounted: $(lsblk -lno MOUNTPOINTS "$disk" | grep . | paste -sd' ')"; return; fi
+    # zpool status -L: real device names (also for pools imported by-id)
+    local members; members=$(zpool status -LP 2> /dev/null | awk '$1 ~ "^/dev/" { print $1 }')
+    for dev in $(devices_of "$disk"); do
+        if grep -qx "$(readlink -f "$dev")" <<< "$members"; then echo "in an imported pool"; return; fi
+        name=$(basename "$(readlink -f "$dev")")
+        if [[ -n $(ls -A "/sys/class/block/$name/holders" 2> /dev/null) ]]; then echo "in use by $(ls -A "/sys/class/block/$name/holders" | paste -sd' ') (LVM, RAID, LUKS)"; return; fi
+        if swapon --show=NAME --noheadings 2> /dev/null | grep -qx "$(readlink -f "$dev")"; then echo "swap"; return; fi
+    done
+}
+
+# stable name of a disk: /dev/disk/by-id/... (no wwn-), otherwise the kernel name
+disk_id() {
+    local disk real link
+    real=$(readlink -f "$1")
+    for link in /dev/disk/by-id/*; do
+        [[ $link == *-part* || $link == */wwn-* || $link == */nvme-eui.* ]] && continue
+        if [[ $(readlink -f "$link") == "$real" ]]; then echo "$link"; return; fi
+    done
+    echo "$real"
+}
+
+cmd_list() {
+    local disk reason
+    printf '%-60s %-8s %-6s %-24s %s\n' DISK SIZE TRAN SERIAL MODEL
+    for disk in $(lsblk -dnpo NAME,TYPE | awk '$2 == "disk" { print $1 }'); do
+        reason=$(not_usable "$disk")
+        [[ -z $reason ]] || continue
+        printf '%-60s %-8s %-6s %-24s %s\n' "$(disk_id "$disk")" "$(lsblk -dno SIZE "$disk" | tr -d ' ')" \
+            "$(lsblk -dno TRAN "$disk" | tr -d ' ')" "$(lsblk -dno SERIAL "$disk" | tr -d ' ')" "$(lsblk -dno MODEL "$disk" | sed 's/ *$//')"
+    done
+}
+
+cmd_create() {
+    local disk= label= luks=0 passphrase=0 config= yes=0 serial_given= arg
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --luks) luks=1 ;;
+            --passphrase) passphrase=1 ;;
+            --config) config=$2; shift ;;
+            --yes) yes=1 ;;
+            --serial) serial_given=$2; shift ;;
+            -*) usage ;;
+            *) if [[ -z $disk ]]; then disk=$1; elif [[ -z $label ]]; then label=$1; else usage; fi ;;
+        esac
+        shift
+    done
+    [[ -n $disk && -n $label ]] || usage
+    [ "$(id -u)" -eq 0 ] || die "must run as root"
+    [[ $label =~ ^[A-Za-z][A-Za-z0-9_.-]*$ ]] || die "invalid label '$label' (pool name: letter, then letters, digits, _ . -)"
+    zpool list "$label" > /dev/null 2>&1 && die "a pool $label is imported already"
+    [[ -e /dev/mapper/$label ]] && die "/dev/mapper/$label exists already"
+    [ $passphrase -eq 1 ] && [ $luks -eq 0 ] && die "--passphrase needs --luks"
+    [ $luks -eq 1 ] && ! command -v cryptsetup > /dev/null && die "cryptsetup is missing (apt install cryptsetup)"
+    local conf=
+    if [[ -n $config ]]; then
+        conf=$conf_dir/$config.conf
+        [[ -f $conf ]] || die "configuration $conf not found (create it first, e.g. with bashclub-zsync-setup)"
+        local target; target=$(conf_value "$conf" target)
+        [[ ${target%%/*} == "$label" ]] || die "the target $target of $conf is not in the pool $label"
+    fi
+    [[ -b $disk ]] || die "$disk is not a block device"
+    local reason; reason=$(not_usable "$disk")
+    [[ -z $reason ]] || die "$disk cannot be used: $reason"
+
+    #### confirmation with the serial number (or the device name if the disk has none)
+    local real serial
+    real=$(readlink -f "$disk")
+    serial=$(lsblk -dno SERIAL "$real" | tr -d ' ')
+    echo "disk     $(disk_id "$real") ($real)"
+    echo "model    $(lsblk -dno MODEL "$real" | sed 's/ *$//'), $(lsblk -dno SIZE "$real" | tr -d ' '), ${serial:+serial $serial, }$(lsblk -dno TRAN "$real" | tr -d ' ')"
+    echo "result   pool $label$([ $luks -eq 1 ] && echo " in LUKS2 (key $conf_dir/$label.key)")${conf:+, configuration $conf}"
+    echo "ALL DATA ON THIS DISK WILL BE DELETED"
+    local expected=${serial:-$real} answer
+    if [ $yes -eq 1 ]; then
+        [[ $serial_given == "$expected" ]] || die "--serial '$serial_given' does not match the disk ($expected)"
+    else
+        read -r -p "Type the ${serial:+serial number}${serial:-device name $real} to confirm: " answer
+        [[ $answer == "$expected" ]] || die "confirmation does not match, nothing changed"
+    fi
+
+    #### partition (GPT, one partition over the whole disk)
+    step "partition table on $real"
+    wipefs -a $(devices_of "$real" | tac) > /dev/null || die "wipefs failed"
+    echo 'label: gpt
+,,L' | sfdisk -q "$real" > /dev/null || die "sfdisk failed"
+    udevadm settle
+    local part
+    part=$(lsblk -lnpo NAME,TYPE "$real" | awk '$2 == "part" { print $1; exit }')
+    [[ -b $part ]] || die "partition on $real not found"
+    wipefs -a "$part" > /dev/null
+
+    #### LUKS2 with key file (and passphrase)
+    local vdev=$part key=$conf_dir/$label.key
+    if [ $luks -eq 1 ]; then
+        step "LUKS2 on $part, key $key"
+        mkdir -p "$conf_dir"
+        if [[ ! -f $key ]]; then
+            (umask 077; dd if=/dev/urandom of="$key" bs=64 count=1 status=none) || die "creating $key failed"
+        fi
+        chmod 600 "$key"
+        cryptsetup luksFormat --batch-mode --type luks2 --label "$label" --key-file "$key" "$part" || die "luksFormat failed"
+        if [ $passphrase -eq 1 ]; then
+            echo "new passphrase for $label (YubiKey: press the button, twice):"
+            cryptsetup luksAddKey --key-file "$key" "$part" || die "adding the passphrase failed"
+        fi
+        cryptsetup open --key-file "$key" "$part" "$label" || die "cryptsetup open failed"
+        vdev=/dev/mapper/$label
+    fi
+
+    #### pool, exported again
+    step "pool $label"
+    zpool create -f -o ashift=12 -m none -O com.sun:auto-snapshot=false -O compression=lz4 "$label" "$vdev" || {
+        [ $luks -eq 1 ] && cryptsetup close "$label"; die "zpool create failed"; }
+    zpool export "$label"
+    if [ $luks -eq 1 ]; then cryptsetup close "$label"; fi
+    udevadm settle
+
+    #### udev rule (UUID of the partition: LUKS or pool), configuration link; as last step, so that nothing starts
+    local uuid rule=$rules_dir/90-zsync-autorun-$label.rules
+    uuid=$(blkid -s UUID -o value "$part")
+    [[ -n $uuid ]] || die "UUID of $part not found"
+    step "udev rule $rule"
+    mkdir -p "$rules_dir"
+    cat > "$rule" << EOF
+# written by $prog for $(disk_id "$real"): connecting the disk starts zsync-autorun@$label
+ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="$uuid", ENV{SYSTEMD_WANTS}+="zsync-autorun@$label.service"
+EOF
+    udevadm control --reload 2> /dev/null
+    if [[ -n $conf ]]; then
+        step "$default_dir/zsync-autorun@$label -> $conf (trigger=autorun)"
+        ln -sfn "$conf" "$default_dir/zsync-autorun@$label"
+        set_conf_value "$conf" trigger autorun
+        # a timer of this configuration (trigger=systemd before) stops
+        if systemctl is-active --quiet "bashclub-zsync@$config.timer" 2> /dev/null; then bashclub-zsync-timer sync > /dev/null; fi
+    else
+        echo "configuration of this disk: target in the pool $label, then"
+        echo "    ln -sfn $conf_dir/<name>.conf $default_dir/zsync-autorun@$label"
+    fi
+
+    #### remove the disk
+    if [[ $(lsblk -dno TRAN "$real" | tr -d ' ') == "usb" ]] && command -v udisksctl > /dev/null; then
+        udisksctl power-off --block-device "$real" > /dev/null 2>&1 && echo "disk powered off, it can be removed"
+    else
+        echo "the pool is exported, the disk can be removed"
+    fi
+    [ $luks -eq 1 ] && echo "keep a copy of $key outside of this host, without it the disk cannot be read"
+    echo "done: connect the disk to start the replication (journalctl -u zsync-autorun@$label)"
+}
+
+case $1 in
+    list) cmd_list ;;
+    create) shift; cmd_create "$@" ;;
+    *) usage ;;
+esac

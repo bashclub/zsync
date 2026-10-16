@@ -1,2 +1,3 @@
-# Insert the zfs pool guid of the USB disk
-# KERNEL=="sd?1", ACTION=="add", SUBSYSTEMS=="block", ENV{ID_FS_UUID}=="<zfs pool guid>", ENV{SYSTEMD_WANTS}+="zsync-autorun@%E{ID_FS_LABEL}.service"
+# bashclub-zsync-disk create writes this rule per disk: /etc/udev/rules.d/90-zsync-autorun-<label>.rules
+# UUID of the partition (LUKS: blkid -s UUID -o value <partition>, without LUKS: the pool guid, same command)
+# ACTION=="add", SUBSYSTEM=="block", ENV{ID_FS_UUID}=="<uuid>", ENV{SYSTEMD_WANTS}+="zsync-autorun@<label>.service"
