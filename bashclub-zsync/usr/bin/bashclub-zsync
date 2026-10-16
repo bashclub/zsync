@@ -396,8 +396,19 @@ include_list="[INFO] Included datasets:\n"
 exclude_list="[INFO] Excluded datasets:\n"
 checkzfs_headline="[INFO] checkzfs filter:"
 checkzfs_filter=
+# critical: without the list of the source nothing can be replicated (ssh failed or zfs failed on the source)
+tagged=$(remote "zfs get -H -o name,value,source -t filesystem,volume $tag")
+remote_rc=$?
+if [ $remote_rc -ne 0 ]; then
+    if [[ $source == "local" ]]; then
+        log "[ERROR] zfs get $tag failed (exit code $remote_rc), nothing is replicated."
+    else
+        log "[ERROR] source $source (port $sshport) is not reachable or zfs failed there (exit code $remote_rc), nothing is replicated."
+    fi
+    exit 1
+fi
 IFS=$'\n'
-for zvol in $(remote "zfs get -H -o name,value,source -t filesystem,volume $tag"); do
+for zvol in $tagged; do
     # property source: local, received, inherited from <dataset> or default
     IFS=$'\t' read -r name value property_source <<< "$zvol"
     # local mode: the replicas in the target can inherit the property from a dataset of the same pool
@@ -523,7 +534,7 @@ function label_leftovers() {
 }
 
 # state of each dataset for the monitoring (written to <config>.datasets):
-# ok, rolled_back, failed, at_risk, diverged, broken, empty, no_snapshots, orphan_missing, orphan_unselected, orphan_kept
+# ok, rolled_back, cleanup_blocked, failed, at_risk, diverged, broken, empty, no_snapshots, orphan_missing, orphan_unselected, orphan_kept
 declare -A ds_state ds_detail
 
 # fix for a target without a usable snapshot: keep the old replica under a new name, the next run replicates again
@@ -787,8 +798,14 @@ for name in "${syncvols[@]}"; do
                 # deletion starts at the oldest source snapshot on the target: without it nothing is deleted
                 if [[ -n $target_snaps ]] && ! grep -q $guid <<< "$target_snaps"; then
                     oldest=$(grep -E "${interval_regex[$interval]}" <<< "$source_snaps" | tail -1 | cut -f2)
-                    log "[ERROR] $name - the oldest source snapshot of interval $interval ($oldest) does not exist on $target/$name, no snapshots of this interval are deleted on the target."
-                    rc=1
+                    # the replication itself is done: warning and dataset state for the monitoring, no exit code
+                    log "[WARN] $name - the oldest source snapshot of interval $interval ($oldest) does not exist on $target/$name, no snapshots of this interval are deleted on the target."
+                    if [[ -z ${ds_state[$name]} ]] || [[ ${ds_state[$name]} == "rolled_back" ]]; then
+                        ds_state[$name]=cleanup_blocked
+                        ds_detail[$name]="oldest source snapshot ${oldest#*@} missing on the target"
+                    elif [[ ${ds_state[$name]} == "cleanup_blocked" ]]; then
+                        ds_detail[$name]+=", ${oldest#*@}"
+                    fi
                 fi
                 snaps_to_delete=$(grep --after-context=200 $guid <<< "$target_snaps" | grep -v $guid | cut -f1)
                 snap_count=$(grep -c . <<< "$target_snaps")
@@ -815,7 +832,7 @@ for name in "${syncvols[@]}"; do
         debug "$name - No snapshots found with filter $snapshot_filter"
         ds_state[$name]=no_snapshots
     fi
-    if [[ -z ${ds_state[$name]} ]] || { [[ ${ds_state[$name]} == "rolled_back" ]] && [ $rc -ne 0 ]; }; then
+    if [[ -z ${ds_state[$name]} ]] || { [[ ${ds_state[$name]} =~ ^(rolled_back|cleanup_blocked)$ ]] && [ $rc -ne 0 ]; }; then
         if [ $rc -ne 0 ]; then ds_state[$name]=failed; else ds_state[$name]=ok; fi
     fi
     if [ $rc -ne 0 ]; then ((datasets_failed++)); fi

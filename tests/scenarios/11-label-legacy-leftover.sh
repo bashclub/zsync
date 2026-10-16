@@ -1,5 +1,6 @@
 # Engine-Wechsel zas -> internal mit gleichem Label, legacy (ohne Einstellung): der alte zas-Snapshot ist der
-# älteste Quell-Snapshot des Labels und fehlt auf dem Ziel -> Fehler statt stillem Nicht-Löschen, Warnungen
+# älteste Quell-Snapshot des Labels und fehlt auf dem Ziel -> Warnung und Status cleanup_blocked
+# statt stillem Nicht-Löschen, Exit-Code 0 (die Replikation ist erfolgreich)
 DEBUG=1; CHECKZFS=0
 CONF='target=backup/zsync
 source=root@src

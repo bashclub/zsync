@@ -268,7 +268,13 @@ The age of the replicated snapshots per dataset is still checked by checkzfs.
 `bashclub-zsync` records a state per dataset in `/var/lib/bashclub-zsync/<config>.datasets` and logs a copyable fix:
 - **no common snapshot with the source**: either the rotation on the source has deleted all snapshots of the replica (the replication was stopped longer than the snapshots are kept), or the dataset was created again on the source. Only a full replication helps; rename the replica to keep it, the next run replicates again: `zfs rename <replica> <replica>.broken-<date>`
 - **chain at risk**: the replication of a dataset failed and its base is the oldest snapshot of its interval on the source; with the next rotation there is no common snapshot anymore
+- **rotation on the target blocked**: the oldest source snapshot of an interval is missing on the target (e.g. a leftover snapshot of another engine with the same label, see [Snapshot label](#snapshot-label-and-snapshot-engine)), so zsync deletes no snapshots of this interval on the target. The replication itself succeeded, the run is not failed; the monitoring warns until the snapshot is gone.
 - **replica only on the target**: the dataset was deleted or renamed on the source, or it is no longer selected (`bashclub:zsync`). It is not replicated anymore and never deleted automatically. To keep it as archive without warning: `zfs set bashclub:zsync-orphan=keep <replica>`. One target per source: datasets of another configuration in the same target would count as replicas without source.
+
+### Exit code
+A failing dataset never stops the run: all other datasets are replicated, the errors are collected and returned at the end.
+- `0`: all datasets replicated. Warnings (e.g. a blocked rotation on the target) do not change the exit code, the monitoring reports them.
+- `1`: at least one dataset was not replicated, or the run stopped at once because nothing can be replicated: wrong configuration (empty `source`), the source is not reachable, or the same configuration is already running (the run is skipped).
 
 ### Running without root
 `bashclub-zsync` can run as an unprivileged user on the backup server and log in to the source as an unprivileged user. Both only get the ZFS permissions they need (`zfs allow`), there is no root login on the source anymore. On Linux only root may mount, so the replicas are received without mounting (`zfs receive -u`); the package makes logs and run status writable for the group `bashclub-zsync`.

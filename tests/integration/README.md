@@ -16,7 +16,8 @@ Fälle: `replication` (Dateisystem mit Kind, Volume, raw-verschlüsselt), `engin
 Deltas nicht löschbar), `deleted_during` (Snapshot während der Replikation gelöscht), `resume` (abgebrochene Erstreplikation und Delta
 fortgesetzt, Teilstand verworfen), `unprivileged` (Betrieb ohne root), `timer` (systemd-Timer, Migration von
 Cronjobs), `same_second` (zwei Labels
-in derselben Sekunde), `checkmk`.
+in derselben Sekunde), `cleanup_blocked` (Rotation am Ziel blockiert: Warnung, Exit 0), `source_unreachable` (sofort Exit 1),
+`checkmk`.
 
 ## Test-VM einrichten
 Eine **VM** (kein LXC-Container: der teilt das ZFS-Modul des Hosts), Debian 13, zwei leere Platten
