@@ -12,6 +12,7 @@ homepage: https://code.bashclub.org/bashclub/zsync
 
 depends:
   - openssh-server
+  - sudo
   - zfsutils-linux
 
 contents:
@@ -20,6 +21,18 @@ contents:
     dst: /usr/bin/bashclub-zsync-remote
     file_info: { mode: 0755 }
 
+  # users of the replication jobs, run by root or by the management user zsync with sudo
+  - src: bashclub-zsync-source/usr/sbin/bashclub-zsync-job-user
+    dst: /usr/sbin/bashclub-zsync-job-user
+    file_info: { mode: 0755 }
+  - src: bashclub-zsync-source/etc/sudoers.d/bashclub-zsync-source
+    dst: /etc/sudoers.d/bashclub-zsync-source
+    type: config|noreplace
+    file_info: { mode: 0440 }
+
   - src: LICENSE
     dst: /usr/share/doc/bashclub-zsync-source/copyright/LICENSE
     file_info: { mode: 0644 }
+
+scripts:
+  postinstall: packaging/scripts/source-postinst

@@ -397,6 +397,45 @@ checkzfs_spool=1"
   check "checkzfs-Ausgabe im Spool der Quelle" grep -q "<<<local>>>" /var/lib/check_mk_agent/spool/87000_zsync
   rm -f /var/lib/check_mk_agent/spool/87000_zsync
 }
+# Quellpaket: Verwaltungsbenutzer zsync legt per sudo den Benutzer eines Replikationsjobs an, der nur die
+# getaggten Datasets lesen darf und nur per command= von seiner Adresse aus erreichbar ist
+case_job_user() {
+  local backup=zsync-ci-j home=/var/lib/zsync-ci-j job=bashclub-zsync-job-user out
+  id $backup > /dev/null 2>&1 || useradd --system --create-home --home-dir $home --shell /bin/bash $backup
+  usermod -aG bashclub-zsync $backup
+  [ -f $home/.ssh/id_ed25519 ] || su - $backup -c 'install -d -m 700 ~/.ssh && ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519'
+  zfs create "$ZCI_POOL_SRC/data"; zfs create "$ZCI_POOL_SRC/other"
+  zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  write "$ZCI_POOL_SRC/data" 1; snap "$ZCI_POOL_SRC/other" 01
+  check "Verwaltungsbenutzer zsync vom Paket" id zsync
+  check "zsync: sudo nur für $job" not su - zsync -c "sudo -n id"
+  check "Job anlegen als zsync" su - zsync -c "sudo -n /usr/sbin/$job add cij 127.0.0.1,::1 $(cat $home/.ssh/id_ed25519.pub)"
+  check "Rechte als zsync" su - zsync -c "sudo -n /usr/sbin/$job allow cij bashclub:zsync"
+  check "kein RSA-Schlüssel" not $job add cij2 127.0.0.1 "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ== x"
+  check "kein ungültiger Jobname" not $job add ../x 127.0.0.1 "$(cat $home/.ssh/id_ed25519.pub)"
+  check "kein fremder Benutzer" not $job add ci-j 127.0.0.1 "$(cat $home/.ssh/id_ed25519.pub)"
+  equal "Schlüssel mit restrict, from und command" 'restrict,from="127.0.0.1,::1",command="/usr/bin/bashclub-zsync-remote" ssh-ed25519' \
+    "$(cut -d' ' -f1-2 /var/lib/bashclub-zsync-source/cij/.ssh/authorized_keys)"
+  out=$($job list)
+  check "list: Adresse und Dataset ($out)" grep -qE "^zsync-cij	from 127.0.0.1,::1	$ZCI_POOL_SRC/data$" <<< "$out"
+  zfs create -o canmount=noauto -o com.sun:auto-snapshot=false "$ZCI_POOL_DST/job_user"
+  zfs allow -u $backup "create,receive,mount,destroy,rollback,hold,release,userprop,$ZCI_RECV_PROPS" "$ZCI_POOL_DST/job_user"
+  config job_user "source=zsync-cij@localhost
+snapshot_filter=\"\"
+zfs_auto_snapshot_keep=3
+source_hold=1
+source_bookmark=1"
+  su - $backup -c 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new zsync-cij@localhost exit'
+  echo "===== $(date +%T) als $backup" >> "$log"
+  su - $backup -c "bashclub-zsync -c $conf" >> "$log" 2>&1; rc=$?
+  equal "Replikation über den Jobbenutzer: Exit-Code" 0 "$rc"
+  equal "Snapshot repliziert" 1 "$(zfs list -H -o name -t snapshot "$ZCI_POOL_DST/job_user/$ZCI_POOL_SRC/data" 2>/dev/null | wc -l)"
+  check "nicht getaggtes Dataset nicht lesbar" not su - $backup -c "ssh -o BatchMode=yes zsync-cij@localhost zfs send -w $ZCI_POOL_SRC/other@zfs-auto-snap_daily-01 > /dev/null"
+  check "keine Shell" not su - $backup -c "ssh -o BatchMode=yes zsync-cij@localhost id"
+  check "Job entfernen" $job remove cij
+  check "Benutzer entfernt" not id zsync-cij
+  check "Rechte entfernt" not grep -q zsync-cij <<< "$(zfs allow "$ZCI_POOL_SRC/data")"
+}
 # fehlt der älteste Quell-Snapshot am Ziel, ist nur die Rotation blockiert: Warnung, Exit 0, Status cleanup_blocked
 case_cleanup_blocked() {
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
@@ -429,7 +468,7 @@ case_checkmk() {
   check "Statusdatei des Laufs entfernt" test ! -e "$RUN_DIR/$id.state"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted cleanup_blocked source_unreachable checkmk)
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user cleanup_blocked source_unreachable checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
 rm -rf /var/log/zsync-ci

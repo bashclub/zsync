@@ -1,0 +1,115 @@
+#!/bin/bash
+# Users of the replication jobs on the source: one user zsync-<job> per backup server and configuration,
+# it can only run the commands of bashclub-zsync (command=bashclub-zsync-remote) from the address of its
+# backup server and only read the datasets selected by the tag of its configuration.
+# Runs as root; the management user zsync may run it with sudo (/etc/sudoers.d/bashclub-zsync-source).
+prog=bashclub-zsync-job-user
+home_base=/var/lib/bashclub-zsync-source
+permissions=send,snapshot,destroy,mount,hold,release,bookmark
+
+usage() {
+    cat >&2 << EOF
+usage: $prog add <job> <from> <ssh-ed25519 public key>
+           create or update the user zsync-<job>, its key may only connect from <from>
+           (addresses or networks, comma separated, as in authorized_keys from=)
+       $prog allow <job> <tag>
+           ZFS permissions for zsync-<job> on the datasets with the tag set locally (e.g. bashclub:zsync),
+           removed from all other datasets; run again after tagging more datasets
+       $prog remove <job>
+           remove the permissions and the user
+       $prog list
+           users of the replication jobs with address and datasets
+EOF
+    exit 2
+}
+
+fail() {
+    echo "$prog: $1" >&2
+    exit 1
+}
+
+[ "$(id -u)" -eq 0 ] || fail "must run as root (sudo $prog)"
+
+# job name: user zsync-<job> with at most 32 characters, no dots (useradd)
+function job_user() {
+    [[ $1 =~ ^[a-z0-9][a-z0-9-]{0,25}$ ]] || fail "invalid job name '$1': lower case letters, digits and -, at most 26 characters"
+    echo "zsync-$1"
+}
+
+function job_exists() {
+    getent passwd "$1" > /dev/null && [[ $(getent passwd "$1" | cut -d: -f6) == "$home_base/"* ]]
+}
+
+case $1 in
+    add)
+        [ $# -ge 4 ] || usage
+        user=$(job_user "$2") || exit 1
+        from=$3
+        shift 3
+        key="$*"
+        [[ $from =~ ^[A-Za-z0-9.:/,*?-]+$ ]] || fail "invalid from '$from'"
+        [[ $key =~ ^ssh-ed25519\ [A-Za-z0-9+/]+={0,2}(\ [A-Za-z0-9_.@:-]+)?$ ]] || fail "only one ssh-ed25519 public key is accepted"
+        ssh-keygen -l -f <(echo "$key") > /dev/null 2>&1 || fail "invalid ssh-ed25519 public key"
+        home=$home_base/${user#zsync-}
+        if getent passwd "$user" > /dev/null; then
+            job_exists "$user" || fail "$user exists, but is not a user of $prog"
+        else
+            # shell: sshd runs the forced command with it; no password, login only with the key
+            install -d -m 755 $home_base
+            useradd --system --home-dir "$home" --create-home --shell /bin/bash --comment "bashclub-zsync job" "$user" || fail "useradd $user failed"
+        fi
+        getent group bashclub-zsync > /dev/null && usermod -aG bashclub-zsync "$user"
+        # key file belongs to root: the user cannot change its own restriction
+        install -d -m 755 -o root -g root "$home/.ssh"
+        echo "restrict,from=\"$from\",command=\"/usr/bin/bashclub-zsync-remote\" $key" > "$home/.ssh/authorized_keys.new"
+        chmod 644 "$home/.ssh/authorized_keys.new"
+        mv "$home/.ssh/authorized_keys.new" "$home/.ssh/authorized_keys"
+        echo "$user: key from $from set"
+        ;;
+    allow)
+        [ $# -eq 3 ] || usage
+        user=$(job_user "$2") || exit 1
+        tag=$3
+        job_exists "$user" || fail "$user does not exist, create it with: $prog add $2 ..."
+        [[ $tag =~ ^[a-z0-9_.-]+:[a-z0-9_.:-]+$ ]] || fail "invalid tag '$tag' (user property, e.g. bashclub:zsync)"
+        count=0
+        while IFS=$'\t' read -r name value source; do
+            if [[ $source == "local" ]] && [[ $value == "all" || $value == "subvols" ]]; then
+                zfs allow -u "$user" $permissions "$name" || fail "zfs allow on $name failed"
+                echo "$user: $permissions on $name"
+                ((count++))
+            else
+                zfs unallow -u "$user" "$name" 2> /dev/null
+            fi
+        done <<< "$(zfs get -H -o name,value,source -t filesystem,volume "$tag")"
+        [ $count -gt 0 ] || echo "$user: no dataset with $tag set locally, nothing allowed"
+        ;;
+    remove)
+        [ $# -eq 2 ] || usage
+        user=$(job_user "$2") || exit 1
+        job_exists "$user" || fail "$user does not exist"
+        for name in $(zfs list -H -o name -t filesystem,volume); do
+            zfs unallow -u "$user" "$name" 2> /dev/null
+        done
+        # open connections (e.g. ssh master of the backup server) end first, userdel refuses a user in use
+        pkill -u "$user" 2> /dev/null
+        for i in $(seq 1 20); do pgrep -u "$user" > /dev/null || break; sleep 0.5; done
+        pkill -9 -u "$user" 2> /dev/null
+        userdel -r "$user" 2> /dev/null || userdel "$user" || fail "userdel $user failed"
+        echo "$user removed"
+        ;;
+    list)
+        while IFS=: read -r user _ _ _ _ home _; do
+            [[ $user == zsync-* && $home == "$home_base/"* ]] || continue
+            from=$(grep -o '^restrict,from="[^"]*"' "$home/.ssh/authorized_keys" 2> /dev/null | cut -d'"' -f2)
+            # datasets with a local permission of the user (zfs allow shows them under "Local+Descendent")
+            datasets=$(for n in $(zfs list -H -o name -t filesystem,volume); do
+                zfs allow "$n" | sed -n '/^---- Permissions on '"${n//\//\\/}"' /,/^---- /p' | grep -q "^[[:space:]]user $user " && echo "$n"
+            done | paste -sd' ')
+            printf '%s\tfrom %s\t%s\n' "$user" "${from:--}" "${datasets:-no datasets}"
+        done < <(getent passwd)
+        ;;
+    *)
+        usage
+        ;;
+esac

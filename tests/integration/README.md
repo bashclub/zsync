@@ -14,7 +14,7 @@ und prüft das Ergebnis am Ziel. Am Ende werden die Pools zerstört.
 Fälle: `replication` (Dateisystem mit Kind, Volume, raw-verschlüsselt), `engine_internal`, `rotation`,
 `refquota`, `rollback`, `broken_chain`, `orphans`, `local_mode`, `bandwidth_lock`, `bookmark` (Anfügen aus dem Bookmark, auch raw-verschlüsselt), `hold` (Basis und geplante Snapshots während des
 Deltas nicht löschbar), `deleted_during` (Snapshot während der Replikation gelöscht), `resume` (abgebrochene Erstreplikation und Delta
-fortgesetzt, Teilstand verworfen), `unprivileged` (Betrieb ohne root), `restricted` (Quelle mit `command=bashclub-zsync-remote`), `timer` (systemd-Timer, Migration von
+fortgesetzt, Teilstand verworfen), `unprivileged` (Betrieb ohne root), `restricted` (Quelle mit `command=bashclub-zsync-remote`), `job_user` (Benutzer pro Replikationsjob über den Verwaltungsbenutzer), `timer` (systemd-Timer, Migration von
 Cronjobs), `same_second` (zwei Labels
 in derselben Sekunde), `cleanup_blocked` (Rotation am Ziel blockiert: Warnung, Exit 0), `source_unreachable` (sofort Exit 1),
 `checkmk`.
@@ -45,6 +45,9 @@ test -f /root/.ssh/id_ed25519 || ssh-keygen -q -t ed25519 -N '' -f /root/.ssh/id
 echo "from=\"127.0.0.1,::1\" $(cat /root/.ssh/id_ed25519.pub)" >> /root/.ssh/authorized_keys
 ssh -o StrictHostKeyChecking=accept-new root@localhost true
 ssh -o StrictHostKeyChecking=accept-new root@127.0.0.1 true
+# OpenSSH ab 9.8 sperrt Adressen nach fehlgeschlagenen Anmeldungen; die Tests prüfen absichtlich abgewiesene Zugriffe
+echo "PerSourcePenaltyExemptList 127.0.0.1,::1" > /etc/ssh/sshd_config.d/zsync-ci.conf
+sshd -t && systemctl reload ssh
 ```
 Danach `/etc/zsync-ci.conf` mit den beiden Testplatten (`ls -l /dev/disk/by-id/`), nur diese und Pools mit
 Präfix `zci-` werden angefasst:

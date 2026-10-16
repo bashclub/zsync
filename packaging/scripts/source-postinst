@@ -1,0 +1,20 @@
+#!/bin/bash
+
+PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
+
+# group of the job users (e.g. for the checkmk spool, see README)
+getent group bashclub-zsync > /dev/null || groupadd --system bashclub-zsync
+
+# management user zsync: sets up the users of the replication jobs with bashclub-zsync-job-user (sudo),
+# no password, login only with a key in /var/lib/zsync/.ssh/authorized_keys; an existing user is not changed
+if ! getent passwd zsync > /dev/null; then
+  useradd --system --create-home --home-dir /var/lib/zsync --shell /bin/bash --comment "bashclub-zsync management" zsync
+  install -d -m 700 -o zsync -g zsync /var/lib/zsync/.ssh
+fi
+install -d -m 755 /var/lib/bashclub-zsync-source
+
+chmod 440 /etc/sudoers.d/bashclub-zsync-source
+if command -v visudo > /dev/null && ! visudo -cqf /etc/sudoers.d/bashclub-zsync-source; then
+  echo "bashclub-zsync-source: /etc/sudoers.d/bashclub-zsync-source is invalid, check it with visudo" >&2
+fi
+exit 0
