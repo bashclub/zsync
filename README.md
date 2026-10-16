@@ -330,6 +330,27 @@ The snapshot engine `zas` (zfs-auto-snapshot on the source) also works as user `
 
 With `command=` the user `zsync` on the source cannot open a shell: `bashclub-zsync-remote` runs only the commands bashclub-zsync, remote-snapshot-manager and checkzfs send (zfs list/get/send/snapshot/hold/release/bookmark, destroy only of snapshots and bookmarks, the checkzfs spool), without a shell. Denied commands end with exit code 126 and are logged to syslog: `journalctl -t bashclub-zsync-remote`.
 
+### Users per replication job on the source
+With the package `bashclub-zsync-source` on the source each replication job gets its own user `zsync-<job>`: its key only works from the address of its backup server, only runs the commands of bashclub-zsync (`command=`, see above) and it may only read the datasets selected by the tag of its configuration. Another backup server or configuration cannot use it. The package also creates the management user `zsync`, which may only run `bashclub-zsync-job-user` with sudo (no password, login only with a key), so a setup tool needs no root access to the source.
+
+Run as root on the backup server, once per configuration, after the blocks 1 and 2 of [Running without root](#running-without-root). The job name is derived from host and configuration, the block sets up the source over the existing root access and switches the configuration to the job user:
+~~~
+conf=/etc/bashclub/zsync.conf
+( . "$conf"; job=$(echo "$(hostname -s)-$(basename "$conf" .conf)" | tr 'A-Z_.' 'a-z--' | cut -c1-26)
+  key=$(cat /var/lib/zsync/.ssh/id_ed25519.pub)
+  ssh -p "$sshport" "$source" "apt-get install -y bashclub-zsync-source > /dev/null || exit 1
+    bashclub-zsync-job-user add $job \${SSH_CLIENT%% *} $key && bashclub-zsync-job-user allow $job $tag" || exit 1
+  sed -i "s|^source=.*|source=zsync-$job@${source#*@}|" "$conf"
+  su - zsync -c "ssh -p $sshport -o StrictHostKeyChecking=accept-new zsync-$job@${source#*@} zfs get -H -o name,value $tag" | head -n 3 )
+~~~
+Then continue with block 6 of [Running without root](#running-without-root). On the source:
+- `bashclub-zsync-job-user list` shows the job users with address and datasets
+- `bashclub-zsync-job-user allow <job> <tag>` again after tagging more datasets (permissions follow the tag)
+- `bashclub-zsync-job-user remove <job>` removes user and permissions
+- for the checkzfs spool on the source (`checkzfs_spool=1`) the job users are in the group `bashclub-zsync`: `install -d -m 2775 -g bashclub-zsync /var/lib/check_mk_agent/spool`
+
+Only `ssh-ed25519` keys are accepted.
+
 ### Run with systemd timers
 Each configuration `/etc/bashclub/<name>.conf` can have its own timer `bashclub-zsync@<name>.timer` (Proxmox VE, Debian, Ubuntu). A run missed while the host was off is started after the next boot, a timer never starts a second run while the previous one is still active, and the output goes to the journal. The Checkmk check takes the interval for the age check from the timer.
 

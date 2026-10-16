@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- users per replication job on the source (package `bashclub-zsync-source`): `bashclub-zsync-job-user add|allow|remove|list` creates `zsync-<job>` with a root-owned key restricted to the address of the backup server and to `bashclub-zsync-remote`, ZFS permissions only on the datasets with the tag of the configuration (removed from all others); only `ssh-ed25519` keys; the package creates the management user `zsync` (if missing), which may only run `bashclub-zsync-job-user` with sudo; README with a copyable block (#43)
 - package `bashclub-zsync-source` with `bashclub-zsync-remote`, a forced command for `authorized_keys` on the source (`restrict,from=…,command=…`): runs only the commands of bashclub-zsync, remote-snapshot-manager and checkzfs without a shell, destroys only snapshots and bookmarks, writes only into the checkmk spool, logs denied commands to syslog; README with a copyable block (#39)
 - exit code rule: a failing dataset never stops the run, errors are collected and returned at the end; README section *Exit code* (#42)
 - systemd timers per configuration (`bashclub-zsync@<name>.timer` / `.service`) and the tool `bashclub-zsync-timer` (`enable` with schedule, user and log file as drop-ins, `disable`, `list`, `migrate [--dry-run]` for cron jobs incl. `/etc/cron.{hourly,daily,weekly,monthly}`, keeping schedule, user and log file); the package only shows a hint if cron jobs exist; the Checkmk check takes the interval from the timer (#12)

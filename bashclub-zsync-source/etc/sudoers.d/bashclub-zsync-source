@@ -1,0 +1,2 @@
+# management user of bashclub-zsync on the source: may only manage the users of the replication jobs
+zsync ALL=(root) NOPASSWD: /usr/sbin/bashclub-zsync-job-user

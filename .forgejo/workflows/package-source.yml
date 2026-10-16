@@ -17,6 +17,10 @@ jobs:
         SSH_ORIGINAL_COMMAND=exit bashclub-zsync-remote
         rc=0; SSH_ORIGINAL_COMMAND=id bashclub-zsync-remote || rc=$?
         test $rc -eq 126
+        # Verwaltungsbenutzer darf per sudo nur bashclub-zsync-job-user
+        id zsync
+        visudo -cf /etc/sudoers.d/bashclub-zsync-source
+        sudo -l -U zsync | grep -q '(root) NOPASSWD: /usr/sbin/bashclub-zsync-job-user'
       test-targets: '["debian-12","debian-13","ubuntu-24.04","ubuntu-26.04"]'
       deb-dists: "bookworm trixie noble resolute"
       formats: deb
