@@ -328,6 +328,9 @@ for id in $ids; do
     if [ ${#ds_orphan[@]} -gt 0 ]; then
         raise 1 "${#ds_orphan[@]} datasets only on the target: $(shortlist "${ds_orphan[@]}")$(level_mark 1)"
     fi
+    if [ ${#ds_crit[@]} -gt 0 ] || [ ${#ds_orphan[@]} -gt 0 ]; then
+        state_text+=("decide on the backup server: bashclub-zsync-maintenance")
+    fi
     if [ ${#ds_failed[@]} -gt 0 ]; then state_text+=("failed: $(shortlist "${ds_failed[@]}")"); fi
     if [ $orphan_new -gt 0 ]; then state_text+=("$orphan_new new datasets only on the target"); fi
     if [ $kept -gt 0 ]; then state_text+=("$kept kept replicas without source"); fi

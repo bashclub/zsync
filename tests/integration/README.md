@@ -17,7 +17,7 @@ Deltas nicht löschbar), `deleted_during` (Snapshot während der Replikation gel
 fortgesetzt, Teilstand verworfen), `unprivileged` (Betrieb ohne root), `restricted` (Quelle mit `command=bashclub-zsync-remote`), `job_user` (Benutzer pro Replikationsjob über den Verwaltungsbenutzer), `setup` (geführtes Setup als root, als Verwaltungsbenutzer und lokal, Fragen), `disk` (Wechseldatenträger mit und ohne LUKS, Anschließen mit `zsync-autorun`), `timer` (systemd-Timer, Migration von
 Cronjobs), `same_second` (zwei Labels
 in derselben Sekunde), `cleanup_blocked` (Rotation am Ziel blockiert: Warnung, Exit 0), `source_unreachable` (sofort Exit 1), `zas_missing` (Warnung ohne zfs-auto-snapshot auf der Quelle),
-`checkmk`.
+`maintenance` (Entscheidungen: verwaistes Replikat, gerissene Kette, Altlast), `checkmk`.
 
 ## Test-VM einrichten
 Eine **VM** (kein LXC-Container: der teilt das ZFS-Modul des Hosts), Debian 13, zwei leere Platten

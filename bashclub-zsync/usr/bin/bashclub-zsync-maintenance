@@ -1,0 +1,219 @@
+#!/bin/bash
+#
+# bashclub-zsync-maintenance: open decisions of all configurations of this backup server in one place. The admin
+# chooses, the tool runs the action: only on this host, under the lock of the configuration (no replication at the
+# same time), shown before and logged after (/var/log/bashclub-zsync/maintenance.log, syslog).
+# Cases are read as data, never run: dataset states written by bashclub-zsync (<config>.datasets) and the
+# snapshots of the target.
+#   orphan     replica without source or no longer selected (#21)  keep (bashclub:zsync-orphan=keep) / delete / later
+#   broken     no common snapshot with the source or replica without snapshots (#21)
+#                                                    rename (the next run replicates again, the old replica stays)
+#                                                    / delete (the next run replicates again) / later
+#   leftovers  snapshots of the label in another name scheme on the target (#3)            delete / later
+
+PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
+prog=$(basename "$0")
+conf_dir=${ZSYNC_CONF_DIR:-/etc/bashclub}
+lib_dir=${ZSYNC_LIB_DIR:-/var/lib/bashclub-zsync}
+log_file=${ZSYNC_MAINTENANCE_LOG:-/var/log/bashclub-zsync/maintenance.log}
+. ${ZSYNC_LIB:-/usr/lib/bashclub-zsync/schedule.sh} || exit 1
+
+usage() {
+    cat >&2 << EOF
+usage: $prog                              all open cases, one after the other: context, options, preview, confirmation
+       $prog --list [--tsv]               open cases as table (--tsv: id, config, type, dataset, since, detail)
+       $prog --decide <case> <option> [--dry-run]
+                                          decide a case without questions (options: see --list), --dry-run only
+                                          shows the commands
+EOF
+    exit 2
+}
+
+die() { echo "$prog: $*" >&2; exit 1; }
+
+#### dataset states of a configuration: from the folder of its run_as user, otherwise root, otherwise the newest
+function datasets_file() {
+    local conf=$1 id owner f newest=0 file=
+    id=$(readlink -m "$conf" | tr '/' '_')
+    owner=$(conf_value "$conf" run_as)
+    for f in "$lib_dir/${owner:-root}/$id.datasets" "$lib_dir"/*/"$id.datasets"; do
+        [[ -f $f ]] || continue
+        if [[ $f == "$lib_dir/${owner:-root}/$id.datasets" ]]; then echo "$f"; return; fi
+        if [ $(stat -c %Y "$f") -gt $newest ]; then newest=$(stat -c %Y "$f"); file=$f; fi
+    done
+    [[ -z $owner ]] && [[ -n $file ]] && echo "$file"
+}
+
+# snapshots on the target that contain the label but are not in the name scheme of the engine (as bashclub-zsync)
+function leftovers() {
+    local conf=$1 target=$2 label engine scheme
+    label=$(conf_value "$conf" zfs_auto_snapshot_label)
+    engine=$(conf_value "$conf" zfs_auto_snapshot_engine)
+    [[ $(conf_value "$conf" zfs_auto_snapshot_keep) -gt 1 ]] 2>/dev/null && valid_label "$label" || return 0
+    if [[ ${engine:-zas} == "zas" ]]; then scheme="zfs-auto-snap_$label"; else scheme=$label; fi
+    zfs list -H -o name -t snapshot -r "$target" 2>/dev/null \
+        | grep -E "@.*$label" | grep -vE "@$scheme-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}$"
+}
+
+#### open cases: id<TAB>config<TAB>type<TAB>dataset<TAB>since<TAB>detail
+function cases() {
+    local conf target file ds state since detail replica id snaps
+    for conf in "$conf_dir"/*.conf; do
+        [[ -f $conf ]] || continue
+        target=$(conf_value "$conf" target)
+        valid_dataset "$target" || continue
+        file=$(datasets_file "$conf")
+        if [[ -n $file ]]; then
+            while IFS=$'\t' read -r ds state since detail; do
+                valid_dataset "$ds" || continue
+                [[ $since =~ ^[0-9]+$ ]] || since=
+                replica=$target/$ds
+                case $state in
+                    orphan_missing|orphan_unselected) type=orphan ;;
+                    broken|empty) type=broken ;;
+                    *) continue ;;
+                esac
+                zfs list "$replica" > /dev/null 2>&1 || continue
+                # kept since the last run
+                [[ $type == orphan && $(zfs get -H -o value bashclub:zsync-orphan "$replica" 2>/dev/null) == "keep" ]] && continue
+                id=$(printf '%s|%s|%s' "$conf" "$type" "$replica" | sha1sum | cut -c1-8)
+                printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$conf" "$type" "$replica" "$since" "${detail//$'\t'/ }"
+            done < "$file"
+        fi
+        # snapshot leftovers: one case per replica
+        while read -r replica; do
+            [[ -n $replica ]] || continue
+            snaps=$(leftovers "$conf" "$target" | awk -F@ -v r="$replica" '$1 == r' | grep -c .)
+            id=$(printf '%s|%s|%s' "$conf" leftovers "$replica" | sha1sum | cut -c1-8)
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$conf" leftovers "$replica" "" "$snaps snapshots of the label in another name scheme"
+        done < <(leftovers "$conf" "$target" | cut -d@ -f1 | sort -u)
+    done
+}
+
+function options_of() {
+    case $1 in
+        orphan) echo "keep delete later" ;;
+        broken) echo "rename delete later" ;;
+        leftovers) echo "delete later" ;;
+    esac
+}
+
+# commands of a decision, one per line (fields separated by tabs, never run through a shell)
+function commands_of() {
+    local conf=$1 type=$2 replica=$3 option=$4 target
+    case $type:$option in
+        orphan:keep) printf 'zfs\tset\tbashclub:zsync-orphan=keep\t%s\n' "$replica" ;;
+        orphan:delete|broken:delete) printf 'zfs\tdestroy\t-r\t%s\n' "$replica" ;;
+        broken:rename) printf 'zfs\trename\t%s\t%s\n' "$replica" "$replica.broken-$(date +%Y-%m-%d)" ;;
+        leftovers:delete)
+            target=$(conf_value "$conf" target)
+            leftovers "$conf" "$target" | awk -F@ -v r="$replica" '$1 == r' | while read -r snap; do printf 'zfs\tdestroy\t%s\n' "$snap"; done ;;
+        *:later) ;;
+        *) return 1 ;;
+    esac
+}
+
+function show_case() {
+    local id=$1 conf=$2 type=$3 replica=$4 since=$5 detail=$6
+    echo "case $id: $type $replica ($(basename "$conf" .conf))"
+    [[ -n $detail ]] && echo "    $detail"
+    [[ -n $since ]] && echo "    since $(date -d "@$since" '+%Y-%m-%d %H:%M')"
+    echo "    used $(zfs get -H -o value used "$replica" 2>/dev/null)"
+}
+
+# preview of the commands; for destroy also what zfs would delete
+function preview() {
+    local line
+    while IFS= read -r line; do
+        [[ -n $line ]] || continue
+        echo "    ${line//$'\t'/ }"
+        if [[ $line == zfs$'\t'destroy* ]]; then
+            local words; IFS=$'\t' read -ra words <<< "$line"
+            zfs destroy -nv "${words[@]:2}" 2>&1 | sed 's/^/        /' | tail -3
+        fi
+    done
+}
+
+# run the commands under the lock of the configuration, log the decision
+function run_decision() {
+    local id=$1 conf=$2 type=$3 replica=$4 option=$5 cmds=$6 line rc=0 words user
+    user=${SUDO_USER:-$(id -un)}
+    exec 8< "$conf" || die "cannot open $conf"
+    if ! flock -n 8; then
+        die "a run of $conf is active, decide again when it has finished"
+    fi
+    while IFS= read -r line; do
+        [[ -n $line ]] || continue
+        IFS=$'\t' read -ra words <<< "$line"
+        [[ ${words[0]} == "zfs" ]] || die "unexpected command"
+        "${words[@]}" || rc=1
+    done <<< "$cmds"
+    exec 8<&-
+    local result; if [ $rc -eq 0 ]; then result=done; else result=failed; fi
+    local entry="case $id $type $replica: $option by $user ($result)"
+    mkdir -p "$(dirname "$log_file")"
+    echo "$(date '+%Y-%m-%d %H:%M:%S') $entry" >> "$log_file"
+    logger -t "$prog" "$entry" 2>/dev/null
+    echo "$entry"
+    return $rc
+}
+
+function cmd_list() {
+    local all
+    all=$(cases)
+    if [[ $1 == --tsv ]]; then [[ -n $all ]] && echo "$all"; return 0; fi
+    if [[ -z $all ]]; then echo "no open cases"; return 0; fi
+    printf '%-9s %-10s %-50s %-20s %s\n' CASE TYPE DATASET OPTIONS CONFIG
+    while IFS=$'\t' read -r id conf type replica since detail; do
+        printf '%-9s %-10s %-50s %-20s %s\n' "$id" "$type" "$replica" "$(options_of "$type" | tr ' ' ',')" "$(basename "$conf" .conf)"
+    done <<< "$all"
+}
+
+function cmd_decide() {
+    local case_id=$1 option=$2 dry=$3 line id conf type replica since detail cmds
+    [[ -n $case_id && -n $option ]] || usage
+    line=$(cases | awk -F'\t' -v c="$case_id" '$1 == c')
+    [[ -n $line ]] || die "no open case $case_id (see $prog --list)"
+    IFS=$'\t' read -r id conf type replica since detail <<< "$line"
+    [[ " $(options_of "$type") " == *" $option "* ]] || die "option $option is not possible for $type (options: $(options_of "$type"))"
+    cmds=$(commands_of "$conf" "$type" "$replica" "$option") || die "option $option is not possible for $type"
+    show_case "$id" "$conf" "$type" "$replica" "$since" "$detail"
+    echo "  $option:"; [[ -n $cmds ]] && preview <<< "$cmds" || echo "    nothing to do"
+    [[ $dry == 1 ]] && return 0
+    [[ $option == later ]] && return 0
+    run_decision "$id" "$conf" "$type" "$replica" "$option" "$cmds"
+}
+
+function cmd_interactive() {
+    local all n=0 count id conf type replica since detail options option answer cmds i
+    all=$(cases)
+    if [[ -z $all ]]; then echo "no open cases"; return 0; fi
+    count=$(grep -c . <<< "$all")
+    while IFS=$'\t' read -r id conf type replica since detail <&3; do
+        ((n++))
+        echo; echo "[$n/$count]"
+        show_case "$id" "$conf" "$type" "$replica" "$since" "$detail"
+        read -ra options <<< "$(options_of "$type")"
+        for i in "${!options[@]}"; do echo "    $((i + 1))) ${options[$i]}"; done
+        read -r -p "choice [${#options[@]}]: " answer
+        answer=${answer:-${#options[@]}}
+        [[ $answer =~ ^[0-9]+$ ]] && [ "$answer" -ge 1 ] && [ "$answer" -le ${#options[@]} ] || { echo "    skipped"; continue; }
+        option=${options[$((answer - 1))]}
+        [[ $option == later ]] && { echo "    later"; continue; }
+        cmds=$(commands_of "$conf" "$type" "$replica" "$option")
+        echo "  $option:"; preview <<< "$cmds"
+        read -r -p "run? [y/N] " answer
+        [[ $answer =~ ^[yYjJ] ]] || { echo "    nothing changed"; continue; }
+        run_decision "$id" "$conf" "$type" "$replica" "$option" "$cmds"
+    done 3<<< "$all"
+}
+
+case $1 in
+    --list) cmd_list "$2" ;;
+    --decide)
+        dry=0; [[ $4 == --dry-run ]] && dry=1
+        [ "$(id -u)" -eq 0 ] || [ $dry -eq 1 ] || die "must run as root"
+        cmd_decide "$2" "$3" "$dry" ;;
+    "") [ "$(id -u)" -eq 0 ] || die "must run as root"; cmd_interactive ;;
+    *) usage ;;
+esac

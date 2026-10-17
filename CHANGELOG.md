@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- `bashclub-zsync-maintenance`: open decisions of all configurations (replicas without source, broken chains, snapshot leftovers of another name scheme), interactive with context, options, preview and confirmation, or `--list`/`--decide` for scripts; actions run only on the backup server under the lock of the configuration and are logged; the Checkmk check points to it (#67)
 - `zfs-auto-snapshot` is recommended instead of required (`bashclub-zsync`: only needed for `source=local`; `bashclub-zsync-source`: recommended), with the engine `zas` a warning is logged if it is missing on the source (previously no snapshots and no message); the exit code is unchanged (#69)
 - `bashclub-zsync-remote --label <label> --job-tag <tag>` (written by `bashclub-zsync-job-user add`, `bashclub-zsync-setup` and the README): the key of a job may only create and destroy the snapshots of its label, use its own hold tag and bookmark and run zfs-auto-snapshot only with its label, so a backup server that is taken over cannot destroy the other snapshots of the source; keys without these options behave as before (#71)
 - original values of the source saved on each replica after every dataset (only when they changed): `mountpoint`, `canmount`, `com.sun:auto-snapshot`, `refquota` and the tag as `bashclub:zsync-source.<property>=<local|inherited|default|received>:<value>`, for a restore; README with commands to show and restore them (#54)
