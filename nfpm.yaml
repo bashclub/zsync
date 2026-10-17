@@ -13,11 +13,12 @@ depends:
   - bashclub-checkzfs
   - openssh-server
   - udisks2
-  - zfs-auto-snapshot
   - zfsutils-linux
 
-# nur für zsync-autorun (Wechseldatenträger mit LUKS, Mailbenachrichtigung)
+# zfs-auto-snapshot: Snapshot-Engine zas, auf dem Backupserver nur im lokalen Modus nötig (sonst auf der Quelle);
+# cryptsetup, mailx: nur für zsync-autorun (Wechseldatenträger mit LUKS, Mailbenachrichtigung)
 recommends:
+  - zfs-auto-snapshot
   - cryptsetup
   - bsd-mailx | mailx
 

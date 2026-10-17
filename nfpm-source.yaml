@@ -15,6 +15,10 @@ depends:
   - sudo
   - zfsutils-linux
 
+# Snapshot-Engine zas (zfs_auto_snapshot_engine=zas) läuft auf der Quelle
+recommends:
+  - zfs-auto-snapshot
+
 contents:
   # forced command (command= in authorized_keys) for the user of the backup server
   - src: bashclub-zsync-source/usr/bin/bashclub-zsync-remote
