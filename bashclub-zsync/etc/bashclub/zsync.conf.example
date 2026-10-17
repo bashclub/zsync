@@ -48,14 +48,6 @@ run_as=""
 # trigger=systemd: append the output to this file, empty = journal (journalctl -u bashclub-zsync@<name>)
 log_file=""
 
-# newest target snapshot does not exist on the source anymore (rollback or deleted on the source):
-# 1 = roll the target back to the newest common snapshot and continue from there,
-# 0 = no replication of this dataset until it is fixed manually (previous behavior)
-target_rollback=0
-
-# maximum number of target snapshots a rollback may destroy, otherwise only an error is logged
-target_rollback_max=24
-
 # bandwidth limit of the transfer in bytes per second with suffix k, m, g (1024 based), e.g. 10m = 10 MiB/s
 # (about 84 Mbit/s); applied on this host with pv (package pv), empty = no limit
 bandwidth_limit=""

@@ -72,14 +72,6 @@ run_as=""
 # trigger=systemd: append the output to this file, empty = journal (journalctl -u bashclub-zsync@<name>)
 log_file=""
 
-# newest target snapshot does not exist on the source anymore (rollback or deleted on the source):
-# 1 = roll the target back to the newest common snapshot and continue from there,
-# 0 = no replication of this dataset until it is fixed manually (previous behavior)
-target_rollback=0
-
-# maximum number of target snapshots a rollback may destroy, otherwise only an error is logged
-target_rollback_max=24
-
 # bandwidth limit of the transfer in bytes per second with suffix k, m, g (1024 based), e.g. 10m = 10 MiB/s
 # (about 84 Mbit/s); applied on this host with pv (package pv), empty = no limit
 bandwidth_limit=""
@@ -304,8 +296,6 @@ zfs_auto_snapshot_keep=$zfs_auto_snapshot_keep
 zfs_auto_snapshot_label=$zfs_auto_snapshot_label
 zfs_auto_snapshot_engine=internal
 zfs_auto_snapshot_label_match=strict
-target_rollback=$target_rollback
-target_rollback_max=$target_rollback_max
 bandwidth_limit=$bandwidth_limit
 source_bookmark=1
 source_hold=1
@@ -372,7 +362,7 @@ zsync_sshport=-p$sshport
 
 config_log="[INFO] Configuration:"
 for setting in target source sshport tag snapshot_filter min_keep zfs_auto_snapshot_keep zfs_auto_snapshot_label \
-               zfs_auto_snapshot_engine zfs_auto_snapshot_label_match target_rollback target_rollback_max \
+               zfs_auto_snapshot_engine zfs_auto_snapshot_label_match \
                bandwidth_limit source_bookmark source_hold transfer_resume checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
                checkzfs_spool checkzfs_spool_maxage trigger schedule run_as log_file; do
     config_log+="\n\t$setting=${!setting}"
@@ -567,10 +557,6 @@ if [[ -n $bandwidth_limit ]]; then
     fi
 fi
 
-if ! [[ $target_rollback_max =~ ^[0-9]+$ ]]; then
-    log "[WARN] Invalid value target_rollback_max=$target_rollback_max, using 24."
-    target_rollback_max=24
-fi
 if [[ $zfs_auto_snapshot_engine == "zas" ]]; then
     label_scheme="zfs-auto-snap_$zfs_auto_snapshot_label"
 else
@@ -611,10 +597,62 @@ function label_leftovers() {
 }
 
 # state of each dataset for the monitoring (written to <config>.datasets):
-# ok, rolled_back, cleanup_blocked, failed, at_risk, diverged, broken, empty, no_snapshots, orphan_missing, orphan_unselected, orphan_kept
+# ok, branched, cleanup_blocked, failed, at_risk, diverged, broken, empty, no_snapshots, orphan_missing, orphan_unselected,
+# orphan_kept, branch (old chain after a rollback on the source), branch_kept
 declare -A ds_state ds_detail
 
 # fix for a target without a usable snapshot: keep the old replica under a new name, the next run replicates again
+# newest target snapshot missing on the source (rollback there, or its newest snapshots deleted): the replication
+# continues on a new chain from the newest common snapshot, the old chain stays complete as <replica>.zsync-branch-<date>
+# (bashclub:zsync-branch=<date>;<reason>); nothing is deleted, the admin decides with bashclub-zsync-maintenance
+# clone of the common snapshot -> promote (the common snapshots belong to the new chain) -> swap the names -> children
+# (replicas of their own) back below the new chain
+function branch_replica() {
+    local name=$1 common=$2 replica=$target/$1 date new branch discard count prop value child
+    date=$(date +%Y-%m-%d-%H%M)
+    new=$replica.zsync-new
+    branch=$replica.zsync-branch-$date
+    if zfs list "$new" > /dev/null 2>&1 || zfs list "$branch" > /dev/null 2>&1; then
+        log "[ERROR] $name - $new or $branch exists already (an earlier attempt was not completed), check them and remove what is not needed."
+        return 1
+    fi
+    discard=$(zfs list -H -o name -S createtxg -t snapshot "$replica" | awk -v c="$common" '$1 == c { exit } { print }')
+    count=$(grep -c . <<< "$discard")
+    log "[WARN] $name - the newest snapshots of $replica do not exist on the source anymore (rollback or deleted there). The replication continues on a new chain from $common, the old chain with all its snapshots stays as $branch ($count newer snapshots):\n$(sed 's/^/\t/' <<< "$discard")"
+    # as non-root zfs clone cannot mount it and fails, the clone exists nevertheless
+    if [[ $fstype == "filesystem" ]] && [ -z "$nomount" ]; then
+        zfs clone -o canmount=noauto "$common" "$new"
+    else
+        zfs clone "$common" "$new" 2> /dev/null
+    fi
+    if ! zfs list "$new" > /dev/null 2>&1; then
+        log "[ERROR] $name - cloning $common failed, nothing was changed."
+        return 1
+    fi
+    # properties of the replica (received or set by bashclub-zsync, e.g. bashclub:zsync-source.*) also on the new chain,
+    # those that cannot be set there (encryption, missing permission) are left out
+    while IFS=$'\t' read -r prop value; do
+        if [[ -n $prop ]]; then zfs set "$prop=$value" "$new" 2> /dev/null; fi
+    done <<< "$(zfs get -H -o property,value -s local,received all "$replica" 2>/dev/null)"
+    if ! zfs promote "$new"; then
+        log "[ERROR] $name - promoting $new failed, nothing was changed."
+        zfs destroy "$new"
+        return 1
+    fi
+    if ! zfs rename "$replica" "$branch" || ! zfs rename "$new" "$replica"; then
+        log "[ERROR] $name - renaming failed: the new chain is $new, the old chain $replica or $branch. Rename them by hand: zfs rename $replica $branch; zfs rename $new $replica"
+        return 1
+    fi
+    for child in $(zfs list -H -o name -d 1 -t filesystem,volume "$branch" | tail -n +2); do
+        zfs rename "$child" "$replica/${child##*/}" || log "[ERROR] $name - moving $child below the new chain failed: zfs rename $child $replica/${child##*/}"
+    done
+    zfs set "bashclub:zsync-branch=$date;newest common snapshot ${common#*@}, $count newer snapshots" "$branch" \
+        || log "[WARN] $name - marking $branch failed (bashclub:zsync-branch)."
+    ds_state[$name]=branched
+    ds_detail[$name]="new chain from ${common#*@}, old chain ${branch##*/}"
+    return 0
+}
+
 function rename_hint() {
     echo "zfs rename $target/$1 $target/$1.broken-$(date +%Y-%m-%d)"
 }
@@ -761,28 +799,14 @@ for name in "${syncvols[@]}"; do
                     log "[INFO] $name - the newest snapshot of $target/$name was deleted on the source, continuing from the bookmark $last"
                 fi
             fi
-            # newest target snapshot missing on the source (rollback or deleted there): with target_rollback=1
-            # roll the target back to the newest common snapshot (at most target_rollback_max snapshots destroyed)
-            if [[ $last == "" ]] && [[ $target_rollback == "1" ]]; then
-                target_list=$(zfs list -H -o guid,name -S createtxg -t snapshot $target/$name)
+            # newest target snapshot missing on the source (rollback or deleted there): new chain from the newest
+            # common snapshot, the old chain stays as branch (branch_replica)
+            if [[ $last == "" ]]; then
                 common=$(awk -F'\t' 'NR == FNR { g[$2] = 1; next } ($1 in g) { print $2; exit }' \
-                    <(printf '%s\n' "$source_snaps") <(printf '%s\n' "$target_list"))
-                if [[ -n $common ]]; then
-                    discard=$(awk -F'\t' -v c="$common" '$2 == c { exit } { print $2 }' <<< "$target_list")
-                    count=$(grep -c . <<< "$discard")
-                    if [ $count -le $target_rollback_max ]; then
-                        log "[WARN] $name - the newest snapshot on $target/$name does not exist on the source anymore. Rolling back to $common (target_rollback=1), destroying $count snapshots:\n$(sed 's/^/\t/' <<< "$discard")"
-                        if zfs rollback -r $common; then
-                            ds_state[$name]=rolled_back
-                            ds_detail[$name]="rolled back to ${common#*@}, $count snapshots destroyed"
-                            guid=$(zfs list -H -o guid -s createtxg -t snapshot $target/$name | tail -1)
-                            last=$(grep $guid <<< "$source_snaps" | tail -1 | cut -f1)
-                        else
-                            rc=1; log "[ERROR] rollback of $target/$name to $common failed."
-                        fi
-                    else
-                        log "[ERROR] $name - a rollback to $common would destroy $count snapshots on the target, more than target_rollback_max=$target_rollback_max. Check and roll back manually:\n\tzfs rollback -r $common"
-                    fi
+                    <(printf '%s\n' "$source_snaps") <(zfs list -H -o guid,name -S createtxg -t snapshot $target/$name))
+                if [[ -n $common ]] && branch_replica "$name" "$common"; then
+                    guid=$(zfs list -H -o guid -s createtxg -t snapshot $target/$name | tail -1)
+                    last=$(grep $guid <<< "$source_snaps" | tail -1 | cut -f1)
                 fi
             fi
             if [[ $last != "" ]]; then
@@ -882,7 +906,7 @@ for name in "${syncvols[@]}"; do
                     oldest=$(grep -E "${interval_regex[$interval]}" <<< "$source_snaps" | tail -1 | cut -f2)
                     # the replication itself is done: warning and dataset state for the monitoring, no exit code
                     log "[WARN] $name - the oldest source snapshot of interval $interval ($oldest) does not exist on $target/$name, no snapshots of this interval are deleted on the target."
-                    if [[ -z ${ds_state[$name]} ]] || [[ ${ds_state[$name]} == "rolled_back" ]]; then
+                    if [[ -z ${ds_state[$name]} ]] || [[ ${ds_state[$name]} == "branched" ]]; then
                         ds_state[$name]=cleanup_blocked
                         ds_detail[$name]="oldest source snapshot ${oldest#*@} missing on the target"
                     elif [[ ${ds_state[$name]} == "cleanup_blocked" ]]; then
@@ -893,7 +917,11 @@ for name in "${syncvols[@]}"; do
                 snap_count=$(grep -c . <<< "$target_snaps")
 
                 for snap in $snaps_to_delete; do
-                    if [[ $snap_count -gt $min_keep ]]; then
+                    clones=$(zfs get -H -o value clones $snap 2>/dev/null)
+                    if [[ -n $clones && $clones != "-" ]]; then
+                        # the old chain of a rollback on the source starts here (bashclub-zsync-maintenance)
+                        log "[INFO] $name - keeping $snap, the old chain $clones depends on it."
+                    elif [[ $snap_count -gt $min_keep ]]; then
                         log "[INFO] Deleting $snap"
                         debug "$name - snap_count=$snap_count, min_keep=$min_keep"
                         zfs destroy $debug $snap
@@ -914,7 +942,7 @@ for name in "${syncvols[@]}"; do
         debug "$name - No snapshots found with filter $snapshot_filter"
         ds_state[$name]=no_snapshots
     fi
-    if [[ -z ${ds_state[$name]} ]] || { [[ ${ds_state[$name]} =~ ^(rolled_back|cleanup_blocked)$ ]] && [ $rc -ne 0 ]; }; then
+    if [[ -z ${ds_state[$name]} ]] || { [[ ${ds_state[$name]} =~ ^(branched|cleanup_blocked)$ ]] && [ $rc -ne 0 ]; }; then
         if [ $rc -ne 0 ]; then ds_state[$name]=failed; else ds_state[$name]=ok; fi
     fi
     if [ $rc -ne 0 ]; then ((datasets_failed++)); fi
@@ -929,7 +957,7 @@ done
 # acknowledged with: zfs set bashclub:zsync-orphan=keep <replica>
 if [ ${#fstypes[@]} -gt 0 ]; then
     status orphans
-    declare -A selected=() kept=() used=()
+    declare -A selected=() kept=() used=() branches=()
     for n in "${syncvols[@]}"; do selected[$n]=1; done
     while IFS=$'\t' read -r n v; do
         if [[ -n $n ]] && [[ $v == "keep" ]]; then kept[$n]=1; fi
@@ -937,9 +965,23 @@ if [ ${#fstypes[@]} -gt 0 ]; then
     while IFS=$'\t' read -r n v; do
         if [[ -n $n ]]; then used[$n]=$v; fi
     done <<< "$(zfs list -H -o name,used -r $target 2>/dev/null)"
+    # old chains after a rollback on the source (branch_replica), marked with bashclub:zsync-branch
+    while IFS=$'\t' read -r n v; do
+        if [[ -n $n ]]; then branches[$n]=$v; fi
+    done <<< "$(zfs get -H -o name,value -s local -r -t filesystem,volume bashclub:zsync-branch $target 2>/dev/null)"
     for replica in $(zfs list -H -o name -t snapshot -r $target 2>/dev/null | cut -d'@' -f1 | uniq); do
         src=${replica#$target/}
         if [[ $replica == "$target" ]] || [[ -n ${selected[$src]} ]]; then continue; fi
+        if [[ -n ${branches[$replica]} ]]; then
+            ds_detail[$src]="old chain since ${branches[$replica]%%;*} (${branches[$replica]#*;}, ${used[$replica]})"
+            if [[ -n ${kept[$replica]} ]]; then
+                ds_state[$src]=branch_kept
+            else
+                ds_state[$src]=branch
+                log "[WARN] $replica is the old chain after a rollback on the source: ${ds_detail[$src]}. Keep or delete it: bashclub-zsync-maintenance"
+            fi
+            continue
+        fi
         if [[ -z ${fstypes[$src]} ]]; then
             ds_state[$src]=orphan_missing
             ds_detail[$src]="does not exist on the source"

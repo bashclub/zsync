@@ -168,14 +168,6 @@ zfs_auto_snapshot_label_match="strict"
 # empty = derived from the start times of the previous runs, 0 = no age check (e.g. removable disks)
 monitor_max_age=""
 
-# newest target snapshot does not exist on the source anymore (rollback or deleted on the source):
-# 1 = roll the target back to the newest common snapshot and continue from there,
-# 0 = no replication of this dataset until it is fixed manually (previous behavior)
-target_rollback=0
-
-# maximum number of target snapshots a rollback may destroy, otherwise only an error is logged
-target_rollback_max=24
-
 # bandwidth limit of the transfer in bytes per second with suffix k, m, g (1024 based), e.g. 10m = 10 MiB/s
 # (about 84 Mbit/s); applied on this host with pv (package pv), empty = no limit
 bandwidth_limit=""
@@ -235,7 +227,7 @@ conf=/etc/bashclub/zsync.conf
 To replicate datasets of the same host, e.g. from `rpool` to a backup pool, set `source=local`: the commands run on this host without ssh (no ssh login to localhost needed), `remote-snapshot-manager` and checkzfs work locally. Datasets in the target are never selected, also if the target is in the same pool and inherits `bashclub:zsync`. `source=root@localhost` still works as before.
 
 ### Bookmarks on the source
-If the replication stops longer than the source keeps its snapshots, the rotation deletes the snapshot the replica ends with, and only a full replication would help. With `source_bookmark=1` (default for new configurations) `bashclub-zsync` keeps a ZFS bookmark of the newest replicated snapshot on the source, e.g. `rpool/data#zsync_backup1_backup_pve1` (backup host and target in the name, so several backup servers do not interfere). A bookmark takes no space and holds no data, the rotation can still delete the snapshot. The next run then continues from the bookmark (also raw encrypted). A rollback on the source destroys newer bookmarks (`zfs rollback -r`), so a replica is never appended to a different history; see `target_rollback` for this case. Bookmarks of datasets that are no longer replicated stay on the source (`zfs list -t bookmark`).
+If the replication stops longer than the source keeps its snapshots, the rotation deletes the snapshot the replica ends with, and only a full replication would help. With `source_bookmark=1` (default for new configurations) `bashclub-zsync` keeps a ZFS bookmark of the newest replicated snapshot on the source, e.g. `rpool/data#zsync_backup1_backup_pve1` (backup host and target in the name, so several backup servers do not interfere). A bookmark takes no space and holds no data, the rotation can still delete the snapshot. The next run then continues from the bookmark (also raw encrypted). A rollback on the source destroys newer bookmarks (`zfs rollback -r`), so a replica is never appended to a different history; see [Rollback on the source](#rollback-on-the-source) for this case. Bookmarks of datasets that are no longer replicated stay on the source (`zfs list -t bookmark`).
 
 ### Holds on the source
 ZFS itself only protects the snapshot that is being sent. With `source_hold=1` (default for new configurations) `bashclub-zsync` puts a hold (`zfs hold`, tag per backup host and target like the bookmark) on the base and on all snapshots that are still to be sent, before the transfer of a dataset starts, and releases them when the dataset is done or the run ends. During that time the rotation (`zfs-auto-snapshot`, `remote-snapshot-manager`) or an admin cannot delete them (`dataset is busy`), they are deleted with the next rotation. A hold left over by a killed run is released by the next run of the same configuration; to release it manually:
@@ -251,7 +243,13 @@ With `transfer_resume=1` (default for new configurations) the replica is receive
 `bandwidth_limit` limits the transfer to the given bytes per second, e.g. `bandwidth_limit=10m` (10 MiB/s, about 84 Mbit/s) for an offsite backup over a shared line. The limit is applied on the backup server with `pv` between `zfs send` and `zfs receive`; install it with `apt install pv`. Without `pv` the transfer runs without limit and the log shows a warning.
 
 ### Rollback on the source
-If the newest snapshot of a replica does not exist on the source anymore (rolled back or deleted on the source), the dataset cannot be appended. By default it is not replicated anymore until it is fixed manually; the log and the Checkmk check name the newest common snapshot. With `target_rollback=1` `bashclub-zsync` rolls the replica back to the newest common snapshot (`zfs rollback -r`, the newer snapshots of the replica are destroyed) and continues from there, if it destroys at most `target_rollback_max` snapshots (default 24). Otherwise it logs the command to roll back manually. Rollbacks are listed in the log and as a hint in the Checkmk check.
+If the newest snapshots of a replica do not exist on the source anymore (rolled back or deleted on the source), `bashclub-zsync` continues on a new chain and keeps the old one. Nothing on the target is deleted, so a rollback or a deletion on the source (also by an attacker) can never destroy backups:
+- the newest common snapshot is cloned and promoted, the replica continues from it in the same run, without a full replication (also raw encrypted and without root)
+- the old chain with all its snapshots stays as `<replica>.zsync-branch-<date>` (property `bashclub:zsync-branch`), child datasets stay below the new chain
+- the Checkmk check warns until the admin decides with `bashclub-zsync-maintenance`: keep the old chain (archive) or delete it
+- while the old chain exists, the rotation keeps the common snapshot it starts from
+
+Without root the user needs the permissions `clone`, `promote` and `rename` on its target (see [Running without root](#running-without-root)); without them the dataset is reported as before (newest common snapshot in the log and the Checkmk check) until it is fixed.
 
 ### refquota
 The `refquota` of a filesystem is replicated with the initial replication only. If it is raised on the source later, the target keeps the old value and the replication fails with "quota exceeded" as soon as the data exceeds it. Before each incremental replication `bashclub-zsync` therefore raises the `refquota` on the target to the value of the source, or removes it if the source has none. It never lowers it, and `quota` is not changed.
@@ -297,6 +295,7 @@ The age of the replicated snapshots per dataset is still checked by checkzfs.
 | replica only on the target (orphan) | `keep` (`bashclub:zsync-orphan=keep`), `delete`, `later` |
 | no common snapshot with the source, or replica without snapshots | `rename` (the old replica stays, the next run replicates again), `delete` (the next run replicates again), `later` |
 | snapshots of the label in another name scheme on the target | `delete`, `later` |
+| old chain after a rollback on the source (`<replica>.zsync-branch-<date>`) | `keep` (archive, no warning anymore), `delete` (the replication already continues on the new chain), `later` |
 
 All open cases one after the other:
 ~~~
@@ -336,7 +335,7 @@ test -f /var/lib/zsync/.ssh/id_ed25519 || su - zsync -c 'install -d -m 700 ~/.ss
 ( . "$conf"
   zfs list "$target" > /dev/null 2>&1 || zfs create -p -o canmount=noauto -o com.sun:auto-snapshot=false "$target"
   zfs set mountpoint=none "$target"
-  zfs allow -u zsync create,receive,mount,destroy,rollback,hold,release,userprop,aclinherit,aclmode,acltype,atime,checksum,compression,context,copies,dedup,defcontext,dnodesize,filesystem_limit,fscontext,logbias,nbmand,overlay,primarycache,quota,readonly,recordsize,redundant_metadata,refquota,refreservation,relatime,reservation,rootcontext,secondarycache,snapdev,snapdir,snapshot_limit,special_small_blocks,sync,volmode,volsize,vscan,xattr "$target" )
+  zfs allow -u zsync create,receive,mount,destroy,rollback,clone,promote,rename,hold,release,userprop,aclinherit,aclmode,acltype,atime,checksum,compression,context,copies,dedup,defcontext,dnodesize,filesystem_limit,fscontext,logbias,nbmand,overlay,primarycache,quota,readonly,recordsize,redundant_metadata,refquota,refreservation,relatime,reservation,rootcontext,secondarycache,snapdev,snapdir,snapshot_limit,special_small_blocks,sync,volmode,volsize,vscan,xattr "$target" )
 ~~~
 3. User `zsync` on the source with the key of the backup server and the permissions to send, snapshot, hold and bookmark on all pools:
 ~~~

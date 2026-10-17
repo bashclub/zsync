@@ -12,7 +12,7 @@ und prüft das Ergebnis am Ziel. Am Ende werden die Pools zerstört.
 | `ci.sh` | CI-Job auf dem Runner mit Label `zfs`: Paket bauen (nfpm), installieren, testen |
 
 Fälle: `replication` (Dateisystem mit Kind, Volume, raw-verschlüsselt), `engine_internal`, `rotation`,
-`refquota`, `rollback`, `broken_chain`, `orphans`, `local_mode`, `bandwidth_lock`, `bookmark` (Anfügen aus dem Bookmark, auch raw-verschlüsselt), `hold` (Basis und geplante Snapshots während des
+`refquota`, `rollback` (neue Kette per Klon, alter Zweig, verschlüsselt, Kind-Datasets, Entscheidung), `broken_chain`, `orphans`, `local_mode`, `bandwidth_lock`, `bookmark` (Anfügen aus dem Bookmark, auch raw-verschlüsselt), `hold` (Basis und geplante Snapshots während des
 Deltas nicht löschbar), `deleted_during` (Snapshot während der Replikation gelöscht), `resume` (abgebrochene Erstreplikation und Delta
 fortgesetzt, Teilstand verworfen), `unprivileged` (Betrieb ohne root), `restricted` (Quelle mit `command=bashclub-zsync-remote`), `job_user` (Benutzer pro Replikationsjob über den Verwaltungsbenutzer), `setup` (geführtes Setup als root, als Verwaltungsbenutzer und lokal, Fragen), `disk` (Wechseldatenträger mit und ohne LUKS, Anschließen mit `zsync-autorun`), `timer` (systemd-Timer, Migration von
 Cronjobs), `same_second` (zwei Labels

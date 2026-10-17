@@ -20,7 +20,7 @@ jobs_home=/var/lib/bashclub-zsync-jobs
 # devices): the target has mountpoint=none, the job user cannot change that, so no replica is ever mounted; zfs receive
 # skips these properties with "permission denied", their values of the source are saved on the replica
 # (bashclub:zsync-source.*), see README "Running without root"
-target_permissions=create,receive,mount,destroy,rollback,hold,release,userprop,aclinherit,aclmode,acltype,atime,checksum,compression,context,copies,dedup,defcontext,dnodesize,filesystem_limit,fscontext,logbias,nbmand,overlay,primarycache,quota,readonly,recordsize,redundant_metadata,refquota,refreservation,relatime,reservation,rootcontext,secondarycache,snapdev,snapdir,snapshot_limit,special_small_blocks,sync,volmode,volsize,vscan,xattr
+target_permissions=create,receive,mount,destroy,rollback,clone,promote,rename,hold,release,userprop,aclinherit,aclmode,acltype,atime,checksum,compression,context,copies,dedup,defcontext,dnodesize,filesystem_limit,fscontext,logbias,nbmand,overlay,primarycache,quota,readonly,recordsize,redundant_metadata,refquota,refreservation,relatime,reservation,rootcontext,secondarycache,snapdev,snapdir,snapshot_limit,special_small_blocks,sync,volmode,volsize,vscan,xattr
 
 usage() {
     cat >&2 << EOF

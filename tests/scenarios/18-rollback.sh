@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# target_rollback=1: neuester Ziel-Snapshot fehlt auf der Quelle -> Rollback auf den neuesten gemeinsamen Snapshot
-# (2 Snapshots verworfen), danach Anfügen ab dort
+# neuester Ziel-Snapshot fehlt auf der Quelle (Rollback dort): neue Kette per Klon ab dem neuesten gemeinsamen Snapshot,
+# der alte Zweig mit 2 Snapshots bleibt, danach Anfügen ab dort; nichts wird gelöscht
 DEBUG=0; CHECKZFS=0
 CONF='target=backup/zsync
 source=root@src
@@ -11,8 +11,6 @@ min_keep=1
 zfs_auto_snapshot_keep=0
 zfs_auto_snapshot_label=backup
 zfs_auto_snapshot_engine=internal
-target_rollback=1
-target_rollback_max=24
 checkzfs_disabled=1
 checkzfs_local=0
 checkzfs_prefix=zsync

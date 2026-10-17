@@ -75,21 +75,41 @@ case_refquota() {
   check "Delta mit 64 MiB übertragen" grep -q 'zfs-auto-snap_daily-02' <<< "$(snaps "$ZCI_POOL_DST/refquota/$ZCI_POOL_SRC/data")"
 }
 
-# Rollback auf der Quelle: ohne target_rollback Zustand diverged, mit target_rollback=1 zurückrollen und anfügen
+# Rollback auf der Quelle: neue Kette per Klon, die alte bleibt als Zweig, nichts wird gelöscht; Kind-Datasets bleiben
+# an der neuen Kette, auch raw verschlüsselt; Entscheidung über den Zweig im Wartungswerkzeug
 case_rollback() {
-  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
-  for n in 01 02 03; do write "$ZCI_POOL_SRC/data" 1 f$n; snap "$ZCI_POOL_SRC/data" $n; done
+  local d="$ZCI_POOL_DST/rollback/$ZCI_POOL_SRC" branch list
+  zfs create "$ZCI_POOL_SRC/data"; zfs create "$ZCI_POOL_SRC/data/child"
+  echo "zsync-ci-passphrase" | zfs create -o encryption=on -o keyformat=passphrase "$ZCI_POOL_SRC/enc"
+  for c in data enc; do zfs set bashclub:zsync=all "$ZCI_POOL_SRC/$c"; done
+  for n in 01 02 03; do for c in data data/child enc; do write "$ZCI_POOL_SRC/$c" 1 f$n; snap "$ZCI_POOL_SRC/$c" $n; done; done
   config rollback "source_bookmark=1"; zsync
-  zfs rollback -r "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-01"; write "$ZCI_POOL_SRC/data" 1 f04; snap "$ZCI_POOL_SRC/data" 04
+  zfs set compression=zstd "$d/data"
+  for c in data enc; do zfs rollback -r "$ZCI_POOL_SRC/$c@zfs-auto-snap_daily-01"; write "$ZCI_POOL_SRC/$c" 1 f04; snap "$ZCI_POOL_SRC/$c" 04; done
+  snap "$ZCI_POOL_SRC/data/child" 04
   zsync
-  equal "ohne target_rollback: Exit-Code" 1 "$rc"
-  equal "ohne target_rollback: Zustand" diverged "$(state_of "$ZCI_POOL_SRC/data")"
+  equal "Exit-Code" 0 "$rc"
+  equal "neue Kette ab dem gemeinsamen Snapshot" "zfs-auto-snap_daily-01 zfs-auto-snap_daily-04" "$(snaps "$d/data")"
+  equal "verschlüsselt: neue Kette" "zfs-auto-snap_daily-01 zfs-auto-snap_daily-04" "$(snaps "$d/enc")"
+  branch=$(zfs list -H -o name -d 1 "$d" | grep '/data\.zsync-branch-')
+  check "alter Zweig vorhanden ($branch)" test -n "$branch"
+  equal "alter Zweig mit allen Snapshots" "zfs-auto-snap_daily-02 zfs-auto-snap_daily-03" "$(snaps "$branch")"
+  check "Zweig markiert" grep -q "newest common snapshot zfs-auto-snap_daily-01" <<< "$(prop "$branch" bashclub:zsync-branch)"
+  check "verschlüsselt: alter Zweig vorhanden" test -n "$(zfs list -H -o name -d 1 "$d" | grep '/enc\.zsync-branch-')"
+  equal "Kind unter der neuen Kette weiterrepliziert" "zfs-auto-snap_daily-01 zfs-auto-snap_daily-02 zfs-auto-snap_daily-03 zfs-auto-snap_daily-04" "$(snaps "$d/data/child")"
+  equal "Eigenschaften übernommen" zstd "$(prop "$d/data" compression)"
+  equal "Zustand der neuen Kette" branched "$(state_of "$ZCI_POOL_SRC/data")"
+  equal "Zustand des alten Zweigs" branch "$(state_of "${branch#$ZCI_POOL_DST/rollback/}")"
   check "kein Anfügen aus einem Bookmark nach Rollback" not grep -q 'continuing from the bookmark' "$log"
-  echo "target_rollback=1" >> "$conf"
+  check "Checkmk: WARN zum alten Zweig" grep -qE '^1 "zsync rollback" .*old chain after a rollback on the source' <<< "$(check_output)"
+  # Entscheidung: alten Zweig löschen
+  list=$(ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-maintenance --list --tsv)
+  local case_id; case_id=$(awk -F'\t' -v r="$branch" '$3 == "branch" && $4 == r { print $1 }' <<< "$list")
+  check "Fall alter Zweig im Wartungswerkzeug" test -n "$case_id"
+  check "alten Zweig löschen" env ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-maintenance --decide "$case_id" delete
+  check "alter Zweig gelöscht" not exists "$branch"
   zsync
-  equal "mit target_rollback=1: Exit-Code" 0 "$rc"
-  equal "mit target_rollback=1: zurückgerollt und angefügt" "zfs-auto-snap_daily-01 zfs-auto-snap_daily-04" "$(snaps "$ZCI_POOL_DST/rollback/$ZCI_POOL_SRC/data")"
-  equal "Zustand rolled_back" rolled_back "$(state_of "$ZCI_POOL_SRC/data")"
+  equal "nächster Lauf: Exit-Code" 0 "$rc"
 }
 
 # Kette gerissen: alle Snapshots des Replikats wurden auf der Quelle wegrotiert
@@ -271,7 +291,7 @@ case_unprivileged() {
   # Rechte wie im README
   check "Rechte auf der Quelle" zfs allow -u $user send,snapshot,destroy,mount,hold,release,bookmark "$ZCI_POOL_SRC"
   zfs create -o canmount=noauto -o mountpoint=none -o com.sun:auto-snapshot=false "$ZCI_POOL_DST/unprivileged"
-  check "Rechte auf dem Ziel" zfs allow -u $user "create,receive,mount,destroy,rollback,hold,release,userprop,$ZCI_RECV_PROPS" "$ZCI_POOL_DST/unprivileged"
+  check "Rechte auf dem Ziel" zfs allow -u $user "create,receive,mount,destroy,rollback,clone,promote,rename,hold,release,userprop,$ZCI_RECV_PROPS" "$ZCI_POOL_DST/unprivileged"
   config unprivileged "source=$user@localhost
 snapshot_filter=\"\"
 zfs_auto_snapshot_keep=3
@@ -301,6 +321,13 @@ transfer_resume=1"
   check "Bookmarks angelegt" test "$(zfs list -H -o name -t bookmark -r "$ZCI_POOL_SRC" | wc -l)" -ge 3
   equal "Status für das Monitoring geschrieben" "rc=0" "$(grep '^rc=' "$(status_path last)")"
   check "keine Warnung zu Rechten im Log" not grep -q 'not writable\|cannot be used' "$log"
+  # Rollback auf der Quelle ohne root: neue Kette per Klon mit den Rechten clone, promote, rename
+  zfs rollback -r "$ZCI_POOL_SRC/subvol-100-disk-0@$(snaps "$ZCI_POOL_SRC/subvol-100-disk-0" | cut -d' ' -f1)"
+  sleep 61   # der Lauf legt einen neuen Snapshot mit eigenem Namen pro Minute an (remote-snapshot-manager)
+  su - $user -c "bashclub-zsync -c $conf" >> "$log" 2>&1; rc=$?
+  equal "ohne root nach Rollback: Exit-Code" 0 "$rc"
+  check "ohne root: alter Zweig angelegt" test -n "$(zfs list -H -o name -d 1 "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC" | grep 'subvol-100-disk-0\.zsync-branch-')"
+  equal "ohne root: neue Kette weiterrepliziert" "$(snaps "$ZCI_POOL_SRC/subvol-100-disk-0" | awk '{ print $NF }')" "$(snaps "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/subvol-100-disk-0" | awk '{ print $NF }')"
   check "Status im eigenen Ordner des Benutzers" test -f "$LIB_DIR/$user/$id.last"
   check "Checkmk: Service aus dem Ordner des Benutzers" grep -q '"zsync unprivileged"' <<< "$("$CHECK")"
   # Sperre auf der Config: auch über Benutzer hinweg läuft nur ein Lauf
@@ -426,7 +453,7 @@ case_restricted() {
   write "$ZCI_POOL_SRC/data" 2
   zfs allow -u $user send,snapshot,destroy,mount,hold,release,bookmark "$ZCI_POOL_SRC"
   zfs create -o canmount=noauto -o mountpoint=none -o com.sun:auto-snapshot=false "$ZCI_POOL_DST/restricted"
-  zfs allow -u $user "create,receive,mount,destroy,rollback,hold,release,userprop,$ZCI_RECV_PROPS" "$ZCI_POOL_DST/restricted"
+  zfs allow -u $user "create,receive,mount,destroy,rollback,clone,promote,rename,hold,release,userprop,$ZCI_RECV_PROPS" "$ZCI_POOL_DST/restricted"
   config restricted "source=$user@localhost
 snapshot_filter=\"\"
 zfs_auto_snapshot_keep=3
@@ -476,7 +503,7 @@ case_job_user() {
   out=$($job list)
   check "list: Adresse und Dataset ($out)" grep -qE "^zsync-cij	from 127.0.0.1,::1	$ZCI_POOL_SRC/data	all snapshots$" <<< "$out"
   zfs create -o canmount=noauto -o mountpoint=none -o com.sun:auto-snapshot=false "$ZCI_POOL_DST/job_user"
-  zfs allow -u $backup "create,receive,mount,destroy,rollback,hold,release,userprop,$ZCI_RECV_PROPS" "$ZCI_POOL_DST/job_user"
+  zfs allow -u $backup "create,receive,mount,destroy,rollback,clone,promote,rename,hold,release,userprop,$ZCI_RECV_PROPS" "$ZCI_POOL_DST/job_user"
   config job_user "source=zsync-cij@localhost
 snapshot_filter=\"\"
 zfs_auto_snapshot_keep=3
@@ -646,13 +673,16 @@ zfs_auto_snapshot_keep=3"
 case_maintenance() {
   local m=bashclub-zsync-maintenance mlog=/var/log/bashclub-zsync/maintenance.log list c
   for c in data gone broken; do zfs create "$ZCI_POOL_SRC/$c"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/$c"; snap "$ZCI_POOL_SRC/$c" 01; done
-  config maintenance "zfs_auto_snapshot_keep=3"
+  # legacy: ein Snapshot des Labels im Schema von zas wird mitrepliziert und ist am Ziel eine Altlast (wie bei einem
+  # Wechsel der Engine)
+  config maintenance "zfs_auto_snapshot_keep=3
+zfs_auto_snapshot_label_match=legacy"
   zsync
   equal "Erstreplikation" 0 "$rc"
   zfs destroy -r "$ZCI_POOL_SRC/gone"
   zfs list -H -o name -t snapshot "$ZCI_POOL_SRC/broken" | xargs -n1 zfs destroy
   snap "$ZCI_POOL_SRC/broken" 02
-  zfs snapshot "$ZCI_POOL_DST/maintenance/$ZCI_POOL_SRC/data@zfs-auto-snap_backup-2026-01-01-0000"
+  zfs snapshot "$ZCI_POOL_SRC/data@zfs-auto-snap_backup-2026-01-01-0000"
   zsync
   list=$(ZSYNC_CONF_DIR=$CONF_DIR $m --list --tsv)
   equal "drei offene Fälle" 3 "$(grep -c . <<< "$list")"

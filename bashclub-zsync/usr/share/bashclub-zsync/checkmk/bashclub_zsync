@@ -290,8 +290,8 @@ for id in $ids; do
     fi
 
     #### state per dataset (written by the last run)
-    declare -a ds_crit=() ds_risk=() ds_div=() ds_orphan=() ds_failed=() ds_blocked=()
-    kept=0; nosnap=0; orphan_new=0; rolled_back=()
+    declare -a ds_crit=() ds_risk=() ds_div=() ds_orphan=() ds_failed=() ds_blocked=() ds_branch=()
+    kept=0; nosnap=0; orphan_new=0; branched=(); branch_kept=0
     if [[ -f $lib_d/$id.datasets ]]; then
         while IFS=$'\t' read -r ds dstate since detail; do
             since=$(number "$since")
@@ -309,7 +309,9 @@ for id in $ids; do
                         ((orphan_new++))
                     fi ;;
                 orphan_kept) ((kept++)) ;;
-                rolled_back) rolled_back+=("$ds ($detail)") ;;
+                branched) branched+=("$ds ($detail)") ;;
+                branch) ds_branch+=("$ds ($detail)") ;;
+                branch_kept) ((branch_kept++)) ;;
                 no_snapshots) ((nosnap++)) ;;
             esac
         done < "$lib_d/$id.datasets"
@@ -323,19 +325,23 @@ for id in $ids; do
     if [ ${#ds_div[@]} -gt 0 ]; then
         raise 1 "newest target snapshot missing on the source: $(shortlist "${ds_div[@]}")$(level_mark 1)"
     fi
+    if [ ${#ds_branch[@]} -gt 0 ]; then
+        raise 1 "old chain after a rollback on the source, keep or delete it: $(shortlist "${ds_branch[@]}")$(level_mark 1)"
+    fi
     if [ ${#ds_blocked[@]} -gt 0 ]; then
         raise 1 "rotation on the target blocked: $(shortlist "${ds_blocked[@]}")$(level_mark 1)"
     fi
     if [ ${#ds_orphan[@]} -gt 0 ]; then
         raise 1 "${#ds_orphan[@]} datasets only on the target: $(shortlist "${ds_orphan[@]}")$(level_mark 1)"
     fi
-    if [ ${#ds_crit[@]} -gt 0 ] || [ ${#ds_orphan[@]} -gt 0 ]; then
+    if [ ${#ds_crit[@]} -gt 0 ] || [ ${#ds_orphan[@]} -gt 0 ] || [ ${#ds_branch[@]} -gt 0 ]; then
         state_text+=("decide on the backup server: bashclub-zsync-maintenance")
     fi
     if [ ${#ds_failed[@]} -gt 0 ]; then state_text+=("failed: $(shortlist "${ds_failed[@]}")"); fi
     if [ $orphan_new -gt 0 ]; then state_text+=("$orphan_new new datasets only on the target"); fi
     if [ $kept -gt 0 ]; then state_text+=("$kept kept replicas without source"); fi
-    if [ ${#rolled_back[@]} -gt 0 ]; then state_text+=("rolled back by the last run: $(shortlist "${rolled_back[@]}")"); fi
+    if [ ${#branched[@]} -gt 0 ]; then state_text+=("new chain after a rollback on the source: $(shortlist "${branched[@]}")"); fi
+    if [ $branch_kept -gt 0 ]; then state_text+=("$branch_kept old chains kept"); fi
     if [ $nosnap -gt 0 ]; then state_text+=("$nosnap datasets without matching snapshots"); fi
 
     #### age of the last successful run
