@@ -13,17 +13,38 @@ conf_value() {
     printf '%s\n' "$value"
 }
 
-# write a setting: replaced where it is, appended otherwise (quoted if it contains spaces, * or ;)
+# write a setting: replaced where it is, appended otherwise; the configuration is run by bash, so a value with other
+# characters than letters, digits and _ . : / @ , + = - is written in single quotes (nothing is expanded there),
+# a value with ' \ or a line break is refused
 set_conf_value() {
     local file=$1 key=$2 value=$3 line
-    if [[ $value =~ [[:space:]*\;] ]]; then line="$key=\"$value\""; else line="$key=$value"; fi
+    if ! [[ $key =~ ^[a-z_]+$ ]] || [[ $value == *[\'\\]* ]] || [[ $value == *$'\n'* ]]; then
+        echo "invalid value for $key: $value" >&2
+        return 1
+    fi
+    if [[ $value =~ ^[A-Za-z0-9_.:/@,+=-]*$ ]]; then line="$key=$value"; else line="$key='$value'"; fi
     if grep -qE "^[[:space:]]*$key=" "$file"; then
-        awk -v k="$key" -v l="$line" '$0 ~ "^[[:space:]]*" k "=" { print l; next } { print }' "$file" > "$file.tmp" \
+        # the line from the environment: awk -v would interpret backslashes
+        line=$line awk -v k="$key" '$0 ~ "^[[:space:]]*" k "=" { print ENVIRON["line"]; next } { print }' "$file" > "$file.tmp" \
             && cat "$file.tmp" > "$file" && rm -f "$file.tmp"
     else
         printf '%s\n' "$line" >> "$file"
     fi
 }
+
+#### checks of values from options, questions and cron jobs
+# dataset or pool: components of letters, digits and _ . : - separated by /
+valid_dataset() { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9_.:-]*(/[A-Za-z0-9_.:-]+)*$ ]]; }
+# host name, IPv4 or IPv6 address
+valid_host() { [[ $1 =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || [[ $1 =~ ^[0-9A-Fa-f:]+$ ]]; }
+valid_port() { [[ $1 =~ ^[0-9]{1,5}$ ]] && [ "$1" -ge 1 ] && [ "$1" -le 65535 ]; }
+# user property, e.g. bashclub:zsync
+valid_tag() { [[ $1 =~ ^[a-z0-9_.-]+:[a-z0-9_.:-]+$ ]]; }
+# snapshot label (part of snapshot names)
+valid_label() { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9_.:-]*$ ]]; }
+valid_user() { [[ $1 =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; }
+# absolute path without spaces, quotes, % (systemd specifiers) and ..
+valid_path() { [[ $1 =~ ^/[A-Za-z0-9_./-]+$ ]] && [[ $1 != *..* ]]; }
 
 # trigger of a configuration: systemd, autorun or cron (also without the setting: legacy)
 conf_trigger() {

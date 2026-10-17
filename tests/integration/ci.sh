@@ -8,5 +8,6 @@ for f in nfpm.yaml nfpm-source.yaml; do VERSION=$version nfpm pkg -f $f -p deb -
 dpkg -i dist/*.deb > /dev/null
 # Tests ohne ZFS: command=-Wrapper und Checkmk-Check
 tests/remote.sh | tail -1
+tests/schedule.sh | tail -1
 tests/checkmk.sh | tail -1
 tests/integration/run.sh

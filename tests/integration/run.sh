@@ -314,7 +314,7 @@ case_timer() {
   # enable schreibt die Config, der Generator erzeugt den Timer
   check "Timer einschalten" bashclub-zsync-timer enable $name "0 3 * * *"
   check "Config: trigger=systemd" grep -qx 'trigger=systemd' "$tconf"
-  check "Config: schedule im Cron-Format" grep -qx 'schedule="0 3 \* \* \*"' "$tconf"
+  check "Config: schedule im Cron-Format" grep -qx "schedule='0 3 \* \* \*'" "$tconf"
   equal "Timer vom Generator" enabled-runtime "$(systemctl is-enabled $unit)"
   check "Timer aktiv" systemctl is-active --quiet $unit
   check "Zeitplan umgerechnet" grep -q 'OnCalendar=\*-\*-\* 03:00:00' <<< "$(systemctl show -p TimersCalendar --value $unit)"
@@ -334,6 +334,12 @@ case_timer() {
   sed -i 's/^schedule=.*/schedule="@reboot"/' "$tconf"
   check "ungültiger Zeitplan: sync meldet Fehler" grep -q "error $name: schedule '@reboot'" <<< "$(bashclub-zsync-timer sync --dry-run)"
   sed -i 's/^schedule=.*/schedule="0 3 * * *"/' "$tconf"
+  # ungültige Eingaben werden abgewiesen, die Config bleibt unverändert
+  local before_conf; before_conf=$(md5sum < "$tconf")
+  check "enable: ungültiger Benutzer abgewiesen" not bashclub-zsync-timer enable $name --user 'nobody;id'
+  check "enable: Logdatei mit Leerzeichen abgewiesen" not bashclub-zsync-timer enable $name --log '/var/log/a b.log'
+  check "enable: Logdatei mit % abgewiesen" not bashclub-zsync-timer enable $name --log '/var/log/%n.log'
+  equal "Config nach abgewiesenen Eingaben unverändert" "$before_conf" "$(md5sum < "$tconf")"
   # Wechseldatenträger: list erkennt die Verwendung durch zsync-autorun
   ln -sfn "$lconf" /etc/default/zsync-autorun@zci-usb
   check "list: Hinweis auf autorun" grep -q "zci-legacy is used by zsync-autorun@zci-usb: set trigger=autorun" <<< "$(bashclub-zsync-timer list)"
@@ -358,7 +364,7 @@ case_timer() {
   check "migrate <name>: andere Config ohne trigger" not grep -q '^trigger=' "$lconf"
   check "Cron-Zeile auskommentiert" grep -q '^# bashclub-zsync-timer: migrated' $crondir/cron.d/zsync
   check "cron.daily-Zeile auskommentiert" grep -q '^# bashclub-zsync-timer: migrated' $crondir/cron.daily/zsync
-  check "Config: beide Zeitpläne" grep -qE '^schedule="(\*/15 6-22 \* \* 1-5;25 6 \* \* \*|25 6 \* \* \*;\*/15 6-22 \* \* 1-5)"$' "$tconf"
+  check "Config: beide Zeitpläne" grep -qE "^schedule='(\*/15 6-22 \* \* 1-5;25 6 \* \* \*|25 6 \* \* \*;\*/15 6-22 \* \* 1-5)'$" "$tconf"
   check "Config: Logdatei" grep -qx 'log_file=/var/log/bashclub-zsync/zci-timer.log' "$tconf"
   equal "beide Zeitpläne im Timer" 2 "$(systemctl show -p TimersCalendar --value $unit | grep -o OnCalendar= | wc -l)"
   systemctl start bashclub-zsync@$name.service
@@ -508,6 +514,20 @@ case_setup() {
   check "Jobbenutzer über zsync angelegt" id "zsync-$(echo "$host-zci-setup2" | tr 'A-Z_.' 'a-z--' | cut -c1-26)"
   check "--tag-datasets nur als root" not bashclub-zsync-setup -y -s localhost -t "$ZCI_POOL_DST/setup3" --login zsync --tag-datasets "$ZCI_POOL_SRC/other" zci-setup3
   check "--tag-datasets abgewiesen, bevor etwas angelegt wird" not test -e /etc/bashclub/zci-setup3.conf
+  # ungültige Eingaben: abgewiesen, bevor etwas angelegt wird
+  local opt value
+  while IFS=$'\t' read -r opt value; do
+    check "ungültig abgewiesen: $opt $value" not bashclub-zsync-setup -y -s localhost --login root -t "$ZCI_POOL_DST/bad" "$opt" "$value" zci-bad
+  done << 'EOT'
+-s	pve1;id
+-p	70000
+-t	zci-dst/a$(id)
+--tag	nocolon
+--label	a b
+--tag-datasets	zci-src/x;id
+EOT
+  check "nach ungültigen Eingaben keine Config" not test -e /etc/bashclub/zci-bad.conf
+  check "nach ungültigen Eingaben kein Ziel" not exists "$ZCI_POOL_DST/bad"
   # Fragen: Antworten aus der Eingabe, Abbruch bei der Bestätigung ändert nichts
   local out; out=$(printf 'localhost\n2222\n\n\n0 5 * * *\n7\n\nn\n' | bashclub-zsync-setup zci-setup5 2>&1)
   check "Fragen: Antworten übernommen" grep -q "source         localhost (port 2222)" <<< "$out"

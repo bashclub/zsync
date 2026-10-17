@@ -31,6 +31,13 @@ for conf in "$conf_dir"/*.conf; do
     fi
     run_as=$(conf_value "$conf" run_as)
     log_file=$(conf_value "$conf" log_file)
+    # both go into the unit: only a user name and a plain absolute path
+    if [[ -n $run_as ]] && ! valid_user "$run_as"; then
+        warn "$conf: run_as '$run_as' is not a user name, no timer"; continue
+    fi
+    if [[ -n $log_file ]] && ! valid_path "$log_file"; then
+        warn "$conf: log_file '$log_file' is not a plain absolute path, no timer"; continue
+    fi
 
     mkdir -p "$out/bashclub-zsync@$name.timer.d" "$out/bashclub-zsync@$name.service.d" "$out/timers.target.wants"
     {
