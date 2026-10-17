@@ -473,7 +473,7 @@ case_job_user() {
   equal "Schlüssel mit restrict, from und command" 'restrict,from="127.0.0.1,::1",command="/usr/bin/bashclub-zsync-remote" ssh-ed25519' \
     "$(cut -d' ' -f1-2 /var/lib/bashclub-zsync-source/cij/.ssh/authorized_keys)"
   out=$($job list)
-  check "list: Adresse und Dataset ($out)" grep -qE "^zsync-cij	from 127.0.0.1,::1	$ZCI_POOL_SRC/data$" <<< "$out"
+  check "list: Adresse und Dataset ($out)" grep -qE "^zsync-cij	from 127.0.0.1,::1	$ZCI_POOL_SRC/data	all snapshots$" <<< "$out"
   zfs create -o canmount=noauto -o mountpoint=none -o com.sun:auto-snapshot=false "$ZCI_POOL_DST/job_user"
   zfs allow -u $backup "create,receive,mount,destroy,rollback,hold,release,userprop,$ZCI_RECV_PROPS" "$ZCI_POOL_DST/job_user"
   config job_user "source=zsync-cij@localhost
@@ -506,7 +506,7 @@ case_setup() {
   check "Config: Quelle mit Jobbenutzer" grep -qx "source=zsync-$sjob@localhost" "$conf"
   check "Config: neue Defaults (strict)" grep -qx 'zfs_auto_snapshot_label_match=strict' "$conf"
   equal "Tag gesetzt" all "$(prop "$ZCI_POOL_SRC/data" bashclub:zsync)"
-  check "Jobbenutzer auf der Quelle mit command=" grep -q 'command="/usr/bin/bashclub-zsync-remote"' "/var/lib/bashclub-zsync-source/$sjob/.ssh/authorized_keys"
+  check "Jobbenutzer auf der Quelle mit command=" grep -q 'command="/usr/bin/bashclub-zsync-remote[ "]' "/var/lib/bashclub-zsync-source/$sjob/.ssh/authorized_keys"
   check "Rechte nur auf dem Ziel" grep -q "user zsync-zci-setup " <<< "$(zfs allow "$ZCI_POOL_DST/setup")"
   check "Timer aktiv" systemctl is-active --quiet bashclub-zsync@$name.timer
   systemctl start bashclub-zsync@$name.service
@@ -516,6 +516,15 @@ case_setup() {
   check "Setup: Jobbenutzer ohne Recht auf mountpoint" not grep -qE "(^|,)mountpoint(,|$)" <<< "$(zfs allow "$ZCI_POOL_DST/setup" | awk '/user zsync-zci-setup/ { print $3 }')"
   equal "ein Snapshot repliziert" 1 "$(zfs list -H -o name -t snapshot "$ZCI_POOL_DST/setup/$ZCI_POOL_SRC/data" 2>/dev/null | wc -l)"
   check "nicht getaggtes Dataset nicht repliziert" not exists "$ZCI_POOL_DST/setup/$ZCI_POOL_SRC/other"
+  # Schlüssel nur für die Snapshots, den Hold-Tag und das Bookmark dieses Jobs
+  check "command= mit Label und Job-Tag" grep -qF -- "--label zsync-$host --job-tag zsync_${host}_$(tr / _ <<< "$ZCI_POOL_DST/setup")" "/var/lib/bashclub-zsync-source/$sjob/.ssh/authorized_keys"
+  zfs snapshot "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-2026-01-01-0000"; zfs snapshot "$ZCI_POOL_SRC/data@zsync-$host-2000-01-01-0000"
+  local ssh_job="ssh -o BatchMode=yes zsync-$sjob@localhost"
+  check "fremder Snapshot nicht löschbar" not su - zsync-zci-setup -c "$ssh_job zfs destroy $ZCI_POOL_SRC/data@zfs-auto-snap_daily-2026-01-01-0000"
+  check "fremder Snapshot noch da" exists "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-2026-01-01-0000"
+  check "eigener Snapshot löschbar" su - zsync-zci-setup -c "$ssh_job zfs destroy $ZCI_POOL_SRC/data@zsync-$host-2000-01-01-0000"
+  check "fremder Hold-Tag abgewiesen" not su - zsync-zci-setup -c "$ssh_job zfs release other-tag $ZCI_POOL_SRC/data@zfs-auto-snap_daily-2026-01-01-0000"
+  check "Bookmark des Jobs angelegt" grep -q "#zsync_${host}_" <<< "$(zfs list -H -o name -t bookmark -r "$ZCI_POOL_SRC")"
   check "vorhandene Config wird nicht überschrieben" not bashclub-zsync-setup -y -s localhost $name
   zfs create -o mountpoint=/zci/mounted "$ZCI_POOL_DST/mounted"
   check "Ziel mit mountpoint für Jobbenutzer abgewiesen" not bashclub-zsync-setup -y -s localhost -t "$ZCI_POOL_DST/mounted" --login root zci-setup6

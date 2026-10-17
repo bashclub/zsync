@@ -248,7 +248,10 @@ if [ $as_root -eq 0 ]; then
     [[ $key =~ ^ssh-ed25519\ [A-Za-z0-9+/]+={0,2}(\ [A-Za-z0-9_.@:-]+)?$ ]] || die "unexpected public key: $key"
     step "user $source_user on $source"
     # from: the address of this host as the source sees it (SSH_CLIENT of the setup connection)
-    "${ssh_setup[@]}" /usr/sbin/bashclub-zsync-job-user add "$source_job" '"${SSH_CLIENT%% *}"' "$key" || die "setting up $source_user on $source failed"
+    # only the snapshots of this label, the hold tag and bookmark of this job (as bashclub-zsync names them)
+    job_tag="zsync_${host}_${target//\//_}"
+    "${ssh_setup[@]}" /usr/sbin/bashclub-zsync-job-user add --label "$label" --job-tag "$job_tag" "$source_job" '"${SSH_CLIENT%% *}"' "$key" \
+        || die "setting up $source_user on $source failed"
     if [[ -n $tag_datasets ]]; then
         for ds in $tag_datasets; do
             step "tag $tag=all on $source:$ds"

@@ -326,13 +326,14 @@ test -f /var/lib/zsync/.ssh/id_ed25519 || su - zsync -c 'install -d -m 700 ~/.ss
     chown zsync: /var/lib/zsync/.ssh/authorized_keys; chmod 600 /var/lib/zsync/.ssh/authorized_keys
     for p in \$(zpool list -H -o name); do zfs allow -u zsync send,snapshot,destroy,mount,hold,release,bookmark \$p; done" )
 ~~~
-4. Restrict the key to the commands of bashclub-zsync (`command=`) and to the address of this backup server (`from=`, as the source sees it). Installs the package `bashclub-zsync-source` on the source, which needs the bashclub package source there as for `bashclub-zsync`:
+4. Restrict the key to the commands of bashclub-zsync (`command=`), to the snapshots, hold tag and bookmark of this configuration (`--label`, `--job-tag`) and to the address of this backup server (`from=`, as the source sees it). Installs the package `bashclub-zsync-source` on the source, which needs the bashclub package source there as for `bashclub-zsync`:
 ~~~
 ( . "$conf"; key=$(cat /var/lib/zsync/.ssh/id_ed25519.pub)
+  limits="--label $zfs_auto_snapshot_label --job-tag zsync_$(hostname -s)_${target//\//_}"
   ssh -p "$sshport" "$source" "apt-get install -y bashclub-zsync-source > /dev/null || exit 1
     keys=/var/lib/zsync/.ssh/authorized_keys
     grep -vF '${key#* }' \$keys > \$keys.new
-    echo \"restrict,from=\\\"\${SSH_CLIENT%% *}\\\",command=\\\"/usr/bin/bashclub-zsync-remote\\\" $key\" >> \$keys.new
+    echo \"restrict,from=\\\"\${SSH_CLIENT%% *}\\\",command=\\\"/usr/bin/bashclub-zsync-remote $limits\\\" $key\" >> \$keys.new
     chown zsync: \$keys.new; chmod 600 \$keys.new; mv \$keys.new \$keys; grep -F '${key#* }' \$keys" )
 ~~~
 5. Switch the configuration to the user and test the connection:
@@ -351,7 +352,7 @@ install -d -m 3775 -g bashclub-zsync /var/lib/check_mk_agent/spool
 ~~~
 The snapshot engine `zas` (zfs-auto-snapshot on the source) also works as user `zsync` with these permissions.
 
-With `command=` the user `zsync` on the source cannot open a shell: `bashclub-zsync-remote` runs only the commands bashclub-zsync, remote-snapshot-manager and checkzfs send (zfs list/get/send/snapshot/hold/release/bookmark, destroy only of snapshots and bookmarks, the checkzfs spool), without a shell. Denied commands end with exit code 126 and are logged to syslog: `journalctl -t bashclub-zsync-remote`.
+With `command=` the user `zsync` on the source cannot open a shell: `bashclub-zsync-remote` runs only the commands bashclub-zsync, remote-snapshot-manager and checkzfs send (zfs list/get/send, the checkzfs spool), without a shell. With `--label` and `--job-tag` it creates and destroys only the snapshots of this label (`<label>-YYYY-MM-DD-HHMM`, with zas `zfs-auto-snap_<label>-...`) and uses only this hold tag and bookmark: a backup server that is taken over cannot destroy the other snapshots of the source (zfs-auto-snapshot, other backup servers, manual ones). After changing `zfs_auto_snapshot_label` or `target` run the block again. Denied commands end with exit code 126 and are logged to syslog: `journalctl -t bashclub-zsync-remote`.
 
 ### Users per replication job on the source
 With the package `bashclub-zsync-source` on the source each replication job gets its own user `zsync-<job>`: its key only works from the address of its backup server, only runs the commands of bashclub-zsync (`command=`, see above) and it may only read the datasets selected by the tag of its configuration. Another backup server or configuration cannot use it. The package also creates the management user `zsync`, which may only run `bashclub-zsync-job-user` with sudo (no password, login only with a key), so a setup tool needs no root access to the source.
@@ -362,7 +363,8 @@ conf=/etc/bashclub/zsync.conf
 ( . "$conf"; job=$(echo "$(hostname -s)-$(basename "$conf" .conf)" | tr 'A-Z_.' 'a-z--' | cut -c1-26)
   key=$(cat /var/lib/zsync/.ssh/id_ed25519.pub)
   ssh -p "$sshport" "$source" "apt-get install -y bashclub-zsync-source > /dev/null || exit 1
-    bashclub-zsync-job-user add $job \${SSH_CLIENT%% *} $key && bashclub-zsync-job-user allow $job $tag" || exit 1
+    bashclub-zsync-job-user add --label $zfs_auto_snapshot_label --job-tag zsync_$(hostname -s)_${target//\//_} $job \${SSH_CLIENT%% *} $key \
+      && bashclub-zsync-job-user allow $job $tag" || exit 1
   sed -i "s|^source=.*|source=zsync-$job@${source#*@}|" "$conf"
   su - zsync -c "ssh -p $sshport -o StrictHostKeyChecking=accept-new zsync-$job@${source#*@} zfs get -H -o name,value $tag" | head -n 3 )
 ~~~
