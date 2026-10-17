@@ -27,7 +27,7 @@ for sc in "$here"/scenarios/*.sh; do
   echo "exit=$?" >> "$out/$n.calls"
   declare -F after_run > /dev/null && after_run "$w"
   # Zeitstempel, Arbeitsverzeichnis (auch im Namen der Sperrdatei) und Zufallsteil der temporären Spooldatei
-  sed -i -E "s#^[A-Z][a-z]{2} [ 0-9][0-9] [0-9:]{8} ##; s#$w#<dir>#g; s#zsync_$(hostname -s)_#zsync_<host>_#g; s#${w//\//_}#<dir>#g; s#(/\.[0-9]+_[^ /]+)\.[A-Za-z0-9]{6}([^A-Za-z0-9]|\$)#\1.XXXXXX\2#g" "$out/$n.log" "$out/$n.calls"
+  sed -i -E "s#^[A-Z][a-z]{2} [ 0-9][0-9] [0-9:]{8} ##; s#$w#<dir>#g; s#zsync_$(hostname -s)_#zsync_<host>_#g; s#zsync-branch-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}#zsync-branch-<datum>#g; s#zsync-branch=[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4};#zsync-branch=<datum>;#g; s#${w//\//_}#<dir>#g; s#(/\.[0-9]+_[^ /]+)\.[A-Za-z0-9]{6}([^A-Za-z0-9]|\$)#\1.XXXXXX\2#g" "$out/$n.log" "$out/$n.calls"
   cp "$w/zsync.conf" "$out/$n.conf" 2>/dev/null
   { for f in /run/bashclub-zsync/*/* /var/lib/bashclub-zsync/*/*; do
       [ -e "$f" ] || continue

@@ -11,6 +11,8 @@
 #                                                    rename (the next run replicates again, the old replica stays)
 #                                                    / delete (the next run replicates again) / later
 #   leftovers  snapshots of the label in another name scheme on the target (#3)            delete / later
+#   branch     old chain after a rollback on the source (#65), the replication continues on the new chain
+#                                                    keep (bashclub:zsync-orphan=keep) / delete / later
 
 PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
 prog=$(basename "$0")
@@ -72,11 +74,12 @@ function cases() {
                 case $state in
                     orphan_missing|orphan_unselected) type=orphan ;;
                     broken|empty) type=broken ;;
+                    branch) type=branch ;;
                     *) continue ;;
                 esac
                 zfs list "$replica" > /dev/null 2>&1 || continue
                 # kept since the last run
-                [[ $type == orphan && $(zfs get -H -o value bashclub:zsync-orphan "$replica" 2>/dev/null) == "keep" ]] && continue
+                [[ $type == orphan || $type == branch ]] && [[ $(zfs get -H -o value bashclub:zsync-orphan "$replica" 2>/dev/null) == "keep" ]] && continue
                 id=$(printf '%s|%s|%s' "$conf" "$type" "$replica" | sha1sum | cut -c1-8)
                 printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$conf" "$type" "$replica" "$since" "${detail//$'\t'/ }"
             done < "$file"
@@ -93,7 +96,7 @@ function cases() {
 
 function options_of() {
     case $1 in
-        orphan) echo "keep delete later" ;;
+        orphan|branch) echo "keep delete later" ;;
         broken) echo "rename delete later" ;;
         leftovers) echo "delete later" ;;
     esac
@@ -103,8 +106,8 @@ function options_of() {
 function commands_of() {
     local conf=$1 type=$2 replica=$3 option=$4 target
     case $type:$option in
-        orphan:keep) printf 'zfs\tset\tbashclub:zsync-orphan=keep\t%s\n' "$replica" ;;
-        orphan:delete|broken:delete) printf 'zfs\tdestroy\t-r\t%s\n' "$replica" ;;
+        orphan:keep|branch:keep) printf 'zfs\tset\tbashclub:zsync-orphan=keep\t%s\n' "$replica" ;;
+        orphan:delete|broken:delete|branch:delete) printf 'zfs\tdestroy\t-r\t%s\n' "$replica" ;;
         broken:rename) printf 'zfs\trename\t%s\t%s\n' "$replica" "$replica.broken-$(date +%Y-%m-%d)" ;;
         leftovers:delete)
             target=$(conf_value "$conf" target)

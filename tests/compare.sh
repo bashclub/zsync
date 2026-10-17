@@ -4,7 +4,7 @@
 # create, set, unmount, Snapshots, checkzfs, scp, Exit-Code), dann alle Aufrufe und die Logs.
 # Aufruf: tests/compare.sh <alt> <neu>
 old=$1 new=$2
-changing='^(source|target): zfs (send|receive|destroy|create|set|unmount|rollback|snapshot|bookmark|hold|release)|^(remote-snapshot-manager|zfs-auto-snapshot|checkzfs|scp|pv) |^ssh \[[^]]*\] [^:]*: (cat >|mv )|^exit='
+changing='^(source|target): zfs (send|receive|destroy|create|set|unmount|rollback|clone|promote|rename|snapshot|bookmark|hold|release)|^(remote-snapshot-manager|zfs-auto-snapshot|checkzfs|scp|pv) |^ssh \[[^]]*\] [^:]*: (cat >|mv )|^exit='
 for f in "$old"/*.calls; do
   n=$(basename "$f" .calls)
   echo "===== $n"
