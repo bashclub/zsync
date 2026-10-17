@@ -198,15 +198,24 @@ function remote() {
     fi
 }
 
-#### run status for monitoring (checkmk local check bashclub_zsync), file names from the config path
-# /run/bashclub-zsync/<config>.state      active run: pid, phase, dataset (removed at the end of the run)
-# /var/lib/bashclub-zsync/<config>.last   result of the last run and of the last successful run
-# /var/lib/bashclub-zsync/<config>.history start times of the last runs (interval for the age check)
-# /var/lib/bashclub-zsync/<config>.skipped times of runs skipped because of an active run
+#### run status for monitoring (checkmk local check bashclub_zsync), one directory per user, file names from the
+# config path; the base directories have the sticky bit, each user writes only into its own directory
+# /run/bashclub-zsync/<user>/<config>.state        active run: pid, phase, dataset (removed at the end of the run)
+# /var/lib/bashclub-zsync/<user>/<config>.last     result of the last run and of the last successful run
+# /var/lib/bashclub-zsync/<user>/<config>.history  start times of the last runs (interval for the age check)
+# /var/lib/bashclub-zsync/<user>/<config>.skipped  times of runs skipped because of an active run
 conf_path=$(readlink -m "$conf" 2>/dev/null || echo "$conf")
 status_id=$(tr '/' '_' <<< "$conf_path")
 status_file=
-status_lib=/var/lib/bashclub-zsync/$status_id
+status_run_dir=/run/bashclub-zsync/$(id -un)
+status_lib_dir=/var/lib/bashclub-zsync/$(id -un)
+status_lib=$status_lib_dir/$status_id
+
+# own directory of this user: created if missing, used only if it is a directory of this user (not a link)
+function own_dir() {
+    mkdir -p -m 755 "$1" 2>/dev/null
+    [ -d "$1" ] && [ ! -L "$1" ] && [ -O "$1" ] && [ -w "$1" ]
+}
 
 # phase of the active run: status <phase> [dataset]
 function status() {
@@ -235,23 +244,21 @@ function finish_status() {
 }
 
 #### one run per config at a time: the script runs again under flock, a second run is skipped
+# the lock is the configuration file itself: every user that runs it can read it, it lies in a directory only root
+# writes (no lock file another user could replace), and root and run_as share it
 # flock -o: the script itself does not hold the lock, so the background ssh master
 # connection (ControlPersist) does not keep the lock after the run has finished
 # only flock from util-linux (Linux): the options -o and -E are not available everywhere
-if [[ -z $ZSYNC_LOCK ]]; then
+# without the configuration (the initial config file is created below) there is nothing to lock
+if [[ -z $ZSYNC_LOCK ]] && [[ -r $conf_path ]]; then
     if flock --version 2>/dev/null | grep -q util-linux; then
-        # /run/bashclub-zsync (group bashclub-zsync, not sticky): root and the users of the group share the lock of
-        # a configuration; in sticky directories like /run/lock the kernel (protected_regular) refuses to open a lock
-        # file of another user, e.g. after switching a configuration from root to run_as
-        lockdir=/run/bashclub-zsync
-        [ -d $lockdir ] && [ -w $lockdir ] || lockdir=/run/lock
-        [ -d $lockdir ] || lockdir=/tmp
-        export ZSYNC_LOCK=$lockdir/bashclub-zsync$(readlink -m "$conf" | tr '/' '_').lock
+        export ZSYNC_LOCK=$conf_path
         flock -n -o -E 75 "$ZSYNC_LOCK" "$BASH" "$0" "${args[@]}"
         lock_rc=$?
         if [ $lock_rc -eq 75 ]; then
-            log "[ERROR] Another run with configuration $conf is still active (pid $(cat "$ZSYNC_LOCK" 2>/dev/null)). Skipping this run."
-            if mkdir -p /var/lib/bashclub-zsync 2>/dev/null; then
+            active_pid=$(sed -n 's/^pid=//p' /run/bashclub-zsync/*/"$status_id.state" 2>/dev/null | head -1)
+            log "[ERROR] Another run with configuration $conf is still active${active_pid:+ (pid $active_pid)}. Skipping this run."
+            if own_dir "$status_lib_dir"; then
                 { tail -n 19 "$status_lib.skipped" 2>/dev/null; date +%s; } > "$status_lib.skipped.tmp" \
                     && mv -f "$status_lib.skipped.tmp" "$status_lib.skipped"
             fi
@@ -260,10 +267,6 @@ if [[ -z $ZSYNC_LOCK ]]; then
         exit $lock_rc
     fi
     log "[WARN] flock (util-linux) not found, running without protection against concurrent runs."
-else
-    # pid of the active run for the message above
-    # the lock file may belong to another user (e.g. root before switching to run_as): only the message is lost
-    { echo $$ > "$ZSYNC_LOCK"; } 2> /dev/null
 fi
 
 #### log file without logrotate (e.g. TrueNAS: cron job with ">> /mnt/<pool>/.../bashclub-zsync.log")
@@ -326,16 +329,18 @@ fi
 run_start=$(date +%s)
 datasets_total=0
 datasets_failed=0
-# without root: the package makes both directories writable for the group bashclub-zsync
-if mkdir -p /run/bashclub-zsync /var/lib/bashclub-zsync 2>/dev/null && [ -w /run/bashclub-zsync ] && [ -w /var/lib/bashclub-zsync ]; then
-    status_file=/run/bashclub-zsync/$status_id.state
+# own directories of this user below the base directories (the package lets the group bashclub-zsync create them,
+# root creates the base directories on a manual installation)
+if [ "$(id -u)" -eq 0 ]; then mkdir -p /run/bashclub-zsync /var/lib/bashclub-zsync 2>/dev/null; fi
+if own_dir "$status_run_dir" && own_dir "$status_lib_dir"; then
+    status_file=$status_run_dir/$status_id.state
     # start time of the process, to tell a reused pid apart
     pid_start=$(sed 's/.*) //' /proc/$$/stat 2>/dev/null | cut -d' ' -f20)
     { tail -n 10 "$status_lib.history" 2>/dev/null; echo $run_start; } > "$status_lib.history.tmp" \
         && mv -f "$status_lib.history.tmp" "$status_lib.history"
     status start
 else
-    log "[WARN] /run/bashclub-zsync or /var/lib/bashclub-zsync is not writable for $(id -un) (add it to the group bashclub-zsync), no run status for the monitoring."
+    log "[WARN] $status_run_dir or $status_lib_dir cannot be used by $(id -un) (missing, of another user, or $(id -un) is not in the group bashclub-zsync), no run status for the monitoring."
 fi
 
 # end of the run (also on errors): release the holds on the source, write the result for the monitoring
@@ -927,6 +932,7 @@ if [ $checkzfs_disabled -eq 0 ]; then
     status checkzfs
     spooldir=/var/lib/check_mk_agent/spool
     spoolname=${checkzfs_spool_maxage}_${checkzfs_prefix}
+    # temporary file of this run, created exclusively (never through a link of another user)
     spoolfile=$(mktemp /tmp/.$spoolname.XXXXXX)
     spooltmp=$spooldir/$(basename $spoolfile)
     echo "<<<local>>>" > $spoolfile
@@ -943,7 +949,11 @@ if [ $checkzfs_disabled -eq 0 ]; then
     if [ $checkzfs_spool -eq 0 ] || [ $checkzfs_local -gt 0 ]; then
         mkdir -p $spooldir 2>/dev/null
         if [ -w $spooldir ]; then
-            mv $spoolfile $spooltmp && mv $spooltmp $spooldir/$spoolname
+            # the spool may be writable for the group bashclub-zsync: a new file of its own in the spool (mktemp),
+            # then renamed, both never follow a link
+            spooltmp=$(mktemp $spooldir/.$spoolname.XXXXXX) && cat $spoolfile > $spooltmp && chmod 644 $spooltmp \
+                && mv -f $spooltmp $spooldir/$spoolname
+            rm -f $spoolfile
         else
             log "[WARN] $spooldir is not writable for $(id -un), the checkzfs output is not stored."
             rm -f $spoolfile

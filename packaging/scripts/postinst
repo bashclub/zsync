@@ -2,14 +2,24 @@
 
 PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
 
-# group for running bashclub-zsync without root: logs, run status and /run/bashclub-zsync are writable for it
-getent group bashclub-zsync > /dev/null || groupadd --system bashclub-zsync
-install -d -m 2775 -o root -g bashclub-zsync /var/log/bashclub-zsync /var/lib/bashclub-zsync
-if command -v systemd-tmpfiles > /dev/null && [ -d /run/systemd/system ]; then
-  systemd-tmpfiles --create /usr/lib/tmpfiles.d/bashclub-zsync.conf
-else
-  install -d -m 2775 -o root -g bashclub-zsync /run/bashclub-zsync
+# log folder only for root (logrotate rotates only in folders that no other user or group may write), as in 1.0.19;
+# a folder made writable for the group by a testing version before 2.0 gets these permissions back
+if [ ! -d /var/log/bashclub-zsync ] || [ "$(stat -c %G /var/log/bashclub-zsync)" = bashclub-zsync ] || [ -g /var/log/bashclub-zsync ]; then
+  install -d -o root -g root /var/log/bashclub-zsync
+  # five digits: also removes the setgid bit of the testing version (a numeric mode keeps it otherwise)
+  chmod 00755 /var/log/bashclub-zsync
 fi
+
+# group for running bashclub-zsync without root: its users create their own folder of the run status
+# (/run/bashclub-zsync/<user>, /var/lib/bashclub-zsync/<user>); sticky bit: no one changes the folder of another user
+getent group bashclub-zsync > /dev/null || groupadd --system bashclub-zsync
+install -d -o root -g bashclub-zsync /var/lib/bashclub-zsync /run/bashclub-zsync
+install -d -o root -g root /var/lib/bashclub-zsync/root /run/bashclub-zsync/root
+chmod 01775 /var/lib/bashclub-zsync /run/bashclub-zsync
+chmod 00755 /var/lib/bashclub-zsync/root /run/bashclub-zsync/root
+# /run is created again at boot by systemd-tmpfiles (tmpfiles.d/bashclub-zsync.conf)
+# status files of testing versions before 2.0 directly in the base folders (now one folder per user)
+find /var/lib/bashclub-zsync /run/bashclub-zsync -maxdepth 1 -type f -delete 2> /dev/null
 
 chown root:root /usr/bin/bashclub-zsync
 chmod 755 /usr/bin/bashclub-zsync

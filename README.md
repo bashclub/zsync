@@ -277,7 +277,7 @@ The interval is the median of the start intervals of the last 10 runs, so it nee
 The age of the replicated snapshots per dataset is still checked by checkzfs.
 
 ### State of the datasets
-`bashclub-zsync` records a state per dataset in `/var/lib/bashclub-zsync/<config>.datasets` and logs a copyable fix:
+`bashclub-zsync` records a state per dataset in `/var/lib/bashclub-zsync/<user>/<config>.datasets` and logs a copyable fix:
 - **no common snapshot with the source**: either the rotation on the source has deleted all snapshots of the replica (the replication was stopped longer than the snapshots are kept), or the dataset was created again on the source. Only a full replication helps; rename the replica to keep it, the next run replicates again: `zfs rename <replica> <replica>.broken-<date>`
 - **chain at risk**: the replication of a dataset failed and its base is the oldest snapshot of its interval on the source; with the next rotation there is no common snapshot anymore
 - **rotation on the target blocked**: the oldest source snapshot of an interval is missing on the target (e.g. a leftover snapshot of another engine with the same label, see [Snapshot label](#snapshot-label-and-snapshot-engine)), so zsync deletes no snapshots of this interval on the target. The replication itself succeeded, the run is not failed; the monitoring warns until the snapshot is gone.
@@ -289,7 +289,7 @@ A failing dataset never stops the run: all other datasets are replicated, the er
 - `1`: at least one dataset was not replicated, or the run stopped at once because nothing can be replicated: wrong configuration (empty `source`), the source is not reachable, or the same configuration is already running (the run is skipped).
 
 ### Running without root
-`bashclub-zsync` can run as an unprivileged user on the backup server and log in to the source as an unprivileged user. Both only get the ZFS permissions they need (`zfs allow`), there is no root login on the source anymore. On Linux only root may mount, so the replicas are received without mounting (`zfs receive -u`); the package makes logs and run status writable for the group `bashclub-zsync`.
+`bashclub-zsync` can run as an unprivileged user on the backup server and log in to the source as an unprivileged user. Both only get the ZFS permissions they need (`zfs allow`), there is no root login on the source anymore. On Linux only root may mount, so the replicas are received without mounting (`zfs receive -u`); the users of the group `bashclub-zsync` write the run status into their own folder (`/var/lib/bashclub-zsync/<user>`), logs go to the journal or to the log file systemd opens for them.
 
 Run the following blocks as root on the backup server, once per configuration. They read target, source and port from the configuration and set up the source over the existing root access.
 
@@ -328,15 +328,14 @@ test -f /var/lib/zsync/.ssh/id_ed25519 || su - zsync -c 'install -d -m 700 ~/.ss
 ( . "$conf"; sed -i "s|^source=.*|source=zsync@${source#*@}|" "$conf"
   su - zsync -c "ssh -p $sshport -o StrictHostKeyChecking=accept-new zsync@${source#*@} zfs list -H -o name" | head -n 3 )
 ~~~
-6. Logs of earlier root runs writable for the group, the timer or the cron job runs as `zsync`:
+6. Run as `zsync` with a systemd timer: cron jobs of this configuration are taken over (schedule and log file), then the timer runs as `zsync`. systemd opens the log file as root, the log folder stays writable only for root:
 ~~~
-chgrp bashclub-zsync /var/log/bashclub-zsync/*.log 2> /dev/null; chmod g+w /var/log/bashclub-zsync/*.log 2> /dev/null
-sed -i -E 's#^([^#].*[[:space:]])root([[:space:]]+/usr/bin/bashclub-zsync)#\1zsync\2#' /etc/cron.d/bashclub-zsync 2> /dev/null
-systemctl is-enabled --quiet "bashclub-zsync@$(basename "$conf" .conf).timer" 2> /dev/null && bashclub-zsync-timer enable "$(basename "$conf" .conf)" --user zsync
+bashclub-zsync-timer migrate "$(basename "$conf" .conf)"
+bashclub-zsync-timer enable "$(basename "$conf" .conf)" --user zsync
 ~~~
 The checkzfs output goes to the checkmk spool `/var/lib/check_mk_agent/spool` (with `checkzfs_spool=1` on the source). It belongs to root; `bashclub-zsync` logs a warning and skips it until the group may write there:
 ~~~
-install -d -m 2775 -g bashclub-zsync /var/lib/check_mk_agent/spool
+install -d -m 3775 -g bashclub-zsync /var/lib/check_mk_agent/spool
 ~~~
 The snapshot engine `zas` (zfs-auto-snapshot on the source) also works as user `zsync` with these permissions.
 
@@ -359,7 +358,7 @@ Then continue with block 6 of [Running without root](#running-without-root). On 
 - `bashclub-zsync-job-user list` shows the job users with address and datasets
 - `bashclub-zsync-job-user allow <job> <tag>` again after tagging more datasets (permissions follow the tag)
 - `bashclub-zsync-job-user remove <job>` removes user and permissions
-- for the checkzfs spool on the source (`checkzfs_spool=1`) the job users are in the group `bashclub-zsync`: `install -d -m 2775 -g bashclub-zsync /var/lib/check_mk_agent/spool`
+- for the checkzfs spool on the source (`checkzfs_spool=1`) the job users are in the group `bashclub-zsync`: `install -d -m 3775 -g bashclub-zsync /var/lib/check_mk_agent/spool`
 
 Only `ssh-ed25519` keys are accepted.
 

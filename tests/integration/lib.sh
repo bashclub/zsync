@@ -46,7 +46,7 @@ reset_pools() {
     -O mountpoint=/zci/src "$ZCI_POOL_SRC" "$ZCI_DISK_SRC"
   zpool create -f -o ashift=12 -O compression=lz4 -O com.sun:auto-snapshot=false \
     -O mountpoint=none "$ZCI_POOL_DST" "$ZCI_DISK_DST"
-  rm -rf "$CONF_DIR" "$LIB_DIR"/_etc_zsync-ci_* "$RUN_DIR"/_etc_zsync-ci_*
+  rm -rf "$CONF_DIR" "$LIB_DIR"/*/_etc_zsync-ci_* "$RUN_DIR"/*/_etc_zsync-ci_*
   mkdir -p "$CONF_DIR" /var/log/zsync-ci
 }
 
@@ -124,5 +124,7 @@ snaps() { zfs list -H -o name -t snapshot -s creation "$1" 2>/dev/null | sed 's/
 guid() { zfs get -H -o value guid "$1" 2>/dev/null; }
 exists() { zfs list "$1" > /dev/null 2>&1; }
 prop() { zfs get -H -o value "$2" "$1" 2>/dev/null; }
-state_of() { awk -F'\t' -v d="$1" '$1 == d { print $2 }' "$LIB_DIR/$id.datasets" 2>/dev/null; }
+# Status-Dateien des Falls (Ordner des Benutzers, der lief): status_path <endung>
+status_path() { ls "$LIB_DIR"/*/"$id.$1" "$RUN_DIR"/*/"$id.$1" 2>/dev/null | head -1; }
+state_of() { awk -F'\t' -v d="$1" '$1 == d { print $2 }' "$(status_path datasets)" 2>/dev/null; }
 check_output() { "$CHECK" | grep "\"zsync $(basename "$conf" .conf)\""; }

@@ -28,7 +28,7 @@ for sc in "$here"/scenarios/*.sh; do
   # Zeitstempel, Arbeitsverzeichnis (auch im Namen der Sperrdatei) und Zufallsteil der temporären Spooldatei
   sed -i -E "s#^[A-Z][a-z]{2} [ 0-9][0-9] [0-9:]{8} ##; s#$w#<dir>#g; s#zsync_$(hostname -s)_#zsync_<host>_#g; s#${w//\//_}#<dir>#g; s#(/\.[0-9]+_[^ /]+)\.[A-Za-z0-9]{6}([^A-Za-z0-9]|\$)#\1.XXXXXX\2#g" "$out/$n.log" "$out/$n.calls"
   cp "$w/zsync.conf" "$out/$n.conf" 2>/dev/null
-  { for f in /run/bashclub-zsync/* /var/lib/bashclub-zsync/*; do
+  { for f in /run/bashclub-zsync/*/* /var/lib/bashclub-zsync/*/*; do
       [ -e "$f" ] || continue
       echo "== ${f##*.} ($(grep -c . "$f") Zeilen)"
       grep -E '^(config|rc|datasets|datasets_failed|phase|ok_end)=' "$f" | sed -E 's/^(ok_end=)[0-9]+$/\1<zeit>/'

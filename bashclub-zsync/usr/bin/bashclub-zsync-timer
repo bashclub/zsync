@@ -20,7 +20,7 @@ usage: $prog list
        $prog enable <name> [<schedule>] [--user <user>] [--log <file>]
        $prog disable <name>
        $prog sync [--dry-run]
-       $prog migrate [--dry-run]
+       $prog migrate [--dry-run] [<name>]
 
     <name>          configuration /etc/bashclub/<name>.conf, timer bashclub-zsync@<name>.timer
     <schedule>      cron format, e.g. "*/15 6-22 * * 1-5", "0 23 * * *" or @daily, several separated by ";"
@@ -30,8 +30,8 @@ usage: $prog list
     enable          writes trigger=systemd (and the given settings) into the configuration and runs sync
     disable         writes trigger=cron into the configuration and runs sync (the timer stops)
     sync            reads all configurations and starts, updates or stops their timers
-    migrate         take over cron jobs that run bashclub-zsync -c /etc/bashclub/<name>.conf:
-                    schedule, user and log file into the configuration, comment out the cron line, sync
+    migrate         take over cron jobs that run bashclub-zsync -c /etc/bashclub/<name>.conf (all configurations
+                    or only <name>): schedule, user and log file into the configuration, comment out the cron line, sync
 EOF
     exit 1
 }
@@ -204,10 +204,17 @@ cron_jobs() {
 }
 
 cmd_migrate() {
-    local dry=0 file n schedule conf user log name todo=() names=() entry schedules
-    [[ $1 == --dry-run ]] && dry=1
+    local dry=0 only= file n schedule conf user log name todo=() names=() entry schedules
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --dry-run) dry=1 ;;
+            *) only=$1 ;;
+        esac
+        shift
+    done
     while IFS=$'\t' read -r file n schedule conf user log; do
         name=$(basename "$conf" .conf)
+        [[ -z $only || $name == "$only" ]] || continue
         if [[ $(dirname "$conf") != "$conf_dir" ]]; then
             echo "skip  $file:$n: $conf is not in $conf_dir (the timer needs $conf_dir/<name>.conf)"; continue
         fi
