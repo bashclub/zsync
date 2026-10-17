@@ -29,7 +29,7 @@ case_replication() {
   for d in data data/child vol enc; do
     equal "Delta $d: Snapshots am Ziel" "zfs-auto-snap_daily-01 zfs-auto-snap_daily-02 zfs-auto-snap_daily-03" "$(snaps "$ZCI_POOL_DST/replication/$ZCI_POOL_SRC/$d")"
   done
-  equal "Status: letzter Lauf erfolgreich" "rc=0" "$(grep '^rc=' "$LIB_DIR/$id.last")"
+  equal "Status: letzter Lauf erfolgreich" "rc=0" "$(grep '^rc=' "$(status_path last)")"
 }
 
 # Snapshot-Engine internal (remote-snapshot-manager über ssh auf localhost)
@@ -289,8 +289,15 @@ transfer_resume=1"
   equal "nicht eingehängt" no "$(prop "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/subvol-100-disk-0" mounted)"
   equal "keine Holds übrig" "" "$(zfs list -H -o name -t snapshot -r "$ZCI_POOL_SRC" | xargs zfs holds -H | grep zsync_)"
   check "Bookmarks angelegt" test "$(zfs list -H -o name -t bookmark -r "$ZCI_POOL_SRC" | wc -l)" -ge 3
-  equal "Status für das Monitoring geschrieben" "rc=0" "$(grep '^rc=' "$LIB_DIR/$id.last")"
-  check "keine Warnung zu Rechten im Log" not grep -q 'not writable' "$log"
+  equal "Status für das Monitoring geschrieben" "rc=0" "$(grep '^rc=' "$(status_path last)")"
+  check "keine Warnung zu Rechten im Log" not grep -q 'not writable\|cannot be used' "$log"
+  check "Status im eigenen Ordner des Benutzers" test -f "$LIB_DIR/$user/$id.last"
+  check "Checkmk: Service aus dem Ordner des Benutzers" grep -q '"zsync unprivileged"' <<< "$("$CHECK")"
+  # Sperre auf der Config: auch über Benutzer hinweg läuft nur ein Lauf
+  su $user -c "flock $conf sleep 8" & sleep 1
+  zsync; local lock_rc=$rc; wait
+  equal "Lauf von root, während $user die Config sperrt: übersprungen" 1 "$lock_rc"
+  check "Meldung: anderer Lauf aktiv" grep -q "Another run with configuration $conf is still active" <(last_run_log)
 }
 
 # systemd-Timer (#12): echter Timer und Dienst, Checkmk liest das Intervall aus dem Timer, Migration von Cronjobs
@@ -344,7 +351,11 @@ case_timer() {
   check "Probelauf: Cron-Zeitplan übernommen" grep -qF 'schedule="*/15 6-22 * * 1-5"' <<< "$plan"
   check "Probelauf: cron.daily mit Debian-Zeit" grep -qF 'schedule="25 6 * * *"' <<< "$plan"
   equal "Probelauf ändert nichts" "$before" "$(cat $crondir/cron.d/zsync $crondir/cron.daily/zsync "$tconf" | md5sum)"
-  ZSYNC_CRON_DIRS="$crondir/cron.d $crondir/cron.daily" bashclub-zsync-timer migrate > /dev/null
+  # Cronjob einer anderen Config bleibt, wenn nur diese übernommen wird
+  echo "0 2 * * * root /usr/bin/bashclub-zsync -c $lconf" > $crondir/cron.d/legacy
+  ZSYNC_CRON_DIRS="$crondir/cron.d $crondir/cron.daily" bashclub-zsync-timer migrate $name > /dev/null
+  check "migrate <name>: andere Config unverändert" grep -q '^0 2 \* \* \* root' $crondir/cron.d/legacy
+  check "migrate <name>: andere Config ohne trigger" not grep -q '^trigger=' "$lconf"
   check "Cron-Zeile auskommentiert" grep -q '^# bashclub-zsync-timer: migrated' $crondir/cron.d/zsync
   check "cron.daily-Zeile auskommentiert" grep -q '^# bashclub-zsync-timer: migrated' $crondir/cron.daily/zsync
   check "Config: beide Zeitpläne" grep -qE '^schedule="(\*/15 6-22 \* \* 1-5;25 6 \* \* \*|25 6 \* \* \*;\*/15 6-22 \* \* 1-5)"$' "$tconf"
@@ -352,7 +363,7 @@ case_timer() {
   equal "beide Zeitpläne im Timer" 2 "$(systemctl show -p TimersCalendar --value $unit | grep -o OnCalendar= | wc -l)"
   systemctl start bashclub-zsync@$name.service
   check "Ausgabe in der übernommenen Logdatei" grep -q 'Reading configuration' /var/log/bashclub-zsync/zci-timer.log
-  check "erneute Migration findet nichts mehr" grep -q 'no cron jobs' <<< "$(ZSYNC_CRON_DIRS="$crondir/cron.d $crondir/cron.daily" bashclub-zsync-timer migrate --dry-run)"
+  check "erneute Migration findet nichts mehr" grep -q 'no cron jobs' <<< "$(ZSYNC_CRON_DIRS="$crondir/cron.d $crondir/cron.daily" bashclub-zsync-timer migrate --dry-run $name)"
   # aufräumen: ohne Config verschwindet der Timer mit sync
   rm -f "$tconf" "$lconf"
   bashclub-zsync-timer sync > /dev/null
@@ -393,7 +404,7 @@ case_restricted() {
   chown $user: $home/.ssh/authorized_keys; chmod 600 $home/.ssh/authorized_keys
   su - $user -c 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new localhost exit'
   # Spool auf der Quelle (checkzfs_spool=1) für die Gruppe beschreibbar
-  install -d -m 2775 -g bashclub-zsync /var/lib/check_mk_agent/spool
+  install -d -m 3775 -g bashclub-zsync /var/lib/check_mk_agent/spool
   zfs create "$ZCI_POOL_SRC/data"; zfs create -V 64M "$ZCI_POOL_SRC/vol"
   zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/vol"
   write "$ZCI_POOL_SRC/data" 2
@@ -595,17 +606,30 @@ case_source_unreachable() {
   equal "Exit-Code" 1 "$rc"
   check "Fehler im Log" grep -q "\[ERROR\] source root@localhost (port 1) is not reachable" <(last_run_log)
   check "nichts repliziert" not exists "$ZCI_POOL_DST/source_unreachable/$ZCI_POOL_SRC/data"
-  equal "Status: Lauf fehlgeschlagen" "rc=1" "$(grep '^rc=' "$LIB_DIR/$id.last")"
+  equal "Status: Lauf fehlgeschlagen" "rc=1" "$(grep '^rc=' "$(status_path last)")"
+}
+# Rechte der Ordner: Logs nur root (logrotate), Status-Ordner mit Sticky-Bit, je Benutzer ein eigener Ordner
+case_permissions() {
+  equal "Log-Ordner root:root 755" "root root 755" "$(stat -c '%U %G %a' /var/log/bashclub-zsync)"
+  check "logrotate rotiert die Logs" not grep -q "insecure permissions" <<< "$(logrotate -d /etc/logrotate.d/bashclub-zsync 2>&1)"
+  equal "Status-Ordner mit Sticky-Bit" "root bashclub-zsync 1775" "$(stat -c '%U %G %a' /var/lib/bashclub-zsync)"
+  equal "Laufzeit-Ordner mit Sticky-Bit" "root bashclub-zsync 1775" "$(stat -c '%U %G %a' /run/bashclub-zsync)"
+  equal "Ordner von root" "root root 755" "$(stat -c '%U %G %a' /var/lib/bashclub-zsync/root)"
+  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; snap "$ZCI_POOL_SRC/data" 01
+  config permissions; zsync
+  equal "Lauf als root: Exit-Code" 0 "$rc"
+  check "Status von root in seinem Ordner" test -f "/var/lib/bashclub-zsync/root/$id.last"
+  check "keine Status-Datei im Basisordner" test -z "$(find /var/lib/bashclub-zsync /run/bashclub-zsync -maxdepth 1 -type f)"
 }
 case_checkmk() {
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; snap "$ZCI_POOL_SRC/data" 01
   config checkmk; zsync
   local out; out=$(check_output)
   check "Service OK in der Lernphase ($out)" grep -qE '^0 "zsync checkmk" .*learning 0/5' <<< "$out"
-  check "Statusdatei des Laufs entfernt" test ! -e "$RUN_DIR/$id.state"
+  check "Statusdatei des Laufs entfernt" test -z "$(status_path state)"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable checkmk)
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable permissions checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten und Pools): ein zweiter wartet

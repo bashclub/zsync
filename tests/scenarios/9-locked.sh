@@ -23,10 +23,10 @@ DATASETS_target="backup backup/zsync backup/zsync/pool backup/zsync/pool/x"
 declare -A SNAPS_source=([pool/x]=$'pool/x@zfs-auto-snap_daily-01 601')
 declare -A SNAPS_target=([backup/zsync/pool/x]=$'backup/zsync/pool/x@zfs-auto-snap_daily-01 601')
 
-# Sperre wie das Skript bilden und halten, die Datei enthält die pid des aktiven Laufs
+# Sperre wie das Skript halten (auf der Config selbst), die pid des aktiven Laufs steht in seiner Statusdatei
 before_run() {
-  local lockdir=/run/bashclub-zsync; [ -d $lockdir ] && [ -w $lockdir ] || lockdir=/run/lock; [ -d $lockdir ] || lockdir=/tmp
-  lockfile=$lockdir/bashclub-zsync$(readlink -m "$1/zsync.conf" | tr '/' '_').lock
-  exec {lockfd}> "$lockfile"; flock -n $lockfd; echo 4242 > "$lockfile"
+  lockfile=$(readlink -m "$1/zsync.conf")
+  exec {lockfd}< "$lockfile"; flock -n $lockfd
+  mkdir -p /run/bashclub-zsync/root; printf 'config=%s\npid=4242\n' "$lockfile" > "/run/bashclub-zsync/root/$(tr '/' '_' <<< "$lockfile").state"
 }
-after_run() { exec {lockfd}>&-; rm -f "$lockfile"; }
+after_run() { exec {lockfd}<&-; }

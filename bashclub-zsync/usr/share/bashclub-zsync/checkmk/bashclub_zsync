@@ -7,12 +7,16 @@
 # The status files are written by the runs, also by unprivileged users: they are data, never code. The check
 # reads settings from the configuration as text (never runs it), accepts only a configuration file that
 # belongs to root and that no one else may write, and uses only numbers that are numbers.
-#   /run/bashclub-zsync/<config>.state       active run: pid, phase, dataset
-#   /var/lib/bashclub-zsync/<config>.last    result of the last run and of the last successful run
-#   /var/lib/bashclub-zsync/<config>.history start times of the last runs
-#   /var/lib/bashclub-zsync/<config>.skipped times of runs skipped because of an active run
-#   /var/lib/bashclub-zsync/<config>.datasets state per dataset: dataset, state, since, detail
-#   /var/lib/bashclub-zsync/<config>.check   state of this check (transfer progress, blocked processes)
+# One folder per user that runs bashclub-zsync (only folders whose owner has the name of the folder count); the
+# status of a configuration is taken from the folder of its run_as user, otherwise root, otherwise the user with
+# the newest result (e.g. a cron job of another user):
+#   /run/bashclub-zsync/<user>/<config>.state       active run: pid, phase, dataset
+#   /var/lib/bashclub-zsync/<user>/<config>.last    result of the last run and of the last successful run
+#   /var/lib/bashclub-zsync/<user>/<config>.history start times of the last runs
+#   /var/lib/bashclub-zsync/<user>/<config>.skipped times of runs skipped because of an active run
+#   /var/lib/bashclub-zsync/<user>/<config>.datasets state per dataset: dataset, state, since, detail
+#   /var/lib/bashclub-zsync/root/<config>.check     state of this check (transfer progress, blocked processes),
+#                                                   written only into this folder of root
 #
 # Checks:
 #   age of the last successful run   not for removable disks (trigger=autorun or zsync-autorun@) without monitor_max_age;
@@ -34,6 +38,7 @@
 
 RUN_DIR=${ZSYNC_RUN_DIR:-/run/bashclub-zsync}
 LIB_DIR=${ZSYNC_LIB_DIR:-/var/lib/bashclub-zsync}
+CHECK_DIR=${ZSYNC_CHECK_DIR:-$LIB_DIR/root}
 PROC=${ZSYNC_PROC:-/proc}
 SYSTEMCTL=${ZSYNC_SYSTEMCTL:-systemctl}
 CONF_DIR=${ZSYNC_CONF_DIR:-/etc/bashclub}
@@ -151,19 +156,49 @@ function raise() {
 }
 function level_mark() { case $1 in 1) echo " (!)" ;; 2) echo " (!!)" ;; esac; }
 
-ids=$( { ls "$RUN_DIR" "$LIB_DIR" 2>/dev/null; } | sed -nE 's/\.(state|last|history)$//p' | sort -u)
+# names of the user folders below $1 whose owner has the name of the folder
+function user_dirs() {
+    local d
+    for d in "$1"/*/; do
+        d=${d%/}
+        if [[ -d $d ]] && [[ ! -L $d ]] && [[ $(stat -c %U "$d" 2>/dev/null) == "${d##*/}" ]]; then echo "${d##*/}"; fi
+    done
+}
+
+users=$( { user_dirs "$RUN_DIR"; user_dirs "$LIB_DIR"; } | sort -u | paste -sd' ')
+ids=$(for u in $users; do ls "$RUN_DIR/$u" "$LIB_DIR/$u" 2>/dev/null; done | sed -nE 's/\.(state|last|history)$//p' | sort -u)
 for id in $ids; do
     declare -A st=() last=() chk=()
-    read_file "$RUN_DIR/$id.state" st
-    read_file "$LIB_DIR/$id.last" last
-    read_file "$LIB_DIR/$id.check" chk
-    conf=${st[config]:-${last[config]}}
+    # configuration: from a status file of any user, it has to match the name of the status file
+    conf=
+    for u in $users; do
+        for f in "$RUN_DIR/$u/$id.state" "$LIB_DIR/$u/$id.last"; do
+            c=$(sed -n 's/^config=//p' "$f" 2>/dev/null | head -1)
+            if [[ -n $c ]] && [[ $(tr '/' '_' <<< "$c") == "$id" ]]; then conf=$c; break 2; fi
+        done
+    done
     # configuration removed: no service anymore; a configuration that is not trusted is not read
     if [[ -z $conf ]] || [[ ! -f $conf ]]; then continue; fi
     if ! trusted_conf "$conf"; then
         echo "1 \"zsync $(basename "$conf" .conf)\" - configuration $conf is not a file of root that only root may write, not checked"
         continue
     fi
+    # user that runs the configuration: run_as, otherwise root, otherwise the user with the newest result
+    owner=$(conf_value "$conf" run_as)
+    owner=${owner:-root}
+    if [[ ! -f $LIB_DIR/$owner/$id.last ]] && [[ ! -f $RUN_DIR/$owner/$id.state ]] && [[ -z $(conf_value "$conf" run_as) ]]; then
+        newest=0
+        for u in $users; do
+            end=$(number "$(sed -n 's/^end=//p' "$LIB_DIR/$u/$id.last" 2>/dev/null)")
+            if [[ -f $RUN_DIR/$u/$id.state ]] || [ ${end:-0} -gt $newest ]; then owner=$u; newest=${end:-0}; fi
+        done
+    fi
+    if ! [[ " $users " == *" $owner "* ]]; then continue; fi
+    run_d=$RUN_DIR/$owner
+    lib_d=$LIB_DIR/$owner
+    read_file "$run_d/$id.state" st
+    read_file "$lib_d/$id.last" last
+    read_file "$CHECK_DIR/$id.check" chk
     name=$(basename "$conf" .conf)
     state_level=0
     state_text=()
@@ -234,14 +269,16 @@ for id in $ids; do
         fi
 
         # runs skipped while this run is active
-        skipped=$(awk -v s=${st[run_start]} '$1 >= s' "$LIB_DIR/$id.skipped" 2>/dev/null | grep -c .)
+        skipped=$(awk -v s=${st[run_start]} '$1 >= s' "$lib_d/$id.skipped" 2>/dev/null | grep -c .)
         if [ $skipped -ge $skipped_warn ]; then
             raise 1 "$skipped runs skipped while this run is active$(level_mark 1)"
         elif [ $skipped -gt 0 ]; then
             state_text+=("$skipped runs skipped while this run is active")
         fi
     fi
-    printf '%s\n' "${new_chk[@]}" > "$LIB_DIR/$id.check.tmp" 2>/dev/null && mv -f "$LIB_DIR/$id.check.tmp" "$LIB_DIR/$id.check" 2>/dev/null
+    if [[ -d $CHECK_DIR ]] && [[ ! -L $CHECK_DIR ]] && [[ -O $CHECK_DIR ]]; then
+        printf '%s\n' "${new_chk[@]}" > "$CHECK_DIR/$id.check.tmp" 2>/dev/null && mv -f "$CHECK_DIR/$id.check.tmp" "$CHECK_DIR/$id.check" 2>/dev/null
+    fi
 
     #### last run
     if [[ -n ${last[rc]} ]]; then
@@ -254,7 +291,7 @@ for id in $ids; do
     #### state per dataset (written by the last run)
     declare -a ds_crit=() ds_risk=() ds_div=() ds_orphan=() ds_failed=() ds_blocked=()
     kept=0; nosnap=0; orphan_new=0; rolled_back=()
-    if [[ -f $LIB_DIR/$id.datasets ]]; then
+    if [[ -f $lib_d/$id.datasets ]]; then
         while IFS=$'\t' read -r ds dstate since detail; do
             since=$(number "$since")
             age_text=$(duration $((NOW - ${since:-NOW})))
@@ -274,7 +311,7 @@ for id in $ids; do
                 rolled_back) rolled_back+=("$ds ($detail)") ;;
                 no_snapshots) ((nosnap++)) ;;
             esac
-        done < "$LIB_DIR/$id.datasets"
+        done < "$lib_d/$id.datasets"
     fi
     if [ ${#ds_crit[@]} -gt 0 ]; then
         raise 2 "full replication needed for ${#ds_crit[@]} datasets: $(shortlist "${ds_crit[@]}")$(level_mark 2)"
@@ -353,7 +390,7 @@ for id in $ids; do
             source_text="interval $(duration $interval) from bashclub-zsync@$name.timer"
         else
             # median of the intervals between the start times
-            intervals=$(sort -n "$LIB_DIR/$id.history" 2>/dev/null | awk 'NR > 1 && $1 > p { print $1 - p } { p = $1 }' | sort -n)
+            intervals=$(sort -n "$lib_d/$id.history" 2>/dev/null | awk 'NR > 1 && $1 > p { print $1 - p } { p = $1 }' | sort -n)
             count=$(grep -c . <<< "$intervals")
             if [ $count -eq 0 ]; then
                 warn_at=

@@ -11,7 +11,7 @@
 PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
 prog=$(basename "$0")
 conf_dir=${ZSYNC_CONF_DIR:-/etc/bashclub}
-jobs_home=/var/lib/bashclub-zsync/jobs
+jobs_home=/var/lib/bashclub-zsync-jobs
 . ${ZSYNC_LIB:-/usr/lib/bashclub-zsync/schedule.sh} || exit 1
 
 # permissions of the job user on its target: replication plus all properties zfs send -p can bring along
@@ -207,7 +207,9 @@ else
     #### job user on this host: own key, permissions only on its target
     home=$jobs_home/$job
     if getent passwd "$user" > /dev/null; then
-        [[ $(getent passwd "$user" | cut -d: -f6) == "$home" ]] || die "user $user exists, but is not a job user of $prog"
+        # job users of testing versions before 2.0 have their home in /var/lib/bashclub-zsync/jobs
+        home=$(getent passwd "$user" | cut -d: -f6)
+        [[ $home == "$jobs_home/$job" || $home == "/var/lib/bashclub-zsync/jobs/$job" ]] || die "user $user exists, but is not a job user of $prog"
     else
         step "user $user"
         install -d -m 755 "$jobs_home"
@@ -220,7 +222,7 @@ else
     fi
     zfs allow -u "$user" "$target_permissions" "$target" || die "zfs allow on $target failed"
     # checkzfs output into the local checkmk spool (group bashclub-zsync)
-    if [[ -d /var/lib/check_mk_agent ]]; then install -d -m 2775 -g bashclub-zsync /var/lib/check_mk_agent/spool; fi
+    if [[ -d /var/lib/check_mk_agent ]]; then install -d -m 3775 -g bashclub-zsync /var/lib/check_mk_agent/spool; fi
     key=$(cat "$home/.ssh/id_ed25519.pub")
     set_conf_value "$conf" run_as "$user"
     run_cmd=(runuser -u "$user" --)

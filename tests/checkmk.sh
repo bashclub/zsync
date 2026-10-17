@@ -4,12 +4,14 @@
 here=$(cd "$(dirname "$0")" && pwd)
 check=$(readlink -f "${1:-$here/../bashclub-zsync/usr/share/bashclub-zsync/checkmk/bashclub_zsync}")
 w=$(mktemp -d); trap 'rm -rf "$w"' EXIT
-export ZSYNC_RUN_DIR=$w/run ZSYNC_LIB_DIR=$w/lib ZSYNC_PROC=$w/proc ZSYNC_CHECK_CONF=$w/none ZSYNC_DEFAULT_DIR=$w/default ZSYNC_CONF_OWNER=$(id -u)
-T=1760000000; id=_etc_bashclub_pve1.conf; conf=$w/etc/pve1.conf
+export ZSYNC_RUN_DIR=$w/runbase ZSYNC_LIB_DIR=$w/libbase ZSYNC_CHECK_DIR=$w/check ZSYNC_PROC=$w/proc ZSYNC_CHECK_CONF=$w/none ZSYNC_DEFAULT_DIR=$w/default ZSYNC_CONF_OWNER=$(id -u)
+T=1760000000; conf=$w/etc/pve1.conf; id=$(tr '/' '_' <<< "$conf")
 failed=0; count=0
 
 reset() {
-  rm -rf "$w"/{run,lib,proc,etc,default}; mkdir -p "$w"/{run,lib,proc,etc,default}
+  # Status-Ordner des Benutzers, der den Test ausführt (wie /run/bashclub-zsync/<user>), $w/run und $w/lib zeigen darauf
+  rm -rf "$w"/{run,lib,runbase,libbase,check,proc,etc,default}; mkdir -p "$w"/{runbase,libbase,check,proc,etc,default}
+  mkdir "$w/runbase/$(id -un)" "$w/libbase/$(id -un)"; ln -s "$w/runbase/$(id -un)" "$w/run"; ln -s "$w/libbase/$(id -un)" "$w/lib"
   printf 'target=backup/pve1\nsource=root@pve1\n%s\n' "${1:-}" > "$conf"
   # Config-Pfad in den Status-Dateien zeigt auf die Test-Config
 }
@@ -126,7 +128,8 @@ expect "lange Liste wird gekürzt" 2 "full replication needed for 5 datasets: po
 # manipulierte Status-Dateien (Gruppe bashclub-zsync darf sie schreiben): nichts davon wird ausgeführt
 reset; last 0 $((T - 1800)); history 3600 6
 mkdir -p "$w/evil"; printf 'touch %s/EXECUTED\n' "$w" > "$w/evil/pve1.conf"
-sed -i "s#^config=.*#config=$w/evil/pve1.conf#" "$w/lib/$id.last"; chmod 666 "$w/evil/pve1.conf"
+evil_id=$(tr '/' '_' <<< "$w/evil/pve1.conf"); sed "s#^config=.*#config=$w/evil/pve1.conf#" "$w/lib/$id.last" > "$w/lib/$evil_id.last"
+cp "$w/lib/$id.history" "$w/lib/$evil_id.history"; rm -f "$w/lib/$id".*; chmod 666 "$w/evil/pve1.conf"
 expect "Config für andere schreibbar: nicht gelesen" 1 "is not a file of root that only root may write"
 chmod 644 "$w/evil/pve1.conf"; run > /dev/null 2>&1; ((count++))
 if [ -e "$w/EXECUTED" ]; then echo "FAIL Config aus Status-Datei wurde ausgeführt"; ((failed++)); else echo "ok   Config aus Status-Datei wird nicht ausgeführt"; fi
@@ -136,6 +139,13 @@ run > /dev/null 2>&1; ((count++))
 if [ -e "$w/EXECUTED" ]; then echo "FAIL Ausdruck aus Status-Datei wurde ausgewertet"; ((failed++)); else echo "ok   Ausdrücke statt Zahlen werden nicht ausgewertet"; fi
 reset 'monitor_max_age="$(touch '"$w"'/EXECUTED)"'; last 0 $((T - 1800)); history 3600 6
 expect "ungültiges monitor_max_age ignoriert" 0 "invalid monitor_max_age"
+# Status-Datei mit einer Config, die nicht zum Namen der Datei passt: kein Service
+reset; last 0 $((T - 1800)); mv "$w/lib/$id.last" "$w/lib/_etc_bashclub_other.conf.last"; expect_none "Config passt nicht zum Namen der Status-Datei: ignoriert"
+# weiterer Ordner (hier root mit anderem Besitzer, mehrere echte Benutzer prüft die Integration): stört nicht
+reset; last 0 $((T - 1800)); history 3600 6; mkdir "$w/libbase/root" "$w/runbase/root" 2>/dev/null
+expect "weiterer Ordner stört nicht" 0 "interval 1h 0m from 5 runs"
+# Ordner, dessen Besitzer nicht so heißt wie der Ordner: ignoriert
+reset; last 0 $((T - 1800)); mkdir "$w/libbase/root-fake"; mv "$w/lib/$id.last" "$w/libbase/root-fake/"; expect_none "fremder Ordnername: ignoriert"
 # systemd-Timer der Config: Intervall aus letztem und nächstem Start, keine Lernphase
 cat > "$w/systemctl" << 'EOS'
 #!/bin/bash
