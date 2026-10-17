@@ -283,6 +283,17 @@ The age of the replicated snapshots per dataset is still checked by checkzfs.
 - **rotation on the target blocked**: the oldest source snapshot of an interval is missing on the target (e.g. a leftover snapshot of another engine with the same label, see [Snapshot label](#snapshot-label-and-snapshot-engine)), so zsync deletes no snapshots of this interval on the target. The replication itself succeeded, the run is not failed; the monitoring warns until the snapshot is gone.
 - **replica only on the target**: the dataset was deleted or renamed on the source, or it is no longer selected (`bashclub:zsync`). It is not replicated anymore and never deleted automatically. To keep it as archive without warning: `zfs set bashclub:zsync-orphan=keep <replica>`. One target per source: datasets of another configuration in the same target would count as replicas without source.
 
+### Original properties of the source
+The replication changes or leaves out some properties: `mountpoint` (not received), `canmount` (`noauto`), `com.sun:auto-snapshot` and the tag (not received), `refquota` (raised on the target, see [refquota](#refquota)); without root also the properties a job user may not set. After each dataset `bashclub-zsync` saves their values on the source and where they come from on the replica, as user properties `bashclub:zsync-source.<property>=<local|inherited|default|received>:<value>`. Show them for the replicas of `/etc/bashclub/zsync.conf`:
+~~~
+( . /etc/bashclub/zsync.conf; zfs get -H -o name,property,value -s local -r all "$target" | grep 'bashclub:zsync-source\.' )
+~~~
+After a restore, the values that were set locally on the source are set again on the restored dataset; inherited and default values come back by themselves. The commands for all restored datasets below `rpool/data` (the restored dataset of a replica `<target>/rpool/data`), shown first and run after checking them:
+~~~
+restored=rpool/data
+zfs get -H -o name,property,value -s local -r all "$restored" | awk -F'\t' '$2 ~ /^bashclub:zsync-source\./ && $3 ~ /^local:/ { sub(/^bashclub:zsync-source\./, "", $2); sub(/^local:/, "", $3); printf "zfs set \"%s=%s\" %s\n", $2, $3, $1 }'
+~~~
+
 ### Exit code
 A failing dataset never stops the run: all other datasets are replicated, the errors are collected and returned at the end.
 - `0`: all datasets replicated. Warnings (e.g. a blocked rotation on the target) do not change the exit code, the monitoring reports them.
@@ -299,11 +310,12 @@ conf=/etc/bashclub/zsync.conf
 id zsync > /dev/null 2>&1 || useradd --system --create-home --home-dir /var/lib/zsync --shell /bin/bash --groups bashclub-zsync zsync
 test -f /var/lib/zsync/.ssh/id_ed25519 || su - zsync -c 'install -d -m 700 ~/.ssh && ssh-keygen -q -t ed25519 -N "" -f ~/.ssh/id_ed25519'
 ~~~
-2. Target with the permissions to receive (all properties `zfs send -p` can bring along, except `sharenfs`/`sharesmb`):
+2. Target with the permissions to receive. `zsync` gets the properties `zfs send -p` can bring along, except `sharenfs`/`sharesmb` and those that decide whether and how root mounts a replica (`mountpoint`, `canmount`, `setuid`, `exec`, `devices`). The target gets `mountpoint=none`, which `zsync` cannot change, so no replica is ever mounted by root with content an unprivileged user received. `zfs receive` skips these properties with "permission denied"; their values of the source are saved on the replica (see [Original properties of the source](#original-properties-of-the-source)):
 ~~~
 ( . "$conf"
   zfs list "$target" > /dev/null 2>&1 || zfs create -p -o canmount=noauto -o com.sun:auto-snapshot=false "$target"
-  zfs allow -u zsync create,receive,mount,destroy,rollback,hold,release,userprop,aclinherit,aclmode,acltype,atime,canmount,checksum,compression,context,copies,dedup,defcontext,devices,dnodesize,exec,filesystem_limit,fscontext,logbias,mountpoint,nbmand,overlay,primarycache,quota,readonly,recordsize,redundant_metadata,refquota,refreservation,relatime,reservation,rootcontext,secondarycache,setuid,snapdev,snapdir,snapshot_limit,special_small_blocks,sync,volmode,volsize,vscan,xattr "$target" )
+  zfs set mountpoint=none "$target"
+  zfs allow -u zsync create,receive,mount,destroy,rollback,hold,release,userprop,aclinherit,aclmode,acltype,atime,checksum,compression,context,copies,dedup,defcontext,dnodesize,filesystem_limit,fscontext,logbias,nbmand,overlay,primarycache,quota,readonly,recordsize,redundant_metadata,refquota,refreservation,relatime,reservation,rootcontext,secondarycache,snapdev,snapdir,snapshot_limit,special_small_blocks,sync,volmode,volsize,vscan,xattr "$target" )
 ~~~
 3. User `zsync` on the source with the key of the backup server and the permissions to send, snapshot, hold and bookmark on all pools:
 ~~~

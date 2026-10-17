@@ -14,9 +14,12 @@ conf_dir=${ZSYNC_CONF_DIR:-/etc/bashclub}
 jobs_home=/var/lib/bashclub-zsync-jobs
 . ${ZSYNC_LIB:-/usr/lib/bashclub-zsync/schedule.sh} || exit 1
 
-# permissions of the job user on its target: replication plus all properties zfs send -p can bring along
-# (except sharenfs/sharesmb), see README "Running without root"
-target_permissions=create,receive,mount,destroy,rollback,hold,release,userprop,aclinherit,aclmode,acltype,atime,canmount,checksum,compression,context,copies,dedup,defcontext,devices,dnodesize,exec,filesystem_limit,fscontext,logbias,mountpoint,nbmand,overlay,primarycache,quota,readonly,recordsize,redundant_metadata,refquota,refreservation,relatime,reservation,rootcontext,secondarycache,setuid,snapdev,snapdir,snapshot_limit,special_small_blocks,sync,volmode,volsize,vscan,xattr
+# permissions of the job user on its target: replication plus the properties zfs send -p can bring along, except
+# sharenfs/sharesmb and those that decide whether and how root mounts a replica (mountpoint, canmount, setuid, exec,
+# devices): the target has mountpoint=none, the job user cannot change that, so no replica is ever mounted; zfs receive
+# skips these properties with "permission denied", their values of the source are saved on the replica
+# (bashclub:zsync-source.*), see README "Running without root"
+target_permissions=create,receive,mount,destroy,rollback,hold,release,userprop,aclinherit,aclmode,acltype,atime,checksum,compression,context,copies,dedup,defcontext,dnodesize,filesystem_limit,fscontext,logbias,nbmand,overlay,primarycache,quota,readonly,recordsize,redundant_metadata,refquota,refreservation,relatime,reservation,rootcontext,secondarycache,snapdev,snapdir,snapshot_limit,special_small_blocks,sync,volmode,volsize,vscan,xattr
 
 usage() {
     cat >&2 << EOF
@@ -165,6 +168,11 @@ if [[ $source != "local" ]]; then
     fi
 fi
 
+# job user: replicas must never be mounted (the job user decides their content): target with mountpoint=none
+if [ $as_root -eq 0 ] && [ $autorun -eq 0 ] && zfs list "$target" > /dev/null 2>&1 \
+    && [[ $(zfs get -H -o value mountpoint "$target") != "none" ]]; then
+    die "$target exists with a mountpoint, replicas of a job user must not be mounted: zfs set mountpoint=none $target"
+fi
 if [[ -n $tag_datasets ]] && [[ ${ssh_setup[*]} != *"root@$source"* ]]; then
     die "--tag-datasets needs a login as root on $source (--login root), the management user zsync may not set properties"
 fi
@@ -190,7 +198,9 @@ if ! zfs list "$target" > /dev/null 2>&1; then
         echo "pool ${target%%/*} is not imported, the first run creates $target"
     else
         step "target $target"
-        zfs create -p -o canmount=noauto -o com.sun:auto-snapshot=false "$target" || die "creating $target failed"
+        target_opts=(-o canmount=noauto -o com.sun:auto-snapshot=false)
+        if [ $as_root -eq 0 ] && [ $autorun -eq 0 ]; then target_opts+=(-o mountpoint=none); fi
+        zfs create -p "${target_opts[@]}" "$target" || die "creating $target failed"
     fi
 fi
 

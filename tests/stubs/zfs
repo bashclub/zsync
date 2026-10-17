@@ -88,6 +88,14 @@ case $1 in
       "get -H -o name,value -r -t filesystem,volume bashclub:zsync-orphan "*)
         for d in $(datasets | grep -E "^${@: -1}(/|\$)"); do echo "$d"$'\t'"${ORPHAN_KEEP[$d]:--}"; done ;;
       "get -Hp -o value refquota "*) rq="REFQUOTA_${side}[${@: -1}]"; echo "${!rq:-0}" ;;
+      # Originalwerte für das Replikat: mountpoint geerbt, canmount Default, auto-snapshot lokal, refquota, Tag
+      "get -H -o name,property,value,source -t filesystem,volume mountpoint,canmount,com.sun:auto-snapshot,refquota,"*)
+        for d in $(datasets); do
+          printf '%s\tmountpoint\t/%s\tinherited from %s\n%s\tcanmount\ton\tdefault\n' "$d" "$d" "${d%%/*}" "$d"
+          printf '%s\tcom.sun:auto-snapshot\ttrue\tlocal\n%s\trefquota\tnone\tdefault\n' "$d" "$d"
+        done ;;
+      # gespeicherte Originalwerte am Replikat: noch keine
+      "get -H -o property,value -s local all "*) ;;
     esac
     ;;
   send) touch "$ZTEST_STATE/sent"; echo "STREAM $*" ;;
