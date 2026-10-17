@@ -5,10 +5,17 @@
 # from SSH_ORIGINAL_COMMAND is matched against these forms and executed without a shell: names of datasets,
 # snapshots and bookmarks are checked, a pipe, a loop or a condition is only possible in the fixed forms below.
 # Denied commands are logged to syslog (auth) and end with exit code 126.
+# Options (written by bashclub-zsync-job-user add): only the snapshots of this replication job may be created and
+# destroyed, and only its own hold tag and bookmark be used; ZFS permissions cannot be limited to names:
+#   --label <label>      snapshots <label>-YYYY-MM-DD-HHMM (internal) or zfs-auto-snap_<label>-... (zas)
+#   --job-tag <tag>      hold tag and bookmark name of the job (zsync_<backup host>_<target with _>)
+# Without options all snapshots, holds and bookmarks of the permitted datasets are allowed (keys of earlier versions).
 # Test without ssh: SSH_ORIGINAL_COMMAND='zfs list -H -o name' bashclub-zsync-remote
 prog=bashclub-zsync-remote
 spooldir=/var/lib/check_mk_agent/spool
 cmd=${SSH_ORIGINAL_COMMAND-}
+label=
+job_tag=
 
 #### names (ZFS allows more characters, bashclub-zsync quotes none of them)
 ds='[A-Za-z0-9][A-Za-z0-9_.:/-]*'
@@ -29,6 +36,33 @@ function deny() {
 
 function is() {
     [[ $2 =~ ^$1$ ]]
+}
+
+#### options of the forced command (from authorized_keys, not from the client)
+while [ $# -gt 0 ]; do
+    case $1 in
+        --label) label=$2; shift ;;
+        --job-tag) job_tag=$2; shift ;;
+        *) echo "$prog: unknown option $1 in authorized_keys" >&2; exit 126 ;;
+    esac
+    shift
+done
+if [[ -n $label ]] && ! is '[A-Za-z0-9][A-Za-z0-9_.:-]*' "$label"; then echo "$prog: invalid --label" >&2; exit 126; fi
+if [[ -n $job_tag ]] && ! is "$part" "$job_tag"; then echo "$prog: invalid --job-tag" >&2; exit 126; fi
+
+# snapshot of this job: <label>-YYYY-MM-DD-HHMM or zfs-auto-snap_<label>-YYYY-MM-DD-HHMM (any without --label)
+function own_snapshot() {
+    local name=${1#*@}
+    [[ -z $label ]] && return 0
+    name=${name#zfs-auto-snap_}
+    [[ $name == "$label-"* ]] && [[ ${name#"$label-"} =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}$ ]]
+}
+# hold tag and bookmark of this job (any without --job-tag)
+function own_tag() {
+    [[ -z $job_tag || $1 == "$job_tag" ]]
+}
+function own_mark() {
+    [[ -z $job_tag || ${1#*#} == "$job_tag" ]]
 }
 
 #### single zfs command: zfs <subcommand> with the options bashclub-zsync, remote-snapshot-manager and checkzfs use
@@ -73,15 +107,18 @@ function zfs_command() {
                 [ ${#operands[@]} -eq 1 ] && is "$snap" "${operands[0]}" || deny
             fi ;;
         snapshot)
-            [ ${#operands[@]} -eq 1 ] && is "$snap" "${operands[0]}" || deny ;;
+            [ ${#operands[@]} -eq 1 ] && is "$snap" "${operands[0]}" && own_snapshot "${operands[0]}" || deny ;;
         destroy)
-            # only snapshots and bookmarks, never a dataset
-            [ ${#operands[@]} -eq 1 ] && is "($snap|$mark)" "${operands[0]}" || deny ;;
+            # only snapshots and bookmarks of this job, never a dataset
+            [ ${#operands[@]} -eq 1 ] || deny
+            if is "$snap" "${operands[0]}"; then own_snapshot "${operands[0]}" || deny
+            elif is "$mark" "${operands[0]}"; then own_mark "${operands[0]}" || deny
+            else deny; fi ;;
         hold|release)
-            [ ${#operands[@]} -ge 2 ] && is "$part" "${operands[0]}" || deny
+            [ ${#operands[@]} -ge 2 ] && is "$part" "${operands[0]}" && own_tag "${operands[0]}" || deny
             for arg in "${operands[@]:1}"; do is "$snap" "$arg" || deny; done ;;
         bookmark)
-            [ ${#operands[@]} -eq 2 ] && is "$snap" "${operands[0]}" && is "$mark" "${operands[1]}" || deny ;;
+            [ ${#operands[@]} -eq 2 ] && is "$snap" "${operands[0]}" && is "$mark" "${operands[1]}" && own_mark "${operands[1]}" || deny ;;
     esac
 }
 
@@ -110,6 +147,7 @@ form_zas='^which zfs-auto-snapshot > /dev/null \|\| exit 0 ; zfs-auto-snapshot -
 if [[ $cmd =~ $form_holds ]]; then
     # hold/release of several snapshots, errors are ignored
     action=${BASH_REMATCH[2]}; tag=${BASH_REMATCH[3]}
+    own_tag "$tag" || deny
     read -ra list <<< "${BASH_REMATCH[1]}"
     for s in "${list[@]}"; do is "$snap" "$s" || deny; done
     for s in "${list[@]}"; do zfs $action "$tag" "$s" 2> /dev/null; done
@@ -129,13 +167,15 @@ elif [[ $cmd =~ $form_bookmark ]] && [[ ${BASH_REMATCH[1]} == "${BASH_REMATCH[3]
     && ${BASH_REMATCH[2]} == "${BASH_REMATCH[4]}" ]]; then
     # move the bookmark of this backup server to the newest replicated snapshot
     mark_name=${BASH_REMATCH[1]}; snap_name=${BASH_REMATCH[2]}
+    own_mark "$mark_name" || deny
     if [ "$(zfs get -H -o value guid "$mark_name" 2> /dev/null)" != "$(zfs get -H -o value guid "$snap_name")" ]; then
         zfs destroy "$mark_name" 2> /dev/null
         zfs bookmark "$snap_name" "$mark_name"
     fi
     exit $?
 elif [[ $cmd =~ $form_zas ]]; then
-    # snapshot engine zas
+    # snapshot engine zas (it destroys old snapshots of the label itself): only the label of this job
+    [[ -z $label || ${BASH_REMATCH[1]} == "$label" ]] || deny
     command -v zfs-auto-snapshot > /dev/null || exit 0
     exec zfs-auto-snapshot --quiet --syslog --label="${BASH_REMATCH[1]}" --keep="${BASH_REMATCH[2]}" //
 fi

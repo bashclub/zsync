@@ -9,9 +9,10 @@ permissions=send,snapshot,destroy,mount,hold,release,bookmark
 
 usage() {
     cat >&2 << EOF
-usage: $prog add <job> <from> <ssh-ed25519 public key>
+usage: $prog add [--label <label>] [--job-tag <tag>] <job> <from> <ssh-ed25519 public key>
            create or update the user zsync-<job>, its key may only connect from <from>
-           (addresses or networks, comma separated, as in authorized_keys from=)
+           (addresses or networks, comma separated, as in authorized_keys from=); with --label and --job-tag
+           it may only create and destroy the snapshots of this label and use only this hold tag and bookmark
        $prog allow <job> <tag>
            ZFS permissions for zsync-<job> on the datasets with the tag set locally (e.g. bashclub:zsync),
            removed from all other datasets; run again after tagging more datasets
@@ -42,10 +43,22 @@ function job_exists() {
 
 case $1 in
     add)
-        [ $# -ge 4 ] || usage
-        user=$(job_user "$2") || exit 1
-        from=$3
-        shift 3
+        shift
+        label= job_tag=
+        while [[ $1 == --* ]]; do
+            case $1 in
+                --label) label=$2 ;;
+                --job-tag) job_tag=$2 ;;
+                *) usage ;;
+            esac
+            shift 2
+        done
+        [ $# -ge 3 ] || usage
+        [[ -z $label || $label =~ ^[A-Za-z0-9][A-Za-z0-9_.:-]*$ ]] || fail "invalid label '$label'"
+        [[ -z $job_tag || $job_tag =~ ^[A-Za-z0-9_.:-]+$ ]] || fail "invalid job tag '$job_tag'"
+        user=$(job_user "$1") || exit 1
+        from=$2
+        shift 2
         key="$*"
         [[ $from =~ ^[A-Za-z0-9.:/,*?-]+$ ]] || fail "invalid from '$from'"
         [[ $key =~ ^ssh-ed25519\ [A-Za-z0-9+/]+={0,2}(\ [A-Za-z0-9_.@:-]+)?$ ]] || fail "only one ssh-ed25519 public key is accepted"
@@ -61,10 +74,11 @@ case $1 in
         getent group bashclub-zsync > /dev/null && usermod -aG bashclub-zsync "$user"
         # key file belongs to root: the user cannot change its own restriction
         install -d -m 755 -o root -g root "$home/.ssh"
-        echo "restrict,from=\"$from\",command=\"/usr/bin/bashclub-zsync-remote\" $key" > "$home/.ssh/authorized_keys.new"
+        command=/usr/bin/bashclub-zsync-remote${label:+ --label $label}${job_tag:+ --job-tag $job_tag}
+        echo "restrict,from=\"$from\",command=\"$command\" $key" > "$home/.ssh/authorized_keys.new"
         chmod 644 "$home/.ssh/authorized_keys.new"
         mv "$home/.ssh/authorized_keys.new" "$home/.ssh/authorized_keys"
-        echo "$user: key from $from set"
+        echo "$user: key from $from set${label:+, snapshots $label}${job_tag:+, hold tag and bookmark $job_tag}"
         ;;
     allow)
         [ $# -eq 3 ] || usage
@@ -102,11 +116,12 @@ case $1 in
         while IFS=: read -r user _ _ _ _ home _; do
             [[ $user == zsync-* && $home == "$home_base/"* ]] || continue
             from=$(grep -o '^restrict,from="[^"]*"' "$home/.ssh/authorized_keys" 2> /dev/null | cut -d'"' -f2)
+            limits=$(grep -o 'command="[^"]*"' "$home/.ssh/authorized_keys" 2> /dev/null | cut -d'"' -f2 | cut -s -d' ' -f2-)
             # datasets with a local permission of the user (zfs allow shows them under "Local+Descendent")
             datasets=$(for n in $(zfs list -H -o name -t filesystem,volume); do
                 zfs allow "$n" | sed -n '/^---- Permissions on '"${n//\//\\/}"' /,/^---- /p' | grep -q "^[[:space:]]user $user " && echo "$n"
             done | paste -sd' ')
-            printf '%s\tfrom %s\t%s\n' "$user" "${from:--}" "${datasets:-no datasets}"
+            printf '%s\tfrom %s\t%s\t%s\n' "$user" "${from:--}" "${datasets:-no datasets}" "${limits:-all snapshots}"
         done < <(getent passwd)
         ;;
     *)
