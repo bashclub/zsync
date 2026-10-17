@@ -627,6 +627,20 @@ case_disk() {
   rm -rf "$stub"
   wipefs -qa "$part" "$real"
 }
+# Engine zas ohne zfs-auto-snapshot auf der Quelle: Warnung, Exit-Code wie bisher
+case_zas_missing() {
+  local zas; zas=$(command -v zfs-auto-snapshot)
+  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; snap "$ZCI_POOL_SRC/data" 01
+  config zas_missing "zfs_auto_snapshot_engine=zas
+zfs_auto_snapshot_keep=3"
+  zsync
+  check "mit zfs-auto-snapshot: keine Warnung" not grep -q "zfs-auto-snapshot is not installed" <(last_run_log)
+  mv "$zas" "$zas.zci-hidden"
+  zsync; local zrc=$rc
+  mv "$zas.zci-hidden" "$zas"
+  equal "ohne zfs-auto-snapshot: Exit-Code wie bisher" 0 "$zrc"
+  check "ohne zfs-auto-snapshot: Warnung mit Hinweis" grep -q "zfs-auto-snapshot is not installed on the source" <(last_run_log)
+}
 # fehlt der älteste Quell-Snapshot am Ziel, ist nur die Rotation blockiert: Warnung, Exit 0, Status cleanup_blocked
 case_cleanup_blocked() {
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
@@ -672,7 +686,7 @@ case_checkmk() {
   check "Statusdatei des Laufs entfernt" test -z "$(status_path state)"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable permissions checkmk)
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing permissions checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten und Pools): ein zweiter wartet

@@ -185,6 +185,9 @@ case $cmd in
     exit|true)
         # connection test of remote-snapshot-manager
         exit 0 ;;
+    "which zfs-auto-snapshot")
+        # is the snapshot engine zas installed (exit code 1 = no)
+        command -v zfs-auto-snapshot; exit $? ;;
     "grep -E \"^ID=\" /etc/os-release | cut -d'=' -f2")
         grep -E "^ID=" /etc/os-release | cut -d'=' -f2; exit $? ;;
     "grep -m1 -o aes /proc/cpuinfo | uniq")

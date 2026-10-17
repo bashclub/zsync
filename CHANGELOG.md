@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Added
+- `zfs-auto-snapshot` is recommended instead of required (`bashclub-zsync`: only needed for `source=local`; `bashclub-zsync-source`: recommended), with the engine `zas` a warning is logged if it is missing on the source (previously no snapshots and no message); the exit code is unchanged (#69)
 - `bashclub-zsync-remote --label <label> --job-tag <tag>` (written by `bashclub-zsync-job-user add`, `bashclub-zsync-setup` and the README): the key of a job may only create and destroy the snapshots of its label, use its own hold tag and bookmark and run zfs-auto-snapshot only with its label, so a backup server that is taken over cannot destroy the other snapshots of the source; keys without these options behave as before (#71)
 - original values of the source saved on each replica after every dataset (only when they changed): `mountpoint`, `canmount`, `com.sun:auto-snapshot`, `refquota` and the tag as `bashclub:zsync-source.<property>=<local|inherited|default|received>:<value>`, for a restore; README with commands to show and restore them (#54)
 - job users of `bashclub-zsync-setup` (and the README for running without root) get no permissions for `mountpoint`, `canmount`, `setuid`, `exec` and `devices`, the target gets `mountpoint=none`: no replica of an unprivileged user is ever mounted by root; `zfs receive` skips these properties with "permission denied", their values are saved on the replica (#54)

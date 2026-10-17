@@ -41,6 +41,7 @@ allow 'zfs list -t all -Hp -o name,type,creation,guid,used,available,written,ori
 allow 'zfs snapshot rpool/x@backup-2026-10-16-1804' 'zfs snapshot rpool/x@backup-2026-10-16-1804'
 allow 'zfs destroy rpool/x@backup-2026-10-01-1804' 'zfs destroy rpool/x@backup-2026-10-01-1804'
 allow 'exit' ''
+allow 'which zfs-auto-snapshot' "$w/zfs-auto-snapshot"
 allow 'for s in rpool/x@a rpool/x@b ; do zfs hold zsync_backup_backup_pve1 $s 2>/dev/null; done; true' $'zfs hold zsync_backup_backup_pve1 rpool/x@a\nzfs hold zsync_backup_backup_pve1 rpool/x@b'
 allow 'for s in rpool/x@a ; do zfs release zsync_backup_backup_pve1 $s 2>/dev/null; done; true' 'zfs release zsync_backup_backup_pve1 rpool/x@a'
 allow 'zfs list -H -t snapshot -o name -S createtxg rpool/x | grep -E "(@backup-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}([[:space:]]|$)|@.*daily)" | tail -1' ''

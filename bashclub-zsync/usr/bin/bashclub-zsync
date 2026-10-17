@@ -508,6 +508,12 @@ fi
 #### snapshots on the source before replication (zas: once for all datasets, internal: per dataset below)
 if [ $zfs_auto_snapshot_keep -gt 1 ]; then
     if [[ $zfs_auto_snapshot_engine == "zas" ]]; then
+        # without zfs-auto-snapshot the call below creates no snapshots and ends without a message
+        # (exit code 1 = not found; 126 = the forced command of an earlier version does not know the check)
+        remote "which zfs-auto-snapshot" > /dev/null 2>&1
+        if [ $? -eq 1 ]; then
+            log "[WARN] zfs-auto-snapshot is not installed on the source, the snapshot engine zas creates no snapshots. Install it there (apt install zfs-auto-snapshot) or use zfs_auto_snapshot_engine=internal."
+        fi
         debug "Running zfs-auto-snapshot"
         remote "which zfs-auto-snapshot > /dev/null || exit 0 ; zfs-auto-snapshot --quiet --syslog --label=$zfs_auto_snapshot_label --keep=$zfs_auto_snapshot_keep //"
     fi

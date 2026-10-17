@@ -212,7 +212,8 @@ checkzfs_spool_maxage=87000
 ### Snapshot label and snapshot engine
 - A label must not contain the label of another configuration on the same source (e.g. `zsync` and `zsync-miyagi`): in `legacy` mode each configuration would treat the snapshots of the other one as its own.
 - With `zfs_auto_snapshot_label_match="strict"` only snapshots in the name scheme of the configured engine belong to the label. Snapshots of the label in another scheme, e.g. `zfs-auto-snap_<label>-…` left over after switching from `zas` to `internal`, are neither replicated nor used to decide which target snapshots are deleted. In `legacy` mode such a snapshot can be the oldest snapshot of the label on the source; if it does not exist on the target, no snapshots of the label are deleted on the target anymore.
-- `bashclub-zsync` lists such snapshots as `[WARN]` (source and target) and reports an `[ERROR]` if the oldest source snapshot of an interval is missing on the target.
+- `bashclub-zsync` lists such snapshots as `[WARN]` (source and target) and warns if the oldest source snapshot of an interval is missing on the target (state `cleanup_blocked` in the monitoring).
+- The engine `zas` runs `zfs-auto-snapshot` on the source; the packages only recommend it (`bashclub-zsync` needs it on the backup server only for `source=local`). If it is missing on the source, `bashclub-zsync` warns that no snapshots are created.
 
 To switch an existing configuration from `zas` to `internal`, set both values and remove the remaining `zfs-auto-snapshot` snapshots of the label on the source. The commands read source, port and label from the configuration; the first one only shows what would be deleted:
 ~~~
