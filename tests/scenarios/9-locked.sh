@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # ein anderer Lauf mit derselben Config ist aktiv: dieser Lauf wird ohne jeden Aufruf übersprungen
 DEBUG=0; CHECKZFS=1
 CONF='target=backup/zsync

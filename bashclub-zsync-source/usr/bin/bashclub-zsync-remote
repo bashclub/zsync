@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Forced command for the user of bashclub-zsync on the source (authorized_keys):
 #   restrict,from="<backup server>",command="/usr/bin/bashclub-zsync-remote" ssh-ed25519 AAAA...
 # Runs only the commands bashclub-zsync, remote-snapshot-manager and checkzfs send to the source. The command

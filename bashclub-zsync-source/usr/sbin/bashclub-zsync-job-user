@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Users of the replication jobs on the source: one user zsync-<job> per backup server and configuration,
 # it can only run the commands of bashclub-zsync (command=bashclub-zsync-remote) from the address of its
 # backup server and only read the datasets selected by the tag of its configuration.

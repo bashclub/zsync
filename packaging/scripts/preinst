@@ -1,6 +1,12 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 
 PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
+
+# up to 1.0.19 the license was a folder /usr/share/doc/bashclub-zsync/copyright/LICENSE, now copyright is the file
+if [ -d /usr/share/doc/bashclub-zsync/copyright ]; then
+  rm -rf /usr/share/doc/bashclub-zsync/copyright
+fi
 
 # check if script is installed manually on system and rename an remove execute flag
 if ! dpkg -l bashclub-zsync  > /dev/null 2>&1; then

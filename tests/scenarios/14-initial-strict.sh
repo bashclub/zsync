@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Erstreplikation mit strict: das Muster läuft per ssh durch die Shell der Quelle; der älteste passende
 # Snapshot ist backup-2026-10-01-1804, nicht der ältere zas-Rest
 DEBUG=1; CHECKZFS=0

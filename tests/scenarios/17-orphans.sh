@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Datasets nur auf dem Ziel: Quelle fehlt (gone), Quelle nicht mehr ausgewählt (untagged), quittiert (kept);
 # die Zwischenebene backup/zsync/pool hat keine Snapshots und ist kein Replikat
 DEBUG=0; CHECKZFS=0

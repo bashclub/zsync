@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Baut das Paket aus dem Arbeitsstand (nfpm-Container wie in der CI), installiert es auf der Test-VM
 # und führt dort die Integrationstests aus.
 # Aufruf: tests/integration/remote.sh <root@host> [fall ...]

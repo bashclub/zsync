@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # refquota der Quelle: auf dem Ziel nur erhöhen (a) oder aufheben (b), nie verkleinern (c), ein Ziel ohne refquota
 # bleibt so (d), Volumes haben keine (vol)
 DEBUG=0; CHECKZFS=0

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Testet bashclub-zsync-remote (command= auf der Quelle) ohne ssh und ohne ZFS: ein zfs-Stub gibt seine
 # Argumente aus. Erlaubte Befehle müssen genau diese Argumente ausführen, alles andere wird mit 126 abgewiesen.
 # Dass alle Befehle von bashclub-zsync durchgehen, prüft run.sh mit ZTEST_WRAPPER (siehe README).

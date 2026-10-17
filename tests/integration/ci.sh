@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # CI-Job auf dem Runner mit Label zfs (Test-VM): Paket aus dem ausgecheckten Stand bauen, installieren, testen.
 # Aufruf im Wurzelverzeichnis des Repos: tests/integration/ci.sh
 set -euo pipefail

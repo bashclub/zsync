@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+### Changed
+- license: GPL-3.0-or-later instead of MIT from 2.0.0 on (both packages, SPDX headers in all files, DEP-5 copyright file `/usr/share/doc/<package>/copyright` with the MIT notice of the versions up to 1.0.19); contributions with Developer Certificate of Origin (`Signed-off-by`, CONTRIBUTING.md) (#72)
+
 ### Added
 - `bashclub-zsync-maintenance`: open decisions of all configurations (replicas without source, broken chains, snapshot leftovers of another name scheme), interactive with context, options, preview and confirmation, or `--list`/`--decide` for scripts; actions run only on the backup server under the lock of the configuration and are logged; the Checkmk check points to it (#67)
 - `zfs-auto-snapshot` is recommended instead of required (`bashclub-zsync`: only needed for `source=local`; `bashclub-zsync-source`: recommended), with the engine `zas` a warning is logged if it is missing on the source (previously no snapshots and no message); the exit code is unchanged (#69)

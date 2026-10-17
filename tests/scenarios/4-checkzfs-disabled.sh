@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # checkzfs installiert, aber per Konfiguration abgeschaltet
 DEBUG=1; CHECKZFS=1
 CONF='target=backup/zsync

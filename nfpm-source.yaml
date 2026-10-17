@@ -9,6 +9,7 @@ priority: optional
 maintainer: Thorsten Spille <kontakt@spille-it.de>
 description: Source side of bashclub-zsync ${VERSION} maintained from bashclub (restricted ssh access for the replication).
 homepage: https://code.bashclub.org/bashclub/zsync
+license: GPL-3.0-or-later
 
 depends:
   - openssh-server
@@ -34,9 +35,11 @@ contents:
     type: config|noreplace
     file_info: { mode: 0440 }
 
-  - src: LICENSE
-    dst: /usr/share/doc/bashclub-zsync-source/copyright/LICENSE
+  # copyright (DEP-5): GPL-3.0-or-later since 2.0.0, MIT notice of the versions up to 1.0.19
+  - src: packaging/copyright
+    dst: /usr/share/doc/bashclub-zsync-source/copyright
     file_info: { mode: 0644 }
 
 scripts:
+  preinstall: packaging/scripts/source-preinst
   postinstall: packaging/scripts/source-postinst

@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Tests für den Checkmk-Check bashclub_zsync: Status-Dateien und ein nachgebautes /proc, feste Uhrzeit.
 # Aufruf: tests/checkmk.sh [check]   (ohne root, ohne ZFS)
 here=$(cd "$(dirname "$0")" && pwd)

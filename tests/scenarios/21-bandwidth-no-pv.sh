@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # bandwidth_limit=10m ohne pv: Warnung, Übertragung ohne Limit wie bisher
 DEBUG=0; CHECKZFS=0; PV=0
 CONF='target=backup/zsync

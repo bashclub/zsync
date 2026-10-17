@@ -1,3 +1,4 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 echo "checkzfs $*" >> "$ZTEST_LOG"
 echo "0 checkzfs_stub - ok"

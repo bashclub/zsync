@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # target_rollback=1: neuester Ziel-Snapshot fehlt auf der Quelle -> Rollback auf den neuesten gemeinsamen Snapshot
 # (2 Snapshots verworfen), danach Anfügen ab dort
 DEBUG=0; CHECKZFS=0

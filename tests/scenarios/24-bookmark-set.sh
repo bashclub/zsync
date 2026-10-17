@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # source_bookmark=1, normales Delta: danach zeigt das Bookmark auf den neuesten replizierten Snapshot
 DEBUG=1; CHECKZFS=0
 CONF='target=backup/zsync

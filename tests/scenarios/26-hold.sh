@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # source_hold=1: Basis und Delta-Snapshots werden für die Replikation gehalten und danach freigegeben
 DEBUG=1; CHECKZFS=0
 CONF='target=backup/zsync

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Label steht schon in snapshot_filter: jedes Intervall wird nur einmal geprüft
 DEBUG=1; CHECKZFS=0
 CONF='target=backup/zsync

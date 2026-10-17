@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Zustand pro Dataset beim Anfügen (guid = Zeitpunkt): normal (ok), neuester Ziel-Snapshot fehlt auf der Quelle (div),
 # Rotation durchgelaufen (rot), Dataset auf der Quelle neu angelegt (new), Ziel ohne Snapshots (empty),
 # Replikation fehlgeschlagen und Basis ist der älteste Snapshot der Quelle (risk), keine passenden Snapshots (nosnap)
