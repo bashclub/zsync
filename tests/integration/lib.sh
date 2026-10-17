@@ -7,8 +7,9 @@ LIB_DIR=/var/lib/bashclub-zsync
 RUN_DIR=/run/bashclub-zsync
 CHECK=/usr/share/bashclub-zsync/checkmk/bashclub_zsync
 
-# Properties, die zfs send -p mitbringen kann (ohne sharenfs/sharesmb): Rechte für den Betrieb ohne root, wie im README
-ZCI_RECV_PROPS=aclinherit,aclmode,acltype,atime,canmount,checksum,compression,context,copies,dedup,defcontext,devices,dnodesize,exec,filesystem_limit,fscontext,logbias,mountpoint,nbmand,overlay,primarycache,quota,readonly,recordsize,redundant_metadata,refquota,refreservation,relatime,reservation,rootcontext,secondarycache,setuid,snapdev,snapdir,snapshot_limit,special_small_blocks,sync,volmode,volsize,vscan,xattr
+# Properties, die zfs send -p mitbringen kann, ohne sharenfs/sharesmb und ohne die zum Einhängen (mountpoint, canmount,
+# setuid, exec, devices): Rechte für den Betrieb ohne root, wie im README
+ZCI_RECV_PROPS=aclinherit,aclmode,acltype,atime,checksum,compression,context,copies,dedup,defcontext,dnodesize,filesystem_limit,fscontext,logbias,nbmand,overlay,primarycache,quota,readonly,recordsize,redundant_metadata,refquota,refreservation,relatime,reservation,rootcontext,secondarycache,snapdev,snapdir,snapshot_limit,special_small_blocks,sync,volmode,volsize,vscan,xattr
 
 failed_cases=()
 case_failed=0

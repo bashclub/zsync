@@ -30,6 +30,11 @@ case_replication() {
     equal "Delta $d: Snapshots am Ziel" "zfs-auto-snap_daily-01 zfs-auto-snap_daily-02 zfs-auto-snap_daily-03" "$(snaps "$ZCI_POOL_DST/replication/$ZCI_POOL_SRC/$d")"
   done
   equal "Status: letzter Lauf erfolgreich" "rc=0" "$(grep '^rc=' "$(status_path last)")"
+  # Originalwerte der Quelle am Replikat (für einen Restore)
+  equal "Originalwert: mountpoint geerbt" "inherited:/zci/src/data" "$(prop "$ZCI_POOL_DST/replication/$ZCI_POOL_SRC/data" bashclub:zsync-source.mountpoint)"
+  equal "Originalwert: Tag lokal" "local:all" "$(prop "$ZCI_POOL_DST/replication/$ZCI_POOL_SRC/data" bashclub:zsync-source.bashclub:zsync)"
+  equal "Originalwert: auto-snapshot geerbt" "inherited:false" "$(prop "$ZCI_POOL_DST/replication/$ZCI_POOL_SRC/data" bashclub:zsync-source.com.sun:auto-snapshot)"
+  equal "Originalwert am Volume: refquota" "-:-" "$(prop "$ZCI_POOL_DST/replication/$ZCI_POOL_SRC/vol" bashclub:zsync-source.refquota)"
 }
 
 # Snapshot-Engine internal (remote-snapshot-manager über ssh auf localhost)
@@ -264,7 +269,7 @@ case_unprivileged() {
   write "$ZCI_POOL_SRC/subvol-100-disk-0" 2; write "$ZCI_POOL_SRC/enc" 2
   # Rechte wie im README
   check "Rechte auf der Quelle" zfs allow -u $user send,snapshot,destroy,mount,hold,release,bookmark "$ZCI_POOL_SRC"
-  zfs create -o canmount=noauto -o com.sun:auto-snapshot=false "$ZCI_POOL_DST/unprivileged"
+  zfs create -o canmount=noauto -o mountpoint=none -o com.sun:auto-snapshot=false "$ZCI_POOL_DST/unprivileged"
   check "Rechte auf dem Ziel" zfs allow -u $user "create,receive,mount,destroy,rollback,hold,release,userprop,$ZCI_RECV_PROPS" "$ZCI_POOL_DST/unprivileged"
   config unprivileged "source=$user@localhost
 snapshot_filter=\"\"
@@ -285,7 +290,11 @@ transfer_resume=1"
   equal "Subvol: refquota übernommen" 1G "$(prop "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/subvol-100-disk-0" refquota)"
   equal "Subvol: acltype wie auf der Quelle" "$(prop "$ZCI_POOL_SRC/subvol-100-disk-0" acltype)" "$(prop "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/subvol-100-disk-0" acltype)"
   equal "Subvol: xattr wie auf der Quelle" "$(prop "$ZCI_POOL_SRC/subvol-100-disk-0" xattr)" "$(prop "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/subvol-100-disk-0" xattr)"
-  check "keine abgelehnten Properties" not grep -q 'permission denied' "$log"
+  # abgelehnt werden nur die Properties zum Einhängen (nicht delegiert), ihre Werte stehen am Replikat
+  equal "nur Properties zum Einhängen abgelehnt" "" "$(grep 'permission denied' "$log" | grep -vE 'cannot receive (mountpoint|canmount|setuid|exec|devices) property')"
+  check "Jobbenutzer kann mountpoint nicht setzen" not su $user -c "zfs set mountpoint=/tmp/zci-x $ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/subvol-100-disk-0"
+  equal "Replikat ohne mountpoint" none "$(prop "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/subvol-100-disk-0" mountpoint)"
+  equal "Originalwert gesichert: mountpoint" "inherited:/zci/src/subvol-100-disk-0" "$(prop "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/subvol-100-disk-0" bashclub:zsync-source.mountpoint)"
   equal "nicht eingehängt" no "$(prop "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/subvol-100-disk-0" mounted)"
   equal "keine Holds übrig" "" "$(zfs list -H -o name -t snapshot -r "$ZCI_POOL_SRC" | xargs zfs holds -H | grep zsync_)"
   check "Bookmarks angelegt" test "$(zfs list -H -o name -t bookmark -r "$ZCI_POOL_SRC" | wc -l)" -ge 3
@@ -415,7 +424,7 @@ case_restricted() {
   zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/vol"
   write "$ZCI_POOL_SRC/data" 2
   zfs allow -u $user send,snapshot,destroy,mount,hold,release,bookmark "$ZCI_POOL_SRC"
-  zfs create -o canmount=noauto -o com.sun:auto-snapshot=false "$ZCI_POOL_DST/restricted"
+  zfs create -o canmount=noauto -o mountpoint=none -o com.sun:auto-snapshot=false "$ZCI_POOL_DST/restricted"
   zfs allow -u $user "create,receive,mount,destroy,rollback,hold,release,userprop,$ZCI_RECV_PROPS" "$ZCI_POOL_DST/restricted"
   config restricted "source=$user@localhost
 snapshot_filter=\"\"
@@ -465,7 +474,7 @@ case_job_user() {
     "$(cut -d' ' -f1-2 /var/lib/bashclub-zsync-source/cij/.ssh/authorized_keys)"
   out=$($job list)
   check "list: Adresse und Dataset ($out)" grep -qE "^zsync-cij	from 127.0.0.1,::1	$ZCI_POOL_SRC/data$" <<< "$out"
-  zfs create -o canmount=noauto -o com.sun:auto-snapshot=false "$ZCI_POOL_DST/job_user"
+  zfs create -o canmount=noauto -o mountpoint=none -o com.sun:auto-snapshot=false "$ZCI_POOL_DST/job_user"
   zfs allow -u $backup "create,receive,mount,destroy,rollback,hold,release,userprop,$ZCI_RECV_PROPS" "$ZCI_POOL_DST/job_user"
   config job_user "source=zsync-cij@localhost
 snapshot_filter=\"\"
@@ -503,9 +512,14 @@ case_setup() {
   systemctl start bashclub-zsync@$name.service
   equal "erster Lauf erfolgreich" success "$(systemctl show -p Result --value bashclub-zsync@$name.service)"
   equal "Lauf als Jobbenutzer" zsync-zci-setup "$(systemctl show -p User --value bashclub-zsync@$name.service)"
+  equal "Setup: Ziel ohne mountpoint" none "$(prop "$ZCI_POOL_DST/setup" mountpoint)"
+  check "Setup: Jobbenutzer ohne Recht auf mountpoint" not grep -qE "(^|,)mountpoint(,|$)" <<< "$(zfs allow "$ZCI_POOL_DST/setup" | awk '/user zsync-zci-setup/ { print $3 }')"
   equal "ein Snapshot repliziert" 1 "$(zfs list -H -o name -t snapshot "$ZCI_POOL_DST/setup/$ZCI_POOL_SRC/data" 2>/dev/null | wc -l)"
   check "nicht getaggtes Dataset nicht repliziert" not exists "$ZCI_POOL_DST/setup/$ZCI_POOL_SRC/other"
   check "vorhandene Config wird nicht überschrieben" not bashclub-zsync-setup -y -s localhost $name
+  zfs create -o mountpoint=/zci/mounted "$ZCI_POOL_DST/mounted"
+  check "Ziel mit mountpoint für Jobbenutzer abgewiesen" not bashclub-zsync-setup -y -s localhost -t "$ZCI_POOL_DST/mounted" --login root zci-setup6
+  check "abgewiesen, bevor etwas angelegt wird" not test -e /etc/bashclub/zci-setup6.conf
   # Verwaltungsbenutzer zsync: Schlüssel von root eintragen, Einrichtung ohne root auf der Quelle
   local rootkey; rootkey=$(cat /root/.ssh/id_ed25519.pub)
   install -d -m 700 -o zsync -g zsync /var/lib/zsync/.ssh

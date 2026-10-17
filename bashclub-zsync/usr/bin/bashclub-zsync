@@ -481,6 +481,15 @@ while IFS=$'\t' read -r dataset fstype refquota; do
     fstypes[$dataset]=$fstype
     refquotas[$dataset]=$refquota
 done <<< "$(remote "zfs list -Hp -o name,type,refquota -t filesystem,volume")"
+# original values of the properties the replication changes or leaves out (mountpoint, canmount, auto-snapshot,
+# refquota, tag) and where they come from, saved on the replica for a restore (save_source_props):
+# bashclub:zsync-source.<property>=<local|inherited|default|received|->:<value>
+declare -A source_props
+while IFS=$'\t' read -r dataset property value property_source; do
+    if [[ -z $dataset ]]; then continue; fi
+    if [[ $property_source == inherited* ]]; then property_source=inherited; fi
+    source_props[$dataset]+="bashclub:zsync-source.$property=$property_source:$value"$'\n'
+done <<< "$(remote "zfs get -H -o name,property,value,source -t filesystem,volume mountpoint,canmount,com.sun:auto-snapshot,refquota,$tag 2>/dev/null")"
 log "$include_list"
 log "$exclude_list"
 log "$checkzfs_headline\ncheckzfs_filter=$checkzfs_filter\n"
@@ -528,6 +537,12 @@ hold_tag=$bookmark_name
 nomount=
 if [ "$(id -u)" -ne 0 ]; then nomount=-u; fi
 
+# without root on a target with mountpoint=none (bashclub-zsync-setup, README): no replica is ever mounted there and
+# the user may not set canmount (it could make root mount a replica), canmount is left as it is
+function unmounted_target() {
+    [ -n "$nomount" ] && [[ $(zfs get -H -o value mountpoint "$1" 2>/dev/null) == "none" ]]
+}
+
 #### resumable transfers: receive -s keeps the partial state of an interrupted transfer (resume token)
 resumable=
 if [[ $transfer_resume == "1" ]]; then resumable=-s; fi
@@ -569,6 +584,21 @@ fi
 
 # snapshots whose name contains the label but does not match the name scheme of the snapshot engine:
 # not created by this configuration, but in legacy mode replicated and used for deletion
+# save the original values of the source on the replica (only those that changed since the last run)
+function save_source_props() {
+    local name=$1 replica=$target/$1 saved want changed=()
+    if [[ -z ${source_props[$name]} ]] || ! zfs list "$replica" > /dev/null 2>&1; then return 0; fi
+    saved=$(zfs get -H -o property,value -s local all "$replica" 2>/dev/null | grep '^bashclub:zsync-source\.' | tr '\t' '=')
+    while read -r want; do
+        if [[ -n $want ]] && ! grep -qxF "$want" <<< "$saved"; then changed+=("$want"); fi
+    done <<< "${source_props[$name]}"
+    if [ ${#changed[@]} -gt 0 ]; then
+        debug "$name - saving the original properties on $replica: $(printf '%s ' "${changed[@]}")"
+        zfs set "${changed[@]}" "$replica" \
+            || log "[WARN] $name - saving the original properties of the source on $replica failed (bashclub:zsync-source.*)."
+    fi
+}
+
 function label_leftovers() {
     grep -E "@.*$zfs_auto_snapshot_label" | grep -vE "$label_regex"
 }
@@ -659,7 +689,11 @@ for name in "${syncvols[@]}"; do
                 if [ $(zfs list $prefix$part > /dev/null 2>&1 ; echo $?) -gt 0 ]; then
                     debug "$prefix$part does not exist"
                     log "[INFO] Creating $prefix$part"
-                    zfs create -o canmount=noauto $autosnap -p $prefix$part
+                    if unmounted_target "${prefix%/}"; then
+                        zfs create $autosnap -p $prefix$part
+                    else
+                        zfs create -o canmount=noauto $autosnap -p $prefix$part
+                    fi
                 fi
                 prefix="$prefix$part/"
             done
@@ -746,7 +780,8 @@ for name in "${syncvols[@]}"; do
             fi
             if [[ $last != "" ]]; then
                 IFS=$'\n'
-                if [[ $fstype == "filesystem" ]] && [[ $(zfs get -H -o value canmount $target/$name) != "noauto" ]]; then
+                if [[ $fstype == "filesystem" ]] && [[ $(zfs get -H -o value canmount $target/$name) != "noauto" ]] \
+                    && ! unmounted_target $target/$name; then
                     zfs set canmount=noauto $target/$name
                 fi
                 if [[ -z $delta_snaps ]]; then
@@ -877,6 +912,7 @@ for name in "${syncvols[@]}"; do
     fi
     if [ $rc -ne 0 ]; then ((datasets_failed++)); fi
     if [ $rc_before -ne 0 ]; then rc=$rc_before; fi
+    save_source_props "$name"
     log "[INFO] Replication of $name finished."
 done
 
