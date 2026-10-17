@@ -105,9 +105,12 @@ cmd_enable() {
     [[ -n $schedule ]] || schedule=$(conf_value "$conf" schedule)
     [[ -n $schedule ]] || schedule=@daily
     schedule_calendars "$schedule" > /dev/null || die "invalid schedule: $schedule (cron format, e.g. \"0 23 * * *\" or @daily)"
-    if [[ -n $user ]] && ! id "$user" > /dev/null 2>&1; then die "user $user does not exist"; fi
-    set_conf_value "$conf" trigger systemd
-    set_conf_value "$conf" schedule "$schedule"
+    if [[ -n $user ]]; then
+        valid_user "$user" || die "invalid user name '$user'"
+        id "$user" > /dev/null 2>&1 || die "user $user does not exist"
+    fi
+    if [[ -n $log ]]; then valid_path "$log" || die "invalid log file '$log' (absolute path without spaces, quotes, % and ..)"; fi
+    { set_conf_value "$conf" trigger systemd && set_conf_value "$conf" schedule "$schedule"; } || die "writing $conf failed"
     if [[ $user == "root" ]]; then set_conf_value "$conf" run_as ""
     elif [[ -n $user ]]; then set_conf_value "$conf" run_as "$user"; fi
     if [[ -n $log ]]; then set_conf_value "$conf" log_file "$log"; fi
@@ -139,8 +142,11 @@ cmd_sync() {
         if ! schedule_calendars "${schedule:-@daily}" > /dev/null; then
             echo "error $name: schedule '$schedule' is not a cron schedule"; ((problems++)); continue
         fi
-        if [[ -n $user ]] && ! id "$user" > /dev/null 2>&1; then
+        if [[ -n $user ]] && { ! valid_user "$user" || ! id "$user" > /dev/null 2>&1; }; then
             echo "error $name: run_as user $user does not exist"; ((problems++)); continue
+        fi
+        if [[ -n $(conf_value "$conf" log_file) ]] && ! valid_path "$(conf_value "$conf" log_file)"; then
+            echo "error $name: invalid log_file $(conf_value "$conf" log_file)"; ((problems++)); continue
         fi
         if systemctl is-active --quiet "bashclub-zsync@$name.timer" 2> /dev/null; then
             echo "$([ $dry -eq 1 ] && echo plan || echo do)  update bashclub-zsync@$name.timer: ${schedule:-@daily}, user ${user:-root}"
@@ -223,6 +229,10 @@ cmd_migrate() {
         fi
         if ! schedule_calendars "$schedule" > /dev/null; then
             echo "skip  $file:$n: schedule '$schedule' cannot be converted, set it in $conf and run: $prog enable $name"; continue
+        fi
+        if ! valid_user "$user"; then echo "skip  $file:$n: user '$user' is not a valid user name"; continue; fi
+        if [[ -n $log ]] && ! valid_path "$log"; then
+            echo "skip  $file:$n: log file '$log' cannot be used by the timer (path with spaces, quotes, % or ..)"; continue
         fi
         echo "$([ $dry -eq 1 ] && echo plan || echo do)  $file:$n -> $conf: trigger=systemd schedule=\"$schedule\" run_as=$user${log:+ log_file=$log}"
         todo+=("$file"$'\t'"$n"$'\t'"$name"$'\t'"$schedule"$'\t'"$user"$'\t'"$log")

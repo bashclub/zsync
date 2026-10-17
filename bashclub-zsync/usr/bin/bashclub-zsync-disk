@@ -101,6 +101,7 @@ cmd_create() {
     [ $luks -eq 1 ] && ! command -v cryptsetup > /dev/null && die "cryptsetup is missing (apt install cryptsetup)"
     local conf=
     if [[ -n $config ]]; then
+        valid_name "$config" || die "invalid configuration name '$config'"
         conf=$conf_dir/$config.conf
         [[ -f $conf ]] || die "configuration $conf not found (create it first, e.g. with bashclub-zsync-setup)"
         local target; target=$(conf_value "$conf" target)

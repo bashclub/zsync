@@ -93,16 +93,23 @@ conf=$conf_dir/$name.conf
 [[ -e $conf ]] && die "$conf exists already; change it there (bashclub-zsync-timer sync activates a changed schedule)"
 [[ $login =~ ^(auto|zsync|root)$ ]] || die "--login: auto, zsync or root"
 
-#### settings
+#### settings: each value is checked before anything is changed (they go into the configuration, which bash runs,
+# and into commands on the source)
 host=$(hostname -s)
 first_pool=$(zpool list -H -o name 2> /dev/null | head -1)
 ask source "Source host (address or name, local = pools of this host)" ""
 [[ -n $source ]] || die "no source given"
 source=${source#*@}
+[[ $source == "local" ]] || valid_host "$source" || die "invalid source host '$source' (name, IPv4 or IPv6 address)"
 if [[ $source != "local" ]]; then ask port "ssh port of $source" 22; fi
+port=${port:-22}
+valid_port "$port" || die "invalid port '$port'"
 ask target "Target dataset on $host" "${first_pool:+$first_pool/zsync/$name}"
 [[ -n $target ]] || die "no target given (no pool found on this host)"
+valid_dataset "$target" || die "invalid target dataset '$target'"
 ask tag "Tag of the datasets to replicate on the source" bashclub:zsync
+valid_tag "$tag" || die "invalid tag '$tag' (user property, e.g. bashclub:zsync)"
+for ds in $tag_datasets; do valid_dataset "$ds" || die "invalid dataset '$ds' in --tag-datasets"; done
 if [ $autorun -eq 0 ]; then
     ask schedule "Schedule (cron format)" "*/15 * * * *"
     schedule_calendars "$schedule" > /dev/null || die "invalid schedule '$schedule' (cron format, e.g. \"*/15 * * * *\" or @hourly)"
@@ -110,8 +117,7 @@ fi
 ask keep "Snapshots to keep per label on the source" 14
 [[ $keep =~ ^[0-9]+$ ]] || die "invalid number of snapshots '$keep'"
 ask label "Snapshot label" "zsync-$host"
-[[ $port =~ ^[0-9]*$ ]] || die "invalid port '$port'"
-port=${port:-22}
+valid_label "$label" || die "invalid snapshot label '$label' (letters, digits, _ . : -)"
 [[ $source == "local" ]] && as_root=1
 
 job=$(job_name "$name")
@@ -168,11 +174,9 @@ step "configuration $conf"
 mkdir -p "$conf_dir"
 bashclub-zsync -c "$conf" > /dev/null 2>&1
 [[ -f $conf ]] || die "creating $conf with bashclub-zsync failed"
-set_conf_value "$conf" target "$target"
-set_conf_value "$conf" sshport "$port"
-set_conf_value "$conf" tag "$tag"
-set_conf_value "$conf" zfs_auto_snapshot_keep "$keep"
-set_conf_value "$conf" zfs_auto_snapshot_label "$label"
+{ set_conf_value "$conf" target "$target" && set_conf_value "$conf" sshport "$port" && set_conf_value "$conf" tag "$tag" \
+    && set_conf_value "$conf" zfs_auto_snapshot_keep "$keep" && set_conf_value "$conf" zfs_auto_snapshot_label "$label"; } \
+    || die "writing $conf failed"
 if [ $autorun -eq 1 ]; then
     set_conf_value "$conf" trigger autorun
 else
@@ -230,6 +234,8 @@ fi
 
 #### source: job user with key, address and permissions (bashclub-zsync-job-user)
 if [ $as_root -eq 0 ]; then
+    # the key goes into a command on the source: only a ssh-ed25519 key with a simple comment
+    [[ $key =~ ^ssh-ed25519\ [A-Za-z0-9+/]+={0,2}(\ [A-Za-z0-9_.@:-]+)?$ ]] || die "unexpected public key: $key"
     step "user $source_user on $source"
     # from: the address of this host as the source sees it (SSH_CLIENT of the setup connection)
     "${ssh_setup[@]}" /usr/sbin/bashclub-zsync-job-user add "$source_job" '"${SSH_CLIENT%% *}"' "$key" || die "setting up $source_user on $source failed"
