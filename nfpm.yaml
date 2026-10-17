@@ -36,6 +36,9 @@ contents:
   - src: bashclub-zsync/usr/bin/bashclub-zsync-timer
     dst: /usr/bin/bashclub-zsync-timer
     file_info: { mode: 0755 }
+  - src: bashclub-zsync/usr/bin/bashclub-zsync-maintenance
+    dst: /usr/bin/bashclub-zsync-maintenance
+    file_info: { mode: 0755 }
   - src: bashclub-zsync/usr/bin/bashclub-zsync-disk
     dst: /usr/bin/bashclub-zsync-disk
     file_info: { mode: 0755 }

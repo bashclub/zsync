@@ -284,6 +284,21 @@ The age of the replicated snapshots per dataset is still checked by checkzfs.
 - **rotation on the target blocked**: the oldest source snapshot of an interval is missing on the target (e.g. a leftover snapshot of another engine with the same label, see [Snapshot label](#snapshot-label-and-snapshot-engine)), so zsync deletes no snapshots of this interval on the target. The replication itself succeeded, the run is not failed; the monitoring warns until the snapshot is gone.
 - **replica only on the target**: the dataset was deleted or renamed on the source, or it is no longer selected (`bashclub:zsync`). It is not replicated anymore and never deleted automatically. To keep it as archive without warning: `zfs set bashclub:zsync-orphan=keep <replica>`. One target per source: datasets of another configuration in the same target would count as replicas without source.
 
+### Decisions: bashclub-zsync-maintenance
+`bashclub-zsync` detects and reports, the admin decides on the backup server, `bashclub-zsync-maintenance` runs the action. It collects the open cases of all configurations, shows context, options and the exact commands (for a deletion also what ZFS would delete), asks for confirmation, runs the action under the lock of the configuration (never during a run) and logs every decision with time and user to `/var/log/bashclub-zsync/maintenance.log` and syslog.
+
+| case | options |
+|---|---|
+| replica only on the target (orphan) | `keep` (`bashclub:zsync-orphan=keep`), `delete`, `later` |
+| no common snapshot with the source, or replica without snapshots | `rename` (the old replica stays, the next run replicates again), `delete` (the next run replicates again), `later` |
+| snapshots of the label in another name scheme on the target | `delete`, `later` |
+
+All open cases one after the other:
+~~~
+bashclub-zsync-maintenance
+~~~
+Without questions, e.g. for scripts: `bashclub-zsync-maintenance --list [--tsv]` and `bashclub-zsync-maintenance --decide <case> <option> [--dry-run]`.
+
 ### Original properties of the source
 The replication changes or leaves out some properties: `mountpoint` (not received), `canmount` (`noauto`), `com.sun:auto-snapshot` and the tag (not received), `refquota` (raised on the target, see [refquota](#refquota)); without root also the properties a job user may not set. After each dataset `bashclub-zsync` saves their values on the source and where they come from on the replica, as user properties `bashclub:zsync-source.<property>=<local|inherited|default|received>:<value>`. Show them for the replicas of `/etc/bashclub/zsync.conf`:
 ~~~

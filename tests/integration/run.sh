@@ -641,6 +641,49 @@ zfs_auto_snapshot_keep=3"
   equal "ohne zfs-auto-snapshot: Exit-Code wie bisher" 0 "$zrc"
   check "ohne zfs-auto-snapshot: Warnung mit Hinweis" grep -q "zfs-auto-snapshot is not installed on the source" <(last_run_log)
 }
+# Entscheidungen: verwaistes Replikat, gerissene Kette, Snapshot-Altlast; Aktionen mit Vorschau, Sperre und Protokoll
+case_maintenance() {
+  local m=bashclub-zsync-maintenance mlog=/var/log/bashclub-zsync/maintenance.log list c
+  for c in data gone broken; do zfs create "$ZCI_POOL_SRC/$c"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/$c"; snap "$ZCI_POOL_SRC/$c" 01; done
+  config maintenance "zfs_auto_snapshot_keep=3"
+  zsync
+  equal "Erstreplikation" 0 "$rc"
+  zfs destroy -r "$ZCI_POOL_SRC/gone"
+  zfs list -H -o name -t snapshot "$ZCI_POOL_SRC/broken" | xargs -n1 zfs destroy
+  snap "$ZCI_POOL_SRC/broken" 02
+  zfs snapshot "$ZCI_POOL_DST/maintenance/$ZCI_POOL_SRC/data@zfs-auto-snap_backup-2026-01-01-0000"
+  zsync
+  list=$(ZSYNC_CONF_DIR=$CONF_DIR $m --list --tsv)
+  equal "drei offene Fälle" 3 "$(grep -c . <<< "$list")"
+  local orphan broken left
+  orphan=$(awk -F'\t' '$3 == "orphan" { print $1 }' <<< "$list")
+  broken=$(awk -F'\t' '$3 == "broken" { print $1 }' <<< "$list")
+  left=$(awk -F'\t' '$3 == "leftovers" { print $1 }' <<< "$list")
+  check "Fall verwaistes Replikat" test -n "$orphan"
+  check "Fall gerissene Kette" test -n "$broken"
+  check "Fall Snapshot-Altlast" test -n "$left"
+  # Fragen: leere Antwort = später (letzte Option), nichts ändert sich
+  local out; out=$(printf '\n\n\n' | ZSYNC_CONF_DIR=$CONF_DIR $m 2>&1)
+  check "Fragen: drei Fälle gezeigt" grep -q '^\[3/3\]' <<< "$out"
+  equal "Fragen: später ändert nichts" 3 "$(ZSYNC_CONF_DIR=$CONF_DIR $m --list --tsv | grep -c .)"
+  check "Probelauf zeigt den Befehl" grep -q "zfs rename $ZCI_POOL_DST/maintenance/$ZCI_POOL_SRC/broken" <<< "$(ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$broken" rename --dry-run)"
+  check "Probelauf ändert nichts" exists "$ZCI_POOL_DST/maintenance/$ZCI_POOL_SRC/broken"
+  check "unbekannte Option abgewiesen" not env ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$orphan" rename
+  # während eines Laufs (Sperre der Config) wird nichts ausgeführt
+  flock "$conf" sleep 5 & sleep 1
+  check "während eines Laufs abgewiesen" not env ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$orphan" keep
+  wait
+  check "verwaistes Replikat behalten" env ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$orphan" keep
+  equal "Markierung gesetzt" keep "$(prop "$ZCI_POOL_DST/maintenance/$ZCI_POOL_SRC/gone" bashclub:zsync-orphan)"
+  check "gerissene Kette umbenannt" env ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$broken" rename
+  check "altes Replikat bleibt erhalten" exists "$ZCI_POOL_DST/maintenance/$ZCI_POOL_SRC/broken.broken-$(date +%Y-%m-%d)"
+  check "Altlast gelöscht" env ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$left" delete
+  check "Altlast weg" not exists "$ZCI_POOL_DST/maintenance/$ZCI_POOL_SRC/data@zfs-auto-snap_backup-2026-01-01-0000"
+  equal "keine offenen Fälle mehr" "no open cases" "$(ZSYNC_CONF_DIR=$CONF_DIR $m --list)"
+  check "Entscheidungen protokolliert" test "$(grep -c "case \($orphan\|$broken\|$left\)" "$mlog")" -ge 3
+  zsync
+  check "nächster Lauf repliziert die umbenannte Kette neu" exists "$ZCI_POOL_DST/maintenance/$ZCI_POOL_SRC/broken@zfs-auto-snap_daily-02"
+}
 # fehlt der älteste Quell-Snapshot am Ziel, ist nur die Rotation blockiert: Warnung, Exit 0, Status cleanup_blocked
 case_cleanup_blocked() {
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
@@ -686,7 +729,7 @@ case_checkmk() {
   check "Statusdatei des Laufs entfernt" test -z "$(status_path state)"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing permissions checkmk)
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance permissions checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten und Pools): ein zweiter wartet
