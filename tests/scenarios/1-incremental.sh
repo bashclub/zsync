@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Delta, Löschen alter Snapshots, Erstreplikation eines Kindes, Volume mit fehlschlagendem receive,
 # subvols/received/none, interne Snapshot-Engine, checkzfs lokal, Debug
 DEBUG=1; CHECKZFS=1

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Settings of a configuration and its schedule in cron format, used by bashclub-zsync-timer, bashclub-zsync-setup
 # and the systemd generator bashclub-zsync-generator (sourced, no output of its own)
 

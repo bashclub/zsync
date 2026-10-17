@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Dataset-Namen, die "local" bzw. "received" enthalten: maßgeblich ist die Quelle der Eigenschaft, nicht der Name
 DEBUG=1; CHECKZFS=1
 CONF='target=backup/zsync

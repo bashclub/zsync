@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # transfer_resume=1: abgebrochenes Delta (Token am Ziel) wird mit send -t fortgesetzt, danach die übrigen Deltas mit receive -s
 CONF='target=backup/zsync
 source=root@src

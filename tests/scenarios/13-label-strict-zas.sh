@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # strict mit Engine zas: nur zfs-auto-snap_<label>-<Datum> zählt, ein Snapshot im Schema von internal ist ein Rest
 DEBUG=1; CHECKZFS=0
 CONF='target=backup/zsync

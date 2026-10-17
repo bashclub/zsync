@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Quelle nicht erreichbar (ssh Exit 255): sofort Fehler und Exit 1, keine Replikation, Status für das Monitoring
 DEBUG=0; CHECKZFS=0; SSH_FAIL=1
 CONF='target=backup/zsync

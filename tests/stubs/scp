@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Stub für scp: protokolliert den Aufruf und kopiert lokal (die Quelle ist im Test derselbe Rechner).
 echo "scp $*" >> "$ZTEST_LOG"
 src=${@: -2:1}; dst=${@: -1}

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # source leer (lokaler Modus ist nicht umgesetzt)
 DEBUG=0; CHECKZFS=1
 CONF='target=backup/zsync

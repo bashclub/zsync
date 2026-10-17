@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Ziel fehlt ganz (Erstreplikation mit Anlegen des Pfads), keine gemeinsame GUID,
 # zfs-auto-snapshot als Engine, checkzfs nicht installiert, ohne Debug
 DEBUG=0; CHECKZFS=0

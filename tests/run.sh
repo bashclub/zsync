@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Führt bashclub-zsync mit Stubs statt zfs/ssh in allen Szenarien aus.
 # Ergebnis je Szenario in <ausgabe>: .calls (alle Aufrufe), .log (Ausgabe), .conf, .spool,
 # .files (Dateien im Spool und Spool-Reste in /tmp), .status (Status-Dateien für das Monitoring, ohne Zeiten)

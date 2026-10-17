@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Tests der Bibliothek schedule.sh (Cron-Umrechnung, Settings schreiben und lesen, Prüfungen von Eingaben).
 # Aufruf: tests/schedule.sh (ohne root)
 here=$(cd "$(dirname "$0")" && pwd)

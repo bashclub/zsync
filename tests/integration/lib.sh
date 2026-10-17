@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Hilfsfunktionen für die ZFS-Integrationstests (wird von run.sh eingebunden)
 
 # Testumgebung: Platten und Poolnamen aus /etc/zsync-ci.conf (nur diese werden angefasst)

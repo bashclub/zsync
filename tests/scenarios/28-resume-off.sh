@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Token am Ziel, transfer_resume=0: Teilstand wird verworfen (receive -A), danach normal weiter
 CONF='target=backup/zsync
 source=root@src

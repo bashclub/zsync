@@ -458,12 +458,17 @@ The version shown by `bashclub-zsync -h` is read from the installed package, so 
 
 # Roadmap
 
-Following features are on the wishlist:
-- Removable device support (Autostart on connect, remove when finished)
-- E-Mail notifications
-- Internal verification logic for checkzfs replacement
-- Parallel replication (multi-threaded, per dataset)
-- Resume replication after failure caused by changes on source
+The roadmap and the open tickets are in the issue tracker: https://code.bashclub.org/bashclub/zsync/issues/16
+Ideas for later include parallel replication per dataset, an own snapshot check instead of checkzfs and e-mail
+notifications.
+
+
+# License
+
+Since version 2.0.0 bashclub-zsync is licensed under the GNU General Public License, version 3 or later
+([LICENSE](LICENSE), `SPDX-License-Identifier: GPL-3.0-or-later`). Versions up to 1.0.19 were published under the
+MIT license; their notice is kept in the copyright file of the packages (`/usr/share/doc/bashclub-zsync/copyright`).
+Contributions: see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 
 # Author

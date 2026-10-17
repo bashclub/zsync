@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Engine-Wechsel zas -> internal mit gleichem Label, legacy (ohne Einstellung): der alte zas-Snapshot ist der
 # älteste Quell-Snapshot des Labels und fehlt auf dem Ziel -> Warnung und Status cleanup_blocked
 # statt stillem Nicht-Löschen, Exit-Code 0 (die Replikation ist erfolgreich)

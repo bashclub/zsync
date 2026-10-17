@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # ZFS-Integrationstests: echte Pools auf den Testplatten aus /etc/zsync-ci.conf, installiertes bashclub-zsync.
 # Jeder Fall bekommt frische Pools zci-src/zci-dst, am Ende werden sie zerstört.
 # Aufruf (als root auf der Test-VM): tests/integration/run.sh [fall ...]

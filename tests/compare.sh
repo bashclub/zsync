@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Vergleicht zwei Ergebnisse von run.sh: zuerst nur die verändernden Aufrufe (send, receive, destroy,
 # create, set, unmount, Snapshots, checkzfs, scp, Exit-Code), dann alle Aufrufe und die Logs.
 # Aufruf: tests/compare.sh <alt> <neu>

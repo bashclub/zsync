@@ -1,4 +1,5 @@
 #!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 #
 # Checkmk local check for bashclub-zsync: one service "zsync <config>" per configuration
 # Installed by the package as /usr/lib/check_mk_agent/local/bashclub_zsync (link), if the agent is installed.

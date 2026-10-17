@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # derselbe Fall mit zfs_auto_snapshot_label_match=strict: Reste werden ignoriert (nicht repliziert, nicht
 # zum Löschen herangezogen), das Löschen auf dem Ziel funktioniert, Warnungen nennen die Reste
 DEBUG=1; CHECKZFS=0

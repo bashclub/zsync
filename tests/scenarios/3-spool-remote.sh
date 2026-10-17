@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # nichts Neues zu übertragen, checkzfs-Ausgabe per scp auf die Quelle
 DEBUG=0; CHECKZFS=1
 CONF='target=backup/zsync

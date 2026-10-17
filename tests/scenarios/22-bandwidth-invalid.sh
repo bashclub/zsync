@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # ungültiger Wert für bandwidth_limit: Warnung, Übertragung ohne Limit wie bisher
 DEBUG=0; CHECKZFS=0; PV=1
 CONF='target=backup/zsync

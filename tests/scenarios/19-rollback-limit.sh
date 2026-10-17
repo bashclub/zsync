@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # target_rollback=1, aber der Rollback würde 2 Snapshots verwerfen, mehr als target_rollback_max=1: kein Rollback, Fehler
 DEBUG=0; CHECKZFS=0
 CONF='target=backup/zsync

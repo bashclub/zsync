@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 [Unit]
 Description=Import zpool %i and run bashclub-zsync
 

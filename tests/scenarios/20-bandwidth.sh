@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # bandwidth_limit=10m mit pv: pv -q -L 10m zwischen send und receive (Erst- und Delta-Replikation)
 DEBUG=0; CHECKZFS=0; PV=1
 CONF='target=backup/zsync

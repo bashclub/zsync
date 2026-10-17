@@ -8,6 +8,7 @@ priority: optional
 maintainer: Thorsten Spille <kontakt@spille-it.de>
 description: The deb package for bashclub-zsync ${VERSION} maintained from bashclub.
 homepage: https://code.bashclub.org/bashclub/zsync
+license: GPL-3.0-or-later
 
 depends:
   - bashclub-checkzfs
@@ -84,8 +85,9 @@ contents:
     dst: /etc/udev/rules.d/90-automount-zsync.rules.example
     file_info: { mode: 0644 }
 
-  - src: LICENSE
-    dst: /usr/share/doc/bashclub-zsync/copyright/LICENSE
+  # copyright (DEP-5): GPL-3.0-or-later since 2.0.0, MIT notice of the versions up to 1.0.19
+  - src: packaging/copyright
+    dst: /usr/share/doc/bashclub-zsync/copyright
     file_info: { mode: 0644 }
   - src: CHANGELOG.md
     dst: /usr/share/doc/bashclub-zsync/CHANGELOG.md

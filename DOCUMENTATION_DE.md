@@ -80,3 +80,7 @@ Hier ist eine Anleitung zur Konfiguration auf dem Quellserver:
 
 Bitte beachten Sie, dass die genaue Syntax und Verwendung des Befehls je nach dem von Ihnen verwendeten Betriebssystem oder der ZFS-Version variieren kann. Stellen Sie sicher, dass Sie über ausreichende Berechtigungen verfügen, um die Konfiguration auf dem Quellserver vorzunehmen.
 Um mehrere Replikationen zu unterschiedlichen Hosts mit dem bashclub-zsync-Script auf dem Zielserver zu ermöglichen, können Sie den Namen des ZFS-Attributs "bashclub:zsync" in der Scriptkonfiguration mit dem Parameter "tag" anpassen. Dadurch können Sie verschiedene Replikationen zu unterschiedlichen Hosts einrichten und steuern. Öffnen Sie das bashclub-zsync-Script auf dem Zielserver, suchen Sie nach dem "tag"-Parameter und ändern Sie den Wert in den gewünschten Namen für das ZFS-Attribut. Speichern Sie das Script nach der Änderung. Stellen Sie sicher, dass Sie über ausreichende Berechtigungen verfügen, um das Script zu bearbeiten und die Konfiguration auf dem Zielserver vorzunehmen.
+
+# Lizenz
+
+Ab Version 2.0.0 steht bashclub-zsync unter der GNU General Public License, Version 3 oder später (`GPL-3.0-or-later`, Datei `LICENSE`). Versionen bis 1.0.19 wurden unter der MIT-Lizenz veröffentlicht; ihr Hinweis steht in der copyright-Datei der Pakete (`/usr/share/doc/bashclub-zsync/copyright`).

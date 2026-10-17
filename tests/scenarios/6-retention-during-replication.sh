@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # Retention auf der Quelle löscht während der Replikation den ältesten daily-Snapshot:
 # das Löschen auf dem Ziel muss sich nach dem Stand nach der Replikation richten
 DEBUG=1; CHECKZFS=0

@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
 # source=local: alles auf einem Host ohne ssh, Ziel im selben Pool (pool/backup) – die Replikate erben den Tag
 # und dürfen nicht selbst repliziert werden; remote-snapshot-manager ohne -h, checkzfs lokal (Spool lokal statt scp)
 DEBUG=0; CHECKZFS=1
