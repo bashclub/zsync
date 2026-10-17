@@ -70,6 +70,11 @@ apt install bashclub-zsync
 
 `cryptsetup` and a `mail` command (`bsd-mailx`) are installed as recommended packages. They are only needed for `zsync-autorun` (removable disks with LUKS, mail notification).
 
+Packages up to 1.0.19 created `/etc/bashclub` with the owner of their build user (uid 995). An update to 2.0 corrects it; on an installation that stays on 1.0.x, make the folder of the configurations writable only for root:
+~~~
+chown root:root /etc/bashclub; chmod go-w /etc/bashclub
+~~~
+
 ### TrueNAS SCALE
 TrueNAS does not allow installing packages and the system files are replaced on every update. The scripts are therefore installed into `scripts/bashclub-zsync` on your data pool. The first data pool is detected automatically; to use another one, set it first, e.g. `pool=tank`.
 ~~~

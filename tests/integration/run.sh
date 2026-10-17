@@ -716,6 +716,8 @@ case_permissions() {
   equal "Status-Ordner mit Sticky-Bit" "root bashclub-zsync 1775" "$(stat -c '%U %G %a' /var/lib/bashclub-zsync)"
   equal "Laufzeit-Ordner mit Sticky-Bit" "root bashclub-zsync 1775" "$(stat -c '%U %G %a' /run/bashclub-zsync)"
   equal "Ordner von root" "root root 755" "$(stat -c '%U %G %a' /var/lib/bashclub-zsync/root)"
+  equal "Config-Ordner nur für root" "root root 755" "$(stat -c '%U %G %a' /etc/bashclub)"
+  equal "doc-Ordner gehört root" "root root" "$(stat -c '%U %G' /usr/share/doc/bashclub-zsync)"
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; snap "$ZCI_POOL_SRC/data" 01
   config permissions; zsync
   equal "Lauf als root: Exit-Code" 0 "$rc"

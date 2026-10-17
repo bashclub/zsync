@@ -3,6 +3,16 @@
 
 PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
 
+# packages up to 1.0.19 were built with the files of the build user (uid 995): folders dpkg created then keep this
+# owner after an update (dpkg does not change existing folders). /etc/bashclub holds the configurations that run as
+# root, so it and the doc folder belong to root and only root may write them
+for dir in /etc/bashclub /usr/share/doc/bashclub-zsync; do
+  if [ -d "$dir" ] && [ "$(stat -c %u:%g "$dir")" != "0:0" ]; then
+    chown root:root "$dir"
+    chmod go-w "$dir"
+  fi
+done
+
 # log folder only for root (logrotate rotates only in folders that no other user or group may write), as in 1.0.19;
 # a folder made writable for the group by a testing version before 2.0 gets these permissions back
 if [ ! -d /var/log/bashclub-zsync ] || [ "$(stat -c %G /var/log/bashclub-zsync)" = bashclub-zsync ] || [ -g /var/log/bashclub-zsync ]; then
