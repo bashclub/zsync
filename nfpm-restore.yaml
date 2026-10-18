@@ -20,6 +20,10 @@ depends:
 recommends:
   - openssh-server
 
+# nur für --bwlimit
+suggests:
+  - pv
+
 contents:
   - src: bashclub-zsync-restore/usr/bin/bashclub-zsync-restore
     dst: /usr/bin/bashclub-zsync-restore
@@ -28,6 +32,15 @@ contents:
   - src: bashclub-zsync-restore/usr/bin/bashclub-zsync-restore-remote
     dst: /usr/bin/bashclub-zsync-restore-remote
     file_info: { mode: 0755 }
+
+  # snapshot chains compared by GUID (also for a later own snapshot check)
+  - src: bashclub-zsync-restore/usr/lib/bashclub-zsync-restore/chain.sh
+    dst: /usr/lib/bashclub-zsync-restore/chain.sh
+    file_info: { mode: 0644 }
+  # restore jobs in the background: bashclub-zsync-restore start <id>
+  - src: bashclub-zsync-restore/usr/lib/systemd/system/bashclub-zsync-restore@.service
+    dst: /usr/lib/systemd/system/bashclub-zsync-restore@.service
+    file_info: { mode: 0644 }
 
   # copyright (DEP-5): GPL-3.0-or-later
   - src: packaging/copyright

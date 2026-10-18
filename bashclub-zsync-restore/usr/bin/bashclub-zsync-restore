@@ -5,7 +5,9 @@
 #   pull  the system to restore reads from the backup server as a restore user, who can only read the replicas of
 #         one configuration (bashclub-zsync-restore-remote): the backup server needs no access to the system
 #   push  the backup server writes to the system to restore with a one-time key that expires
-# access: set up and remove these accesses.
+#   local both on this host (e.g. into another pool of the backup server)
+# A restore command (dataset, reattach) plans the restore and writes it as a job; the executor (run, started in
+# the background by start) runs it: progress, retries, resume after an abort, final check with report.
 
 PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
 prog=$(basename "$0")
@@ -13,13 +15,37 @@ conf_dir=${ZSYNC_CONF_DIR:-/etc/bashclub}
 lib_dir=${ZSYNC_RESTORE_LIB_DIR:-/var/lib/bashclub-zsync-restore}
 users_home=${ZSYNC_RESTORE_USERS_HOME:-/var/lib/bashclub-zsync-restore-users}
 pull_key=${ZSYNC_RESTORE_PULL_KEY:-/root/.ssh/id_ed25519_bashclub-zsync-restore}
+run_dir=${ZSYNC_RESTORE_RUN_DIR:-/run/bashclub-zsync-restore}
+. "${ZSYNC_RESTORE_CHAIN:-/usr/lib/bashclub-zsync-restore/chain.sh}" || exit 1
 # configurations of bashclub-zsync (only on the backup server)
 zsync_lib=${ZSYNC_LIB:-/usr/lib/bashclub-zsync/schedule.sh}
 [[ -r $zsync_lib ]] && . "$zsync_lib"
 
 usage() {
     cat >&2 << EOF
-usage: $prog access <command>     accesses for a restore
+usage: $prog <command> [--from <user>@<backup server>[:<port>] | --to <system>[:<port>]] [--config <name>] ...
+  connection:     --from  pull: on the system to restore, read from the backup server as restore user
+                  --to    push: on the backup server, write to root@<system> with the push key
+                  neither: both on this host; --config <name>: the replicas of this configuration
+  list            replicas with snapshots, newest snapshot, encryption and their state on the system
+  show <replica>  snapshot chain compared with the system by GUID, and the restore command for it
+  dataset <replica> [--recursive] [--snapshot <name>] [--as <dataset>] [--force] [--bwlimit <rate>] [--scrub]
+                  [--dry-run] [--start]
+                  restore with the complete snapshot chain up to <name> (newest), at the original place or as
+                  <dataset>, with the original properties; an existing dataset only with --force (renamed to
+                  <dataset>.before-restore-<time>, never overwritten)
+  reattach <replica> [--recursive] [--snapshot <name>] [--rollback] [--bwlimit <rate>] [--dry-run] [--start]
+                  send only the snapshots missing on the system after the common one (after a rollback or a loss
+                  there), the replication then continues without a full replication; snapshots or changes on the
+                  system after the common one only with --rollback (destroys them)
+  jobs | status [<job>] [--follow]
+                  restore jobs, or progress and report of a job (--follow: redrawn until it ends)
+  start <job> | stop <job> | resume <job>
+                  run a job in the background (systemd unit bashclub-zsync-restore@<job>), stop it, continue it
+                  (done datasets are skipped)
+  run <job>       run a job in the foreground (used by start)
+
+  access <command>  accesses for a restore:
   on the backup server:
     access pull [--config <name>] [--name <name>] <from> '<ssh-ed25519 key>'
                     restore user zsync-restore-<name> (default: name of the configuration): the system with the key
@@ -294,7 +320,885 @@ function access_remove() {
     echo "$what removed"
 }
 
+#### connection: where the replicas are (backup side) and where they are restored to (system side)
+#   pull   --from <restore user>@<backup server>[:<port>]: replicas over ssh, restored on this host
+#   push   --to <system>[:<port>]: replicas on this host, restored as root@<system> with the push key
+#   local  neither: both on this host (e.g. a restore into another pool of the backup server)
+direction=local login= port=22 root= config=
+ssh_opts=()
+
+# connection options of a command: sets direction, login, port
+function parse_connection() {
+    case $1 in
+        --from)
+            [[ $2 =~ ^([a-z_][a-z0-9_-]{0,31})@([^:]+)(:([0-9]+))?$ ]] || die "invalid --from '$2' (user@backup server[:port])"
+            direction=pull; login=${BASH_REMATCH[1]}@${BASH_REMATCH[2]}; port=${BASH_REMATCH[4]:-22} ;;
+        --to)
+            [[ $2 =~ ^(root@)?([^:@]+)(:([0-9]+))?$ ]] || die "invalid --to '$2' (system[:port])"
+            direction=push; login=root@${BASH_REMATCH[2]}; port=${BASH_REMATCH[4]:-22} ;;
+    esac
+    valid_host "${login#*@}" || die "invalid host '${login#*@}'"
+}
+
+function connect() {
+    local key
+    case $direction in
+        pull) key=${job_key:-$pull_key}; [[ -f $key ]] || die "no key for pull ($prog access key)" ;;
+        push) key=$(push_key "${login#*@}") || die "no valid push key for ${login#*@} ($prog access push ${login#*@})" ;;
+        *) return 0 ;;
+    esac
+    install -d -m 700 "$run_dir"
+    mapfile -t ssh_opts < <(ssh_options "$key")
+    ssh_opts+=(-o ControlMaster=auto -o "ControlPath=$run_dir/ssh-%C" -o ControlPersist=60 -p "$port")
+    if [[ $direction == pull ]]; then
+        root=$(ssh -n "${ssh_opts[@]}" "$login" root) || die "connection to $login failed"
+        valid_dataset "$root" || die "invalid root '$root' from $login"
+    else
+        ssh -n "${ssh_opts[@]}" "$login" true || die "connection to $login failed"
+    fi
+}
+
+# zfs on the backup side; over ssh only names checked by valid_dataset are sent (the wrapper splits at spaces)
+function backup_zfs() {
+    if [[ $direction == pull ]]; then ssh -n "${ssh_opts[@]}" "$login" "zfs $*"; else zfs "$@"; fi
+}
+# zfs on the system side (stdin only for receive)
+function system_zfs() {
+    if [[ $direction == push ]]; then ssh -n "${ssh_opts[@]}" "$login" "$(printf '%q ' zfs "$@")"; else zfs "$@"; fi
+}
+function system_receive() {
+    if [[ $direction == push ]]; then ssh "${ssh_opts[@]}" "$login" "$(printf '%q ' zfs receive "$@")"; else zfs receive "$@"; fi
+}
+function system_exists() {
+    system_zfs list -H -o name "$1" > /dev/null 2>&1
+}
+function system_name() {
+    if [[ $direction == push ]]; then echo "${login#*@}"; else hostname -s; fi
+}
+
+#### replicas
+# configuration of a replica (push, local): the one whose target contains it, the longest; sets root and config
+function config_of() {
+    local name=$1 c t best=
+    need_zsync
+    while IFS=$'\t' read -r c t; do
+        [[ $name == "$t" || $name == "$t/"* ]] || continue
+        [[ ${#t} -gt ${#best} ]] && best=$t && config=$conf_dir/$c.conf
+    done < <(configs)
+    [[ -n $best ]] && root=$best
+}
+# replica from an argument: full name, or the name on the source below the root (pull, --config)
+function resolve_replica() {
+    local arg=$1
+    valid_dataset "$arg" || die "invalid dataset '$arg'"
+    if [[ $direction == pull ]]; then
+        [[ $arg == "$root" || $arg == "$root/"* ]] || arg=$root/$arg
+    elif [[ -n $config ]]; then
+        [[ $arg == "$root/"* ]] || arg=$root/$arg
+    else
+        config_of "$arg" || die "$arg is not below the target of a configuration in $conf_dir"
+    fi
+    [[ $arg != "$root" ]] || die "$arg is the target of the configuration, choose a replica below it ($prog list)"
+    backup_zfs list -H -o name "$arg" > /dev/null 2>&1 || die "replica $arg does not exist"
+    echo "$arg"
+}
+# --config <name> (push, local): root = target of the configuration
+function use_config() {
+    need_zsync
+    [[ $1 =~ ^[A-Za-z0-9_.-]+$ && -f $conf_dir/$1.conf ]] || die "no configuration $conf_dir/$1.conf"
+    config=$conf_dir/$1.conf
+    root=$(conf_value "$config" target)
+    valid_dataset "$root" || die "invalid target in $config"
+}
+
+# replicas below the root with snapshots: name<TAB>type<TAB>used<TAB>encryption<TAB>encryptionroot<TAB>keystatus<TAB>count
+function replicas() {
+    local r=$1
+    awk -F'\t' 'FNR == 1 { file++ } file == 1 { sub(/@.*/, "", $1); n[$1]++; next } NF >= 6 && ($1 in n) { print $0 "\t" n[$1] }' \
+        <(backup_zfs list -H -o name -t snapshot -r "$r") \
+        <(backup_zfs list -H -o name,type,used,encryption,encryptionroot,keystatus -t filesystem,volume -r "$r") \
+        | awk -F'\t' -v r="$r" '$1 != r'
+}
+# send options of a replica: raw if it came encrypted from the source (encryption root below the root), else
+# decrypted and compressed; with the encryption of the backup server only with its key loaded; properties (-p) only
+# for a new dataset, reattach sends only data and leaves the properties of the dataset on the system as they are
+function send_flags() {
+    local r=$1 enc encroot keystatus props=" -p"
+    [[ $job_mode == reattach ]] && props=
+    IFS=$'\t' read -r enc encroot keystatus < <(backup_zfs get -H -o value encryption,encryptionroot,keystatus "$r" | paste -sd$'\t')
+    if [[ $enc == off ]]; then echo "-L -e -c$props"
+    elif [[ $encroot == "$root/"* ]]; then echo "-w$props"
+    elif [[ $keystatus == available ]]; then echo "-L -e -c$props"
+    else return 1; fi
+}
+function encryption_of() {
+    local r=$1 enc encroot
+    IFS=$'\t' read -r enc encroot < <(backup_zfs get -H -o value encryption,encryptionroot "$r" | paste -sd$'\t')
+    if [[ $enc == off ]]; then echo "-"
+    elif [[ $encroot == "$root/"* ]]; then echo "raw"
+    else echo "backup key"; fi
+}
+function chain_of_backup() {
+    backup_zfs list -H -o guid,name -s createtxg -t snapshot -d 1 "$1" 2> /dev/null | chain_names
+}
+function chain_of_system() {
+    system_zfs list -H -o guid,name -s createtxg -t snapshot -d 1 "$1" 2> /dev/null | chain_names
+}
+# estimated bytes of zfs send (dry run)
+function send_size() {
+    backup_zfs send "$@" -n -v -P 2>&1 | awk '$1 == "size" { s = $2 } END { print s + 0 }'
+}
+
+#### list and show
+function cmd_list() {
+    local roots=() r line name type used enc encroot keystatus count original state common missing diverged newest dst_all cmp
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --from|--to) parse_connection "$1" "$2"; shift ;;
+            --config) use_config "$2"; shift ;;
+            *) usage ;;
+        esac
+        shift
+    done
+    need_root; connect
+    if [[ -n $root ]]; then roots=("$root")
+    else need_zsync; mapfile -t roots < <(configs | cut -f2); fi
+    [ ${#roots[@]} -gt 0 ] || die "no replicas (no configuration in $conf_dir)"
+    [[ $direction != local ]] && dst_all=$(system_zfs list -H -o guid,name -s createtxg -t snapshot 2> /dev/null)
+    for r in "${roots[@]}"; do
+        root=$r
+        echo "replicas below $r${config:+ ($(basename "$config" .conf))}:"
+        printf '  %-48s %-7s %6s %-30s %-10s %s\n' DATASET TYPE SNAPS NEWEST ENCRYPTION "$([[ $direction != local ]] && echo "ON $(system_name)")"
+        while IFS=$'\t' read -r name type used enc encroot keystatus count; do
+            original=${name#"$r/"}
+            newest=$(backup_zfs list -H -o name -S createtxg -t snapshot -d 1 "$name" | head -1)
+            state=
+            if [[ $direction != local ]]; then
+                cmp=$(chain_compare "$(chain_of_backup "$name")" "$(awk -F'\t' -v d="$original" 'index($2, d "@") == 1' <<< "$dst_all" | chain_names)")
+                common=$(sed -n 's/^common=//p' <<< "$cmp"); missing=$(sed -n 's/^missing=//p' <<< "$cmp")
+                diverged=$(sed -n 's/^diverged=//p' <<< "$cmp")
+                if ! system_exists "$original"; then state="missing"
+                elif [[ -z $common ]]; then state="no common snapshot"
+                elif [ "$diverged" -gt 0 ]; then state="diverged ($diverged newer there), $missing to restore"
+                elif [ "$missing" -gt 0 ]; then state="$missing snapshots behind"
+                else state="up to date"; fi
+            fi
+            [[ $enc == off ]] && enc=- || { [[ $encroot == "$r/"* ]] && enc=raw || enc="backup key"; }
+            printf '  %-48s %-7s %6s %-30s %-10s %s\n' "$original" "$type" "$count" "${newest#*@}" "$enc" "$state"
+        done < <(replicas "$r")
+    done
+}
+
+function cmd_show() {
+    local arg= r original src dst cmp common missing diverged mark g n created
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --from|--to) parse_connection "$1" "$2"; shift ;;
+            --config) use_config "$2"; shift ;;
+            -*) usage ;;
+            *) arg=$1 ;;
+        esac
+        shift
+    done
+    [[ -n $arg ]] || usage
+    need_root; connect
+    r=$(resolve_replica "$arg") || exit 1
+    [[ $direction == pull || -n $config ]] || config_of "$r"
+    original=${r#"$root/"}
+    src=$(chain_of_backup "$r")
+    echo "replica  $r ($(backup_zfs get -H -o value type "$r"), $(backup_zfs get -H -o value used "$r"), encryption: $(encryption_of "$r"))"
+    if [[ $direction == local ]] || ! system_exists "$original"; then
+        [[ $direction != local ]] && echo "system   $original does not exist on $(system_name)"
+        dst=
+    else
+        dst=$(chain_of_system "$original")
+        cmp=$(chain_compare "$src" "$dst")
+        common=$(sed -n 's/^common=//p' <<< "$cmp"); missing=$(sed -n 's/^missing=//p' <<< "$cmp")
+        diverged=$(sed -n 's/^diverged=//p' <<< "$cmp")
+        echo "system   $original on $(system_name): ${common:+common snapshot $common, }$missing missing there${diverged:+, $diverged only there after the common one}"
+    fi
+    echo "  = on both   + missing on the system   ! only on the system, after the common snapshot"
+    while IFS=$'\t' read -r g n; do
+        [[ -n $g ]] || continue
+        if [[ -n $dst ]] && grep -q "^$g"$'\t' <<< "$dst"; then mark="="; else mark="+"; fi
+        created=$(backup_zfs list -H -o creation "$r@$n" 2> /dev/null)
+        printf '  %s %-40s %s\n' "$mark" "$n" "$created"
+    done <<< "$src"
+    if [[ -n $dst && -n $common ]]; then
+        while read -r n; do [[ -n $n ]] && printf '  ! %s\n' "$n"; done < <(awk -F'\t' 'FNR == 1 { file++ } file == 1 { g[$1] = 1; next } !($1 in g) && seen { print $2 } $2 == c { seen = 1 }' c="$common" <(printf '%s\n' "$src") <(printf '%s\n' "$dst"))
+    fi
+    local conn=; [[ $direction == pull ]] && conn=" --from $login$([[ $port != 22 ]] && echo ":$port")"
+    [[ $direction == push ]] && conn=" --to ${login#root@}$([[ $port != 22 ]] && echo ":$port")"
+    echo "restore:"
+    if [[ -n $common ]]; then
+        echo "    $prog reattach$conn $r"
+    else
+        echo "    $prog dataset$conn $r$([[ -n $dst ]] && echo " --as $original-restored")"
+    fi
+}
+
+#### restore jobs: $lib_dir/jobs/<id>.job (settings as data, never run), <id>.steps (steps done), <id>.log,
+# <id>.report; state of a running job in $run_dir/<id>.state
+jobs_dir=$lib_dir/jobs
+valid_id() { [[ $1 =~ ^[0-9]{8}-[0-9]{6}-[0-9a-f]{4}$ ]]; }
+
+# job settings: fixed keys, each value checked; item=<replica>\t<destination>\t<snapshot>\t<aside 0|1>
+function load_job() {
+    local id=$1 line key value r d s a
+    valid_id "$id" || die "invalid job id '$id'"
+    job_file=$jobs_dir/$id.job
+    [[ -f $job_file && ! -L $job_file && -O $job_file ]] || die "no job $id"
+    job_id=$id job_mode= job_created= job_force=0 job_rollback=0 job_scrub=0 job_bwlimit= job_config= job_key= items=()
+    direction=local login= port=22 root=
+    while IFS= read -r line; do
+        [[ -z $line || $line == \#* ]] && continue
+        key=${line%%=*}; value=${line#*=}
+        case $key in
+            mode) [[ $value =~ ^(dataset|reattach|server)$ ]] && job_mode=$value ;;
+            created) [[ $value =~ ^[0-9]+$ ]] && job_created=$value ;;
+            direction) [[ $value =~ ^(pull|push|local)$ ]] && direction=$value ;;
+            login) [[ $value =~ ^[a-z_][a-z0-9_-]{0,31}@[A-Za-z0-9.:-]+$ ]] && valid_host "${value#*@}" && login=$value ;;
+            port) [[ $value =~ ^[0-9]{1,5}$ ]] && port=$value ;;
+            root) valid_dataset "$value" && root=$value ;;
+            config) [[ $value =~ ^/[A-Za-z0-9_./-]+\.conf$ && $value != *..* ]] && job_config=$value ;;
+            # key of the pull (the job may run as systemd unit without the environment of its creation)
+            key) [[ $value =~ ^/[A-Za-z0-9_./-]+$ && $value != *..* ]] && job_key=$value ;;
+            force|rollback|scrub) [[ $value =~ ^[01]$ ]] && printf -v "job_$key" '%s' "$value" ;;
+            bwlimit) [[ $value =~ ^[0-9]+[kmgKMG]?$ ]] && job_bwlimit=$value ;;
+            item)
+                IFS=$'\t' read -r r d s a <<< "$value"
+                valid_dataset "$r" && valid_dataset "$d" && [[ $s =~ ^[A-Za-z0-9_.:-]+$ && $a =~ ^[01]$ ]] || die "invalid item in $job_file: $value"
+                items+=("$r"$'\t'"$d"$'\t'"$s"$'\t'"$a") ;;
+            *) die "unknown setting '$key' in $job_file" ;;
+        esac
+    done < "$job_file"
+    [[ -n $job_mode && -n $root && ${#items[@]} -gt 0 ]] || die "incomplete job $job_file"
+    [[ $direction == local || -n $login ]] || die "job $id without login"
+    for line in "${items[@]}"; do [[ ${line%%$'\t'*} == "$root/"* ]] || die "item outside of $root in $job_file"; done
+}
+
+function step_done() { grep -qxF "$1" "$jobs_dir/$job_id.steps" 2> /dev/null; }
+function mark_done() { echo "$1" >> "$jobs_dir/$job_id.steps"; }
+
+# properties to restore: the original values of the source saved on the replica (bashclub:zsync-source.*), only
+# those set locally (or received) there; mountpoint and the tag only at the original place
+function restore_props() {
+    local r=$1 d=$2 prop value src
+    while IFS=$'\t' read -r prop value; do
+        prop=${prop#bashclub:zsync-source.}
+        src=${value%%:*}; value=${value#*:}
+        [[ $src == local || $src == received ]] || continue
+        if [[ $d != "${r#"$root/"}" ]] && [[ $prop == mountpoint || ( $prop == *:* && $prop != com.sun:auto-snapshot ) ]]; then continue; fi
+        printf '%s=%s\n' "$prop" "$value"
+    done < <(backup_zfs get -H -o property,value -s local all "$r" 2> /dev/null | grep '^bashclub:zsync-source\.')
+}
+# receive options: properties set locally on the replica are not taken (mountpoint and canmount of the backup server,
+# refquota raised there, user properties of bashclub-zsync), the original values come with restore_props
+function receive_excludes() {
+    local r=$1 type prop
+    type=$(backup_zfs get -H -o value type "$r")
+    [[ $type == filesystem ]] && printf -- '-x\n%s\n' mountpoint canmount refquota
+    backup_zfs get -H -o property -s local all "$r" 2> /dev/null | grep ':' | while read -r prop; do printf -- '-x\n%s\n' "$prop"; done
+}
+
+# next step of an item, planned from what is on the system (the same after an abort, a restart or resume):
+#   aside | parent <dataset> | full <snapshot> | resume <token> | rollback <snapshot> | incr <from> <to> | props |
+#   mount | done | error <message>
+function next_step() {
+    local r=$1 d=$2 s=$3 aside=$4 src want token dst cmp common missing diverged written parent
+    src=$(chain_of_backup "$r")
+    want=$(chain_upto "$src" "$s")
+    [[ -n $want ]] || { echo "error snapshot $s does not exist on $r"; return; }
+    if [[ $aside == 1 ]] && ! step_done "aside $d" && system_exists "$d"; then echo "aside"; return; fi
+    if ! system_exists "$d"; then
+        [[ $job_mode == reattach ]] && { echo "error $d does not exist on $(system_name)"; return; }
+        parent=${d%/*}
+        if [[ $d != */* ]]; then echo "error pool $d does not exist on $(system_name)"; return; fi
+        system_exists "$parent" || { echo "parent $parent"; return; }
+        echo "full $(head -1 <<< "$want" | cut -f2)"; return
+    fi
+    token=$(system_zfs get -H -o value receive_resume_token "$d" 2> /dev/null)
+    if [[ -n $token && $token != "-" ]]; then echo "resume $token"; return; fi
+    dst=$(chain_of_system "$d")
+    cmp=$(chain_compare "$want" "$dst")
+    common=$(sed -n 's/^common=//p' <<< "$cmp"); missing=$(sed -n 's/^missing=//p' <<< "$cmp")
+    diverged=$(sed -n 's/^diverged=//p' <<< "$cmp")
+    if [[ -z $common ]]; then
+        if [[ $job_mode == reattach ]]; then echo "error $d has no snapshot in common with $r"
+        else echo "error $d exists without a snapshot in common with $r"; fi
+        return
+    fi
+    if [ "$diverged" -gt 0 ] && [ "$missing" -gt 0 ]; then
+        if [[ $job_mode == reattach && $job_rollback == 1 ]]; then echo "rollback $common"; return; fi
+        echo "error $d has $diverged snapshots after $common that are not on the backup (--rollback destroys them)"; return
+    fi
+    if [ "$missing" -gt 0 ]; then
+        if [[ $job_mode == reattach && $job_rollback != 1 ]]; then
+            written=$(system_zfs get -Hp -o value "written@$common" "$d" 2> /dev/null)
+            if [[ $written =~ ^[0-9]+$ ]] && [ "$written" -gt 0 ]; then
+                echo "error $d was changed after $common ($(size "$written")), --rollback discards the changes"; return
+            fi
+        fi
+        echo "incr $common $s"; return
+    fi
+    if [[ $job_mode != reattach ]]; then
+        step_done "props $d" || { echo "props"; return; }
+        step_done "mount $d" || { echo "mount"; return; }
+    fi
+    echo "done"
+}
+
+#### state of a running job (key=value, written whole and renamed), on push also on the system
+function state_write() {
+    local f=$run_dir/$job_id.state now rate=0 eta=
+    now=$(date +%s)
+    if [ $((now - st_started)) -gt 0 ] && [ "$st_done" -gt "$st_done0" ]; then
+        rate=$(( (st_done - st_done0) / (now - st_started) ))
+        [ "$rate" -gt 0 ] && [ "$st_total" -gt "$st_done" ] && eta=$(( (st_total - st_done) / rate ))
+    fi
+    install -d -m 700 "$run_dir"
+    printf 'id=%s\npid=%s\nphase=%s\nitem=%s\nitems=%s\ndataset=%s\nstep=%s\nbytes_done=%s\nbytes_total=%s\nrate=%s\neta=%s\nstarted=%s\nupdated=%s\nerror=%s\n' \
+        "$job_id" "$$" "$st_phase" "$st_item" "${#items[@]}" "$st_dataset" "$st_step" "$st_done" "$st_total" "$rate" "$eta" \
+        "$st_started" "$now" "$st_error" > "$f.tmp" && mv "$f.tmp" "$f"
+    # push: a copy on the system, readable there without this package
+    if [[ $direction == push ]] && [ $((now - ${st_copied:-0})) -ge 30 -o "$st_phase" != transfer ]; then
+        timeout 20 ssh "${ssh_opts[@]}" "$login" "cat > /run/bashclub-zsync-restore.state" < "$f" 2> /dev/null
+        st_copied=$now
+    fi
+}
+
+# progress lines of zfs send -v -P (per second: time, bytes of the current snapshot, snapshot); -I sends one stream
+# per snapshot, their bytes add up
+function progress() {
+    local base=$1 t b s cur= last=0 sum=0 written=0
+    while IFS=$'\t' read -r t b s; do
+        if [[ $t =~ ^[0-9]{2}:[0-9]{2}:[0-9]{2}$ && $b =~ ^[0-9]+$ ]]; then
+            [[ $s != "$cur" ]] && { sum=$((sum + last)); cur=$s; }
+            last=$b
+            st_done=$((base + sum + last))
+            [ $((SECONDS - written)) -ge 1 ] && { state_write; written=$SECONDS; }
+        elif [[ $t != full && $t != incremental && $t != size && $t != resume ]] && [[ -n $t ]]; then
+            echo "$t${b:+ $b}${s:+ $s}"
+        fi
+    done
+    echo "$((base + sum + last))" > "$run_dir/$job_id.bytes"
+}
+
+function throttle() {
+    if [[ -n $job_bwlimit ]] && command -v pv > /dev/null; then pv -q -L "$job_bwlimit"; else cat; fi
+}
+
+# zfs send on the backup side | zfs receive on the system side, with progress
+function transfer() {
+    local r=$1 d=$2; shift 2
+    local send=("$@") recv=(-s -u) rc
+    [[ $job_mode != reattach ]] && mapfile -t -O 2 recv < <(receive_excludes "$r")
+    [[ $job_mode != reattach || $job_rollback == 1 ]] && recv+=(-F)
+    log "backup: zfs send ${send[*]} -v -P | $(system_name): zfs receive ${recv[*]} $d"
+    rm -f "$run_dir/$job_id.bytes"
+    if [[ $direction == pull ]]; then
+        ssh -n "${ssh_opts[@]}" "$login" "zfs send ${send[*]} -v -P" 2> >(progress "$st_done" >&3) | throttle | system_receive "${recv[@]}" "$d"
+    else
+        zfs send "${send[@]}" -v -P 2> >(progress "$st_done" >&3) | throttle | system_receive "${recv[@]}" "$d"
+    fi
+    rc=("${PIPESTATUS[@]}")
+    sleep 0.2
+    [[ -f $run_dir/$job_id.bytes ]] && st_done=$(cat "$run_dir/$job_id.bytes")
+    [ "${rc[0]}" -eq 0 ] && [ "${rc[2]}" -eq 0 ]
+}
+
+function log() { echo "$(date '+%Y-%m-%d %H:%M:%S') $*"; }
+function size() { numfmt --to=iec-i --suffix=B "${1:-0}" 2> /dev/null || echo "$1 bytes"; }
+
+# one item: steps until done, a failed step is retried with a growing pause (resumed where it stopped)
+held=()
+function run_item() {
+    local r=$1 d=$2 s=$3 aside=$4 step args flags attempt=1 count=0 snaps
+    flags=$(send_flags "$r") || { st_error="$r is encrypted with the key of the backup server, which is not loaded"; log "ERROR $st_error"; return 1; }
+    # holds: the rotation of bashclub-zsync cannot destroy a snapshot of the restore
+    mapfile -t snaps < <(chain_upto "$(chain_of_backup "$r")" "$s" | cut -f2 | sed "s|^|$r@|")
+    if [ ${#snaps[@]} -gt 0 ]; then
+        backup_zfs release "zsync-restore-$job_id" "${snaps[@]}" > /dev/null 2>&1
+        backup_zfs hold "zsync-restore-$job_id" "${snaps[@]}" && held=("${snaps[@]}")
+    fi
+    while [ $count -lt 100 ]; do
+        ((count++))
+        step=$(next_step "$r" "$d" "$s" "$aside")
+        args=${step#* }; step=${step%% *}
+        st_step=$step; state_write
+        case $step in
+            done) break ;;
+            error) st_error="$args"; log "ERROR $d: $args"; release_held; return 1 ;;
+            aside)
+                local aside_name=$d.before-restore-$(date +%Y%m%d-%H%M)
+                log "$d exists: renamed to $aside_name"
+                system_zfs rename "$d" "$aside_name" && mark_done "aside $d" || { failed_step "rename $d" && continue || return 1; }
+                if [[ $(system_zfs get -H -o value type "$aside_name") == filesystem ]]; then
+                    system_zfs set canmount=noauto "$aside_name"; system_zfs unmount "$aside_name" 2> /dev/null
+                fi ;;
+            parent)
+                log "creating $args"
+                system_zfs create -p "$args" || { failed_step "create $args" && continue || return 1; } ;;
+            full)
+                log "full: $r@$args -> $d"
+                # shellcheck disable=SC2086
+                transfer "$r" "$d" $flags "$r@$args" || { failed_step "full $r@$args" && continue || return 1; } ;;
+            resume)
+                log "resume: $d"
+                transfer "$r" "$d" -t "$args" || { failed_step "resume $d" && continue || return 1; } ;;
+            incr)
+                log "incremental: $r@${args% *} -> @${args#* } -> $d"
+                # shellcheck disable=SC2086
+                transfer "$r" "$d" $flags -I "$r@${args% *}" "$r@${args#* }" || { failed_step "incremental $d" && continue || return 1; } ;;
+            rollback)
+                log "rollback: $d@$args (destroys the newer snapshots there)"
+                system_zfs rollback -r "$d@$args" && mark_done "rollback $d" || { failed_step "rollback $d" && continue || return 1; } ;;
+            props)
+                local p
+                while read -r p; do
+                    [[ -n $p ]] || continue
+                    log "set $p on $d"
+                    system_zfs set "$p" "$d" || log "WARN setting $p on $d failed"
+                done < <(restore_props "$r" "$d")
+                mark_done "props $d" ;;
+            mount)
+                mount_restored "$d"
+                mark_done "mount $d" ;;
+        esac
+    done
+    release_held
+}
+# a failed transfer: try again after a pause (30 s, 60 s, ...), at most $attempts times
+function failed_step() {
+    st_error="$1 failed"
+    if [ $attempt -ge $attempts ]; then log "ERROR $st_error, giving up after $attempt attempts"; release_held; return 1; fi
+    log "WARN $st_error (attempt $attempt of $attempts), next attempt in $((retry_delay * (1 << (attempt - 1))))s"
+    st_phase=waiting; state_write
+    sleep $((retry_delay * (1 << (attempt - 1))))
+    st_phase=transfer
+    ((attempt++))
+    return 0
+}
+function release_held() {
+    [ ${#held[@]} -gt 0 ] && backup_zfs release "zsync-restore-$job_id" "${held[@]}" > /dev/null 2>&1
+    held=()
+}
+# mount a restored filesystem like the source had it (canmount=on), if its key is loaded
+function mount_restored() {
+    local d=$1 type canmount mountpoint keystatus
+    IFS=$'\t' read -r type canmount mountpoint keystatus < <(system_zfs get -H -o value type,canmount,mountpoint,keystatus "$d" | paste -sd$'\t')
+    [[ $type == filesystem && $canmount == on && $mountpoint != none && $mountpoint != legacy ]] || return 0
+    [[ $keystatus == unavailable ]] && { log "$d: key not loaded, not mounted"; return 0; }
+    [[ $(system_zfs get -H -o value mounted "$d") == yes ]] && return 0
+    system_zfs mount "$d" || log "WARN mounting $d failed"
+}
+
+#### final check per item against the plan, report: OK|WARN|ERROR <TAB> dataset <TAB> details
+function verify_item() {
+    local r=$1 d=$2 s=$3 want dst token detail=() level=OK lr ld p expected value src enc keystatus encroot
+    want=$(chain_upto "$(chain_of_backup "$r")" "$s")
+    if ! system_exists "$d"; then printf 'ERROR\t%s\tdoes not exist\n' "$d"; return; fi
+    token=$(system_zfs get -H -o value receive_resume_token "$d")
+    [[ -n $token && $token != "-" ]] && { level=ERROR; detail+=("partial receive left (receive_resume_token)"); }
+    dst=$(chain_of_system "$d")
+    if [[ $job_mode == reattach ]]; then
+        if ! grep -q "^$(tail -1 <<< "$want" | cut -f1)"$'\t' <<< "$dst"; then level=ERROR; detail+=("$s missing")
+        elif [[ $(tail -1 <<< "$dst" | cut -f2) != "$s" ]]; then [[ $level == OK ]] && level=WARN; detail+=("newer snapshots than $s on the system"); fi
+    elif chain_equal "$want" "$dst"; then :
+    elif chain_contains "$dst" "$want"; then [[ $level == OK ]] && level=WARN; detail+=("more snapshots than planned")
+    else level=ERROR; detail+=("snapshots differ from the plan ($(grep -c . <<< "$dst") of $(grep -c . <<< "$want"))"); fi
+    if grep -q "^$(tail -1 <<< "$want" | cut -f1)"$'\t' <<< "$dst"; then
+        lr=$(backup_zfs get -Hp -o value logicalreferenced "$r@$s"); ld=$(system_zfs get -Hp -o value logicalreferenced "$d@$s")
+        [[ $lr == "$ld" ]] || { [[ $level == OK ]] && level=WARN; detail+=("logicalreferenced $ld instead of $lr"); }
+    fi
+    if [[ $job_mode != reattach ]]; then
+        while IFS='=' read -r p expected; do
+            [[ -n $p ]] || continue
+            IFS=$'\t' read -r value src < <(system_zfs get -H -o value,source "$p" "$d")
+            [[ $value == "$expected" && $src == local ]] || { [[ $level == OK ]] && level=WARN; detail+=("$p=$value instead of $expected"); }
+        done < <(restore_props "$r" "$d")
+        if [[ -z $(backup_zfs get -H -o property -s local all "$r" | grep '^bashclub:zsync-source\.') ]]; then
+            [[ $level == OK ]] && level=WARN; detail+=("no original properties on the replica (bashclub-zsync before 2.0), check mountpoint and canmount")
+        fi
+    fi
+    IFS=$'\t' read -r enc keystatus encroot < <(system_zfs get -H -o value encryption,keystatus,encryptionroot "$d" | paste -sd$'\t')
+    if [[ $enc != off ]]; then
+        if [[ $keystatus == available ]]; then detail+=("encrypted, key loaded")
+        else detail+=("encrypted, load the key: zfs load-key $encroot"); fi
+        if [[ $(encryption_of "$r") == raw ]] && [[ $(backup_zfs get -H -o value encryptionroot "$r") != "$r" && $encroot == "$d" ]]; then
+            detail+=("the source inherited the key: zfs change-key -i $d after loading the key of ${d%/*}")
+        fi
+    fi
+    printf '%s\t%s\t%s\n' "$level" "$d" "$(IFS=';'; echo "${detail[*]}" | sed 's/;/; /g')"
+}
+
+function cmd_run() {
+    local id=$1 line r d s a rc=0 i report level pools p
+    need_root
+    load_job "$id"
+    install -d -m 700 "$run_dir"
+    exec 7< "$job_file"
+    flock -n 7 || die "job $id is already running"
+    exec > >(tee -a "$jobs_dir/$id.log") 2>&1
+    # fd 3: the log, also for the progress reader inside a pipeline (whose stdout would be the stream)
+    exec 3>&1
+    attempts=${ZSYNC_RESTORE_ATTEMPTS:-4} retry_delay=${ZSYNC_RESTORE_RETRY_DELAY:-30}
+    st_phase=planning st_item=0 st_dataset= st_step= st_done=0 st_done0=0 st_total=0 st_error= st_started=$(date +%s)
+    trap 'st_phase=stopped; st_error="stopped"; release_held; state_write; log "stopped"; exit 143' TERM INT
+    trap 'release_held' EXIT
+    log "restore job $id ($job_mode, $direction${login:+ $login}), ${#items[@]} datasets"
+    connect
+    [[ -n $job_bwlimit ]] && ! command -v pv > /dev/null && log "WARN pv is not installed, transfer without bandwidth limit"
+    # reattach on this host (push, local): no run of the configuration at the same time
+    if [[ $job_mode == reattach && $direction != pull && -n $job_config && -f $job_config ]]; then
+        exec 8< "$job_config"
+        if ! flock -n 8; then log "waiting for the run of $job_config"; st_phase=waiting; state_write; flock 8; fi
+    fi
+    # estimated size of everything still to transfer
+    state_write
+    for line in "${items[@]}"; do
+        IFS=$'\t' read -r r d s a <<< "$line"
+        st_total=$((st_total + $(estimate_item "$r" "$d" "$s" "$(send_flags "$r" 2> /dev/null)")))
+    done
+    log "to transfer: about $(size "$st_total")"
+    st_phase=transfer
+    i=0
+    for line in "${items[@]}"; do
+        IFS=$'\t' read -r r d s a <<< "$line"
+        ((i++)); st_item=$i st_dataset=$d st_error=
+        log "[$i/${#items[@]}] $r -> $d (up to $s)"
+        run_item "$r" "$d" "$s" "$a" || rc=1
+    done
+    st_phase=verify; state_write
+    report=$jobs_dir/$id.report
+    : > "$report.tmp"
+    for line in "${items[@]}"; do
+        IFS=$'\t' read -r r d s a <<< "$line"
+        verify_item "$r" "$d" "$s" >> "$report.tmp"
+    done
+    if [[ $job_scrub == 1 ]]; then
+        pools=$(for line in "${items[@]}"; do IFS=$'\t' read -r r d s a <<< "$line"; echo "${d%%/*}"; done | sort -u)
+        for p in $pools; do
+            log "scrub of $p"
+            system_zpool scrub -w "$p"
+            if system_zpool status -x "$p" | grep -q "is healthy"; then printf 'OK\tpool %s\tscrub without errors\n' "$p" >> "$report.tmp"
+            else printf 'ERROR\tpool %s\tscrub: %s\n' "$p" "$(system_zpool status -x "$p" | grep -m1 -E 'errors:|status:')" >> "$report.tmp"; fi
+        done
+    fi
+    mv "$report.tmp" "$report"
+    show_report "$report"
+    if grep -q '^ERROR' "$report"; then rc=2; elif grep -q '^WARN' "$report"; then [ $rc -eq 0 ] && rc=1; fi
+    if [ $rc -eq 0 ]; then st_phase=done; else st_phase=failed; fi
+    st_step=; state_write
+    log "restore job $id: $st_phase"
+    return $rc
+}
+function system_zpool() {
+    if [[ $direction == push ]]; then ssh -n "${ssh_opts[@]}" "$login" "$(printf '%q ' zpool "$@")"; else zpool "$@"; fi
+}
+# bytes still to send for an item (dry run of the remaining streams)
+function estimate_item() {
+    local r=$1 d=$2 s=$3 flags=$4 src want first token cmp common
+    [[ -n $flags ]] || { echo 0; return; }
+    src=$(chain_of_backup "$r"); want=$(chain_upto "$src" "$s")
+    [[ -n $want ]] || { echo 0; return; }
+    first=$(head -1 <<< "$want" | cut -f2)
+    # shellcheck disable=SC2086
+    if ! system_exists "$d"; then
+        local full incr=0
+        full=$(send_size $flags "$r@$first")
+        [[ $first != "$s" ]] && incr=$(send_size $flags -I "$r@$first" "$r@$s")
+        echo $((full + incr)); return
+    fi
+    token=$(system_zfs get -H -o value receive_resume_token "$d" 2> /dev/null)
+    if [[ -n $token && $token != "-" ]]; then send_size -t "$token"; return; fi
+    cmp=$(chain_compare "$want" "$(chain_of_system "$d")")
+    common=$(sed -n 's/^common=//p' <<< "$cmp")
+    if [[ -n $common && $common != "$s" ]]; then send_size $flags -I "$r@$common" "$r@$s"; else echo 0; fi
+}
+
+function show_report() {
+    local level d detail
+    printf '%-6s %-50s %s\n' RESULT DATASET DETAILS
+    while IFS=$'\t' read -r level d detail; do
+        printf '%-6s %-50s %s\n' "$level" "$d" "$detail"
+    done < "$1"
+}
+
+#### create a job: dataset, reattach
+function new_job_id() { echo "$(date +%Y%m%d-%H%M%S)-$(od -An -N2 -tx1 /dev/urandom | tr -d ' \n')"; }
+
+# items of a replica: itself and with --recursive its children with snapshots (parents first, no old chains of
+# rollbacks or renamed broken replicas); the snapshot of a child: the same name, or its newest not newer than it
+function job_items() {
+    local r=$1 dest=$2 snap=$3 recursive=$4 c cd cs created
+    [[ -n $snap ]] || snap=$(backup_zfs list -H -o name -S createtxg -t snapshot -d 1 "$r" | head -1 | cut -d@ -f2)
+    [[ -n $snap ]] || die "$r has no snapshots"
+    backup_zfs list -H -o name "$r@$snap" > /dev/null 2>&1 || die "snapshot $r@$snap does not exist"
+    printf '%s\t%s\t%s\n' "$r" "$dest" "$snap"
+    [[ $recursive == 1 ]] || return 0
+    created=$(backup_zfs get -Hp -o value creation "$r@$snap")
+    while IFS=$'\t' read -r c _; do
+        [[ $c == "$r/"* ]] || continue
+        if [[ $c =~ \.(zsync-branch|broken|before-restore)-[0-9-]+(/|$) ]]; then echo "skipped: $c (old chain)" >&2; continue; fi
+        cd=$dest${c#"$r"}
+        if backup_zfs list -H -o name "$c@$snap" > /dev/null 2>&1; then cs=$snap
+        else cs=$(backup_zfs list -Hp -o name,creation -s createtxg -t snapshot -d 1 "$c" | awk -F'\t' -v t="$created" '$2 <= t { n = $1 } END { sub(/.*@/, "", n); print n }'); fi
+        [[ -n $cs ]] || { echo "skipped: $c (no snapshot up to $snap)" >&2; continue; }
+        printf '%s\t%s\t%s\n' "$c" "$cd" "$cs"
+    done < <(replicas "$r" | sort)
+}
+
+function cmd_job() {
+    local mode=$1; shift
+    local arg= as= snap= recursive=0 force=0 rollback=0 scrub=0 bwlimit= dry=0 start=0 r line rr d s a errors=0 id
+    local plan=() total=0 flags action cmp common missing diverged first size_item src want dst
+    while [ $# -gt 0 ]; do
+        case $1 in
+            --from|--to) parse_connection "$1" "$2"; shift ;;
+            --config) use_config "$2"; shift ;;
+            --as) [[ $mode == dataset ]] || usage; valid_dataset "$2" || die "invalid --as '$2'"; as=$2; shift ;;
+            --snapshot) [[ $2 =~ ^[A-Za-z0-9_.:-]+$ ]] || die "invalid --snapshot '$2'"; snap=$2; shift ;;
+            --recursive|-r) recursive=1 ;;
+            --force) [[ $mode == dataset ]] || usage; force=1 ;;
+            --rollback) [[ $mode == reattach ]] || usage; rollback=1 ;;
+            --scrub) scrub=1 ;;
+            --bwlimit) [[ $2 =~ ^[0-9]+[kmgKMG]?$ ]] || die "invalid --bwlimit '$2' (e.g. 10m)"; bwlimit=$2; shift ;;
+            --dry-run|-n) dry=1 ;;
+            --start) start=1 ;;
+            -*) usage ;;
+            *) [[ -z $arg ]] || usage; arg=$1 ;;
+        esac
+        shift
+    done
+    [[ -n $arg ]] || usage
+    need_root; connect
+    r=$(resolve_replica "$arg") || exit 1
+    [[ $direction == pull || -n $config ]] || config_of "$r"
+    [[ -n $as ]] || as=${r#"$root/"}
+    mapfile -t plan < <(job_items "$r" "$as" "$snap" "$recursive")
+    [ ${#plan[@]} -gt 0 ] || exit 1
+    job_mode=$mode job_rollback=$rollback job_id=none
+    echo "restore plan ($mode, $([[ $direction == local ]] && echo "on this host" || echo "$direction ${login}")):"
+    printf '  %-50s %-40s %-26s %10s  %s\n' REPLICA "ON $(system_name)" "UP TO" SIZE ACTION
+    local items_out=() covered=
+    for line in "${plan[@]}"; do
+        IFS=$'\t' read -r rr d s <<< "$line"
+        a=0
+        flags=$(send_flags "$rr") || { action="ERROR: encrypted with the key of the backup server, load it first"; ((errors++)); flags=; }
+        src=$(chain_of_backup "$rr"); want=$(chain_upto "$src" "$s"); first=$(head -1 <<< "$want" | cut -f2)
+        size_item=0
+        if [[ -n $flags ]]; then
+            if [[ $mode == dataset ]]; then
+                if [[ -n $covered && $d == "$covered/"* ]]; then
+                    action="full, $(grep -c . <<< "$want") snapshots"
+                elif system_exists "$d"; then
+                    if [[ $force == 1 && $d == */* ]]; then
+                        a=1; covered=$d; action="exists: renamed to $d.before-restore-<time>, then full, $(grep -c . <<< "$want") snapshots"
+                    elif [[ $d != */* ]]; then action="ERROR: pool $d exists, restore below it (--as)"; ((errors++))
+                    else action="ERROR: exists (--force renames it, or --as another name)"; ((errors++)); fi
+                else
+                    action="full, $(grep -c . <<< "$want") snapshots"
+                    [[ $d == */* ]] && ! system_exists "${d%/*}" && ! printf '%s\n' "${plan[@]}" | cut -f2 | grep -qxF "${d%/*}" && action+=", creates ${d%/*}"
+                fi
+                # shellcheck disable=SC2086
+                [[ $action != ERROR* ]] && size_item=$(( $(send_size $flags "$rr@$first") + $([[ $first != "$s" ]] && send_size $flags -I "$rr@$first" "$rr@$s" || echo 0) ))
+            else
+                if ! system_exists "$d"; then action="ERROR: does not exist on $(system_name) (dataset restores it)"; ((errors++))
+                else
+                    dst=$(chain_of_system "$d"); cmp=$(chain_compare "$want" "$dst")
+                    common=$(sed -n 's/^common=//p' <<< "$cmp"); missing=$(sed -n 's/^missing=//p' <<< "$cmp"); diverged=$(sed -n 's/^diverged=//p' <<< "$cmp")
+                    if [[ -z $common ]]; then action="ERROR: no snapshot in common (dataset --as restores it beside)"; ((errors++))
+                    elif [ "$missing" -eq 0 ]; then action="up to date"
+                    elif [ "$diverged" -gt 0 ] && [[ $rollback != 1 ]]; then action="ERROR: $diverged snapshots after $common only on the system (--rollback destroys them)"; ((errors++))
+                    else
+                        action="$missing snapshots after $common"
+                        [ "$diverged" -gt 0 ] && action+=", rollback destroys $diverged snapshots there: $(chain_after "$dst" "$common" | paste -sd' ')"
+                        # shellcheck disable=SC2086
+                        size_item=$(send_size $flags -I "$rr@$common" "$rr@$s")
+                    fi
+                fi
+            fi
+        fi
+        total=$((total + size_item))
+        printf '  %-50s %-40s %-26s %10s  %s\n' "${rr#"$root/"}" "$d" "$s" "$(size "$size_item")" "$action"
+        items_out+=("$rr"$'\t'"$d"$'\t'"$s"$'\t'"$a")
+    done
+    # no second job on a dataset (or its parents and children) that a running job restores
+    local f other od
+    for f in "$jobs_dir"/*.job; do
+        [[ -f $f ]] || continue
+        other=$(basename "$f" .job)
+        [[ $(job_phase "$other") =~ ^(planning|transfer|waiting|verify)$ ]] || continue
+        while IFS=$'\t' read -r _ od _; do
+            for line in "${items_out[@]}"; do
+                IFS=$'\t' read -r rr d s a <<< "$line"
+                [[ $d == "$od" || $d == "$od/"* || $od == "$d/"* ]] && { echo "  ERROR: job $other is restoring $od"; ((errors++)); }
+            done
+        done < <(sed -n 's/^item=//p' "$f")
+    done
+    echo "  total about $(size "$total")$([[ $direction == push ]] && echo ", the replicas are held while the restore runs")"
+    [ $errors -eq 0 ] || die "$errors datasets cannot be restored like this"
+    if [ $dry -eq 1 ]; then
+        echo "commands (the executor plans each step again from what is on the system when it runs):"
+        for line in "${items_out[@]}"; do
+            IFS=$'\t' read -r rr d s a <<< "$line"
+            dry_commands "$rr" "$d" "$s" "$a" "$(send_flags "$rr")"
+        done
+        return 0
+    fi
+    id=$(new_job_id)
+    install -d -m 700 "$lib_dir" "$jobs_dir"
+    {
+        echo "# restore job, created $(date '+%Y-%m-%d %H:%M:%S') by ${SUDO_USER:-$(id -un)}: $prog $mode ..."
+        echo "mode=$mode"; echo "created=$(date +%s)"; echo "direction=$direction"
+        [[ -n $login ]] && echo "login=$login" && echo "port=$port"
+        [[ $direction == pull ]] && echo "key=$pull_key"
+        echo "root=$root"; [[ -n $config ]] && echo "config=$config"
+        echo "force=$force"; echo "rollback=$rollback"; echo "scrub=$scrub"
+        [[ -n $bwlimit ]] && echo "bwlimit=$bwlimit"
+        for line in "${items_out[@]}"; do echo "item=$line"; done
+    } > "$jobs_dir/$id.job"
+    chmod 600 "$jobs_dir/$id.job"
+    echo "job $id written: $jobs_dir/$id.job"
+    if [ $start -eq 0 ] && [ -t 0 ]; then
+        local answer; read -r -p "start the restore now? [y/N] " answer
+        [[ $answer =~ ^[yYjJ] ]] && start=1
+    fi
+    if [ $start -eq 1 ]; then
+        cmd_start "$id"
+        [ -t 1 ] && cmd_status "$id" --follow
+    else
+        echo "start it with: $prog start $id"
+    fi
+}
+
+# the commands of an item as planned now (dry run)
+function dry_commands() {
+    local r=$1 d=$2 s=$3 a=$4 flags=$5 want first excl=() cmp common p
+    [[ $job_mode != reattach ]] && mapfile -t excl < <(receive_excludes "$r")
+    want=$(chain_upto "$(chain_of_backup "$r")" "$s"); first=$(head -1 <<< "$want" | cut -f2)
+    local recv="zfs receive -s -u ${excl[*]}"
+    [[ $job_mode != reattach || $job_rollback == 1 ]] && recv+=" -F"
+    echo "  $d:"
+    if [[ $job_mode == reattach ]]; then
+        cmp=$(chain_compare "$want" "$(chain_of_system "$d")"); common=$(sed -n 's/^common=//p' <<< "$cmp")
+        [[ $job_rollback == 1 ]] && [ "$(sed -n 's/^diverged=//p' <<< "$cmp")" -gt 0 ] && echo "    system: zfs rollback -r $d@$common"
+        [[ $common != "$s" ]] && echo "    backup: zfs send $flags -I $r@$common $r@$s | system: $recv $d"
+        return
+    fi
+    [[ $a == 1 ]] && echo "    system: zfs rename $d $d.before-restore-<time>"
+    echo "    backup: zfs send $flags $r@$first | system: $recv $d"
+    [[ $first != "$s" ]] && echo "    backup: zfs send $flags -I $r@$first $r@$s | system: $recv $d"
+    while read -r p; do [[ -n $p ]] && echo "    system: zfs set $p $d"; done < <(restore_props "$r" "$d")
+}
+
+#### run in the background: systemd unit bashclub-zsync-restore@<id>.service, without systemd setsid
+function cmd_start() {
+    local id=$1
+    need_root
+    load_job "$id"
+    if [[ -f $run_dir/$id.state ]] && kill -0 "$(sed -n 's/^pid=//p' "$run_dir/$id.state")" 2> /dev/null; then die "job $id is already running"; fi
+    if [ -d /run/systemd/system ] && systemctl cat "bashclub-zsync-restore@$id.service" > /dev/null 2>&1; then
+        systemctl reset-failed "bashclub-zsync-restore@$id.service" 2> /dev/null
+        systemctl start --no-block "bashclub-zsync-restore@$id.service" || die "systemctl start failed"
+        echo "job $id started: bashclub-zsync-restore@$id.service (journalctl -u bashclub-zsync-restore@$id)"
+    else
+        setsid nohup "$0" run "$id" > /dev/null 2>&1 < /dev/null &
+        echo "job $id started in the background (log: $jobs_dir/$id.log)"
+    fi
+    sleep 1
+}
+function cmd_stop() {
+    local id=$1 pid
+    need_root
+    valid_id "$id" || die "invalid job id '$id'"
+    if [ -d /run/systemd/system ] && systemctl is-active -q "bashclub-zsync-restore@$id.service" 2> /dev/null; then
+        systemctl stop "bashclub-zsync-restore@$id.service"
+    else
+        pid=$(sed -n 's/^pid=//p' "$run_dir/$id.state" 2> /dev/null)
+        [[ $pid =~ ^[0-9]+$ ]] && kill -0 "$pid" 2> /dev/null || die "job $id is not running"
+        kill -TERM -- "-$pid" 2> /dev/null || kill -TERM "$pid"
+    fi
+    echo "job $id stopped, continue it with: $prog resume $id"
+}
+
+#### status: all jobs, or one job (with --follow redrawn until it ends, Ctrl-C ends only the display)
+function job_phase() {
+    local id=$1 f=$run_dir/$1.state pid phase
+    phase=$(sed -n 's/^phase=//p' "$f" 2> /dev/null)
+    pid=$(sed -n 's/^pid=//p' "$f" 2> /dev/null)
+    if [[ $phase =~ ^(planning|transfer|waiting|verify)$ ]] && ! kill -0 "$pid" 2> /dev/null; then phase="aborted"; fi
+    if [[ -z $phase ]]; then
+        if [[ -f $jobs_dir/$id.report ]]; then grep -q '^ERROR\|^WARN' "$jobs_dir/$id.report" && phase=failed || phase=done
+        elif [[ -f $jobs_dir/$id.log ]]; then phase=aborted
+        else phase=new; fi
+    fi
+    echo "$phase"
+}
+function bar() {
+    local done=$1 total=$2 width=30 n
+    [ "$total" -gt 0 ] || total=1
+    n=$((done * width / total)); [ $n -gt $width ] && n=$width
+    printf '[%s%s] %3d%%' "$(printf '%*s' $n '' | tr ' ' '#')" "$(printf '%*s' $((width - n)) '' | tr ' ' '-')" $((done * 100 / total > 100 ? 100 : done * 100 / total))
+}
+function status_once() {
+    local id=$1 f=$run_dir/$1.state phase
+    phase=$(job_phase "$id")
+    echo "job $id: $phase"
+    if [[ -f $f ]]; then
+        local item items dataset step done total rate eta error
+        item=$(sed -n 's/^item=//p' "$f"); items=$(sed -n 's/^items=//p' "$f"); dataset=$(sed -n 's/^dataset=//p' "$f")
+        step=$(sed -n 's/^step=//p' "$f"); done=$(sed -n 's/^bytes_done=//p' "$f"); total=$(sed -n 's/^bytes_total=//p' "$f")
+        rate=$(sed -n 's/^rate=//p' "$f"); eta=$(sed -n 's/^eta=//p' "$f"); error=$(sed -n 's/^error=//p' "$f")
+        echo "  $(bar "${done:-0}" "${total:-0}") $(size "${done:-0}") of $(size "${total:-0}")${rate:+, $(size "$rate")/s}${eta:+, $(printf '%02d:%02d:%02d' $((eta / 3600)) $((eta % 3600 / 60)) $((eta % 60))) left}"
+        echo "  dataset ${item:-0}/${items:-0} ${dataset}${step:+ ($step)}"
+        [[ -n $error ]] && echo "  last error: $error"
+    fi
+    if [[ $phase =~ ^(done|failed)$ && -f $jobs_dir/$id.report ]]; then show_report "$jobs_dir/$id.report"; fi
+}
+function cmd_status() {
+    local id=$1 follow=0 f
+    [[ $2 == --follow || $1 == --follow ]] && follow=1
+    [[ $id == --follow ]] && id=$2
+    need_root
+    if [[ -z $id ]]; then
+        printf '%-21s %-9s %-6s %-9s %-16s %s\n' JOB MODE WAY PHASE CREATED DATASETS
+        for f in "$jobs_dir"/*.job; do
+            [[ -f $f ]] || continue
+            id=$(basename "$f" .job)
+            valid_id "$id" || continue
+            printf '%-21s %-9s %-6s %-9s %-16s %s\n' "$id" "$(sed -n 's/^mode=//p' "$f")" "$(sed -n 's/^direction=//p' "$f")" "$(job_phase "$id")" \
+                "$(date -d "@$(sed -n 's/^created=//p' "$f")" '+%Y-%m-%d %H:%M')" "$(grep -c '^item=' "$f")"
+        done
+        return 0
+    fi
+    valid_id "$id" && [[ -f $jobs_dir/$id.job ]] || die "no job $id"
+    if [ $follow -eq 0 ]; then status_once "$id"; [[ $(job_phase "$id") == done ]]; return; fi
+    trap 'echo; exit 0' INT
+    local n=0 phase out
+    while true; do
+        out=$(status_once "$id")
+        phase=$(job_phase "$id")
+        [ -t 1 ] && printf '\033[H\033[2J'
+        printf '%s\n(Ctrl-C ends only this display)\n' "$out"
+        [[ $phase =~ ^(done|failed|aborted|stopped)$ ]] && break
+        # a job just started has no state yet
+        [[ $phase == new ]] && [ $((++n)) -gt 15 ] && break
+        sleep 2
+    done
+    [[ $(job_phase "$id") == done ]]
+}
+
 case $1 in
+    list) shift; cmd_list "$@" ;;
+    show) shift; cmd_show "$@" ;;
+    dataset|reattach) cmd_job "$@" ;;
+    jobs) cmd_status ;;
+    status) shift; cmd_status "$@" ;;
+    start|resume) [[ -n $2 ]] || usage; cmd_start "$2"; [ -t 1 ] && cmd_status "$2" --follow ;;
+    stop) [[ -n $2 ]] || usage; cmd_stop "$2" ;;
+    run) [[ -n $2 ]] || usage; cmd_run "$2" ;;
     access)
         sub=$2; shift 2
         case $sub in

@@ -1,0 +1,13 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# restore job <id> of bashclub-zsync-restore in the background: bashclub-zsync-restore start <id>
+# (survives the end of the ssh session; log: journalctl -u bashclub-zsync-restore@<id> and the log file of the job)
+[Unit]
+Description=bashclub-zsync restore job %i
+After=network-online.target zfs.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/bashclub-zsync-restore run %i
+# exit code 1: done with warnings (see the report), not a failure of the unit
+SuccessExitStatus=1

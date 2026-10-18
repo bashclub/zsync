@@ -500,6 +500,59 @@ On the backup server:
 - `bashclub-zsync-restore access list` shows the restore users and push keys
 - `bashclub-zsync-restore access remove <user|push key>` removes a restore user with its permissions, or a push key; for a push key it prints the command for the system
 
+### Restoring datasets
+All commands work in three ways:
+
+| option | way |
+|---|---|
+| `--from zsync-restore-<configuration>@<backup server>` | pull: run on the system to restore |
+| `--to <system>` | push: run on the backup server, with the push key |
+| neither | both on the backup server, e.g. into another pool (`--config <configuration>` for names below its target) |
+
+A replica is named by its full name on the backup server, or with pull and `--config` by its name on the source.
+
+Show the replicas and their state on the system, then one chain:
+~~~
+bashclub-zsync-restore list --from zsync-restore-pve1@192.0.2.20
+bashclub-zsync-restore show --from zsync-restore-pve1@192.0.2.20 rpool/data/vm-100-disk-0
+~~~
+`show` compares the snapshots by GUID: `=` exists on both sides, `+` is missing on the system, `!` exists only on the system after the common snapshot. At the end it prints the matching restore command.
+
+**dataset** restores a dataset with its complete snapshot chain:
+- `--recursive` includes its children; `--snapshot <name>` restores up to this snapshot instead of the newest; `--as <dataset>` restores under another name.
+- Encrypted datasets are sent raw (the key never leaves the source). Load the key afterwards; the report prints the command.
+- The original properties (see [Original properties of the source](#original-properties-of-the-source)) are set again. Mountpoint and tag are only set at the original place, so a copy under another name is not mounted over the original and not backed up twice.
+- An existing dataset is never overwritten. `--force` renames it to `<dataset>.before-restore-<time>` first.
+
+**reattach** sends only the snapshots that are missing on the system after the common one, e.g. after a rollback or a lost snapshot there. The GUIDs stay the same, so the replication continues without a full replication. Snapshots or changes on the system after the common snapshot block it; `--rollback` destroys them (the plan lists them first).
+
+Each command shows the plan first (datasets, snapshots, size, action); `--dry-run` also shows the commands and changes nothing. Then it writes a restore job and asks whether to start it (`--start`: without asking).
+
+### Restore jobs
+A job runs in the background (systemd unit `bashclub-zsync-restore@<job>`, without systemd with `setsid`), so it survives the end of the ssh session:
+- `bashclub-zsync-restore status <job> --follow` shows the progress (bytes, rate, time left); Ctrl-C ends only the display.
+- `bashclub-zsync-restore jobs` lists all jobs.
+- `bashclub-zsync-restore stop <job>` stops a job, `bashclub-zsync-restore resume <job>` continues it.
+
+Every start plans again from what is on the system:
+- an interrupted transfer continues from its resume token;
+- finished datasets are skipped;
+- a failed transfer is retried 3 times, after 30, 60 and 120 seconds.
+
+While a job runs, the snapshots it sends are held (`zfs hold`), so the rotation of bashclub-zsync cannot delete them. A `reattach` on the backup server also waits for a running replication of the configuration. With push, the state is also copied to `/run/bashclub-zsync-restore.state` on the system, so it can be read there without this package.
+
+At the end the job checks each dataset against the plan and writes a report: OK, WARN or ERROR per dataset (`status <job>`). The check covers:
+- the same snapshots by GUID;
+- the requested snapshot is the newest;
+- no partial receive is left;
+- the same `logicalreferenced`;
+- the restored properties;
+- the key status of encrypted datasets.
+
+`--scrub` adds a scrub of the restored pools, the only check that reads all data. The job ends with exit code 0 only if everything is OK.
+
+Jobs, logs and reports are in `/var/lib/bashclub-zsync-restore/jobs`. The log is also in the journal: `journalctl -u bashclub-zsync-restore@<job>`.
+
 ## Releases
 Packages are built by Forgejo CI on https://code.bashclub.org/bashclub/zsync:
 - pull request: build and test only

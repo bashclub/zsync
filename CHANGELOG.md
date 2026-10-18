@@ -7,6 +7,21 @@
 - license: GPL-3.0-or-later instead of MIT from 2.0.0 on (both packages, SPDX headers in all files, DEP-5 copyright file `/usr/share/doc/<package>/copyright` with the MIT notice of the versions up to 1.0.19); contributions with Developer Certificate of Origin (`Signed-off-by`, CONTRIBUTING.md) (#72)
 
 ### Added
+- `bashclub-zsync-restore list`, `show`, `dataset`, `reattach` (#58), plus restore jobs: `jobs`, `status [--follow]`, `start`, `stop`, `resume` and `run` (#62).
+  - **All commands:** pull (`--from`), push (`--to`) or on the backup server itself.
+  - **`list`, `show`:** replicas and their snapshot chains, compared with the system by GUID: common snapshot, missing there, only there.
+  - **`dataset`:**
+    - restores the complete chain up to a chosen snapshot, also recursively and under another name (`--as`);
+    - sends encrypted datasets raw and sets the original properties of the source again (mountpoint and tag only at the original place);
+    - never overwrites an existing dataset; with `--force` it renames it to `<name>.before-restore-<time>`.
+  - **`reattach`:** sends only the snapshots missing after the common one, so the replication then continues without a full replication. Snapshots or changes on the system after the common one need `--rollback`.
+  - **Restore jobs:**
+    - Every command shows the plan with sizes (`--dry-run`: also the commands) and writes a job.
+    - The job runs in the background (systemd unit `bashclub-zsync-restore@<job>`, without systemd `setsid`), with progress, rate and time left.
+    - Each start plans again from the system: resume token, finished datasets are skipped, 3 retries.
+    - The snapshots it sends are held during the restore. A `reattach` on the backup server waits for a running replication. No second job runs on the same datasets.
+    - With push, the state is copied to the system.
+    - At the end, a report per dataset (GUID chain, newest snapshot, no partial receive, `logicalreferenced`, properties, key status; `--scrub` optional); exit code 0 only if everything is OK.
 - package `bashclub-zsync-restore`, recommended by `bashclub-zsync`: restore toolbox, first part access (#57). Pull: `access key` on the system to restore prints the command for the backup server, `access pull` there creates the restore user `zsync-restore-<configuration>`; its key works only from the address of the system and only runs `bashclub-zsync-restore-remote` (zfs list/get/send and holds with a restore tag below the target of the configuration, no shell), ZFS allows it only `send,hold,release` there. Push: `access push <host>` creates a one-time key and prints the line for `/root/.ssh/authorized_keys` with `restrict`, `from=` and `expiry-time`, plus the command to remove it; `access test`, `access list`, `access remove`
 - `bashclub-zsync -s [checkmk]`: runs checkzfs, refreshes both spool files and shows the state of a configuration (without `-c` of all configurations), without snapshots, replication, deletion or a change of the run status; exit code 0 OK, 1 WARN, 2 CRIT (#85)
 - number of snapshots to keep on the backup server per label in `snapshot_filter` (`daily=30`): kept whatever happens on the source, so deleting snapshots on the source cannot shrink the backup; a label alone or `label=source` behaves as before, existing configurations are unchanged; `bashclub-zsync-setup` asks for it; `min_keep` is deprecated (#66)

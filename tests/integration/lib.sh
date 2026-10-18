@@ -101,6 +101,28 @@ remove_timer_configs() {
   done
   bashclub-zsync-timer sync > /dev/null
 }
+# Restore-Befehl mit --start (ohne Terminal: ohne Anzeige), wartet auf das Ende des Jobs; setzt $job, $phase, $rc
+restore() {
+  local out
+  echo "===== $(date +%T) bashclub-zsync-restore $*" >> "$log"
+  out=$(ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-restore "$@" --start < /dev/null 2>&1); rc=$?
+  echo "$out" >> "$log"
+  job=$(sed -n 's/^job \([0-9a-f-]*\) written.*/\1/p' <<< "$out")
+  phase=
+  [[ -n $job ]] || return $rc
+  wait_job "$job"
+}
+last_restore_output() { awk '/^===== .* bashclub-zsync-restore /{ buf = "" } { buf = buf $0 "\n" } END { printf "%s", buf }' "$log"; }
+wait_job() {
+  local i
+  for i in $(seq 1 300); do
+    phase=$(bashclub-zsync-restore status "$1" | sed -n '1s/^job [^:]*: //p')
+    [[ $phase =~ ^(done|failed|aborted|stopped)$ ]] && break
+    sleep 1
+  done
+  bashclub-zsync-restore status "$1" >> "$log" 2>&1
+  cat "/var/lib/bashclub-zsync-restore/jobs/$1.log" >> "$log" 2>/dev/null
+}
 last_run_log() { awk '/^===== /{ buf = "" } { buf = buf $0 "\n" } END { printf "%s", buf }' "$log"; }
 
 # Daten und Snapshots auf der Quelle
