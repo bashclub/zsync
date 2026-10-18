@@ -580,7 +580,7 @@ EOT
   check "nach ungültigen Eingaben keine Config" not test -e /etc/bashclub/zci-bad.conf
   check "nach ungültigen Eingaben kein Ziel" not exists "$ZCI_POOL_DST/bad"
   # Fragen: Antworten aus der Eingabe, Abbruch bei der Bestätigung ändert nichts
-  local out; out=$(printf 'localhost\n2222\n\n\n0 5 * * *\n7\n\nn\n' | bashclub-zsync-setup zci-setup5 2>&1)
+  local out; out=$(printf 'localhost\n2222\n\n\n0 5 * * *\n7\n\n\nn\n' | bashclub-zsync-setup zci-setup5 2>&1)
   check "Fragen: Antworten übernommen" grep -q "source         localhost (port 2222)" <<< "$out"
   check "Fragen: Zeitplan übernommen" grep -q "schedule       0 5 \* \* \*, snapshots zsync-$host (keep 7)" <<< "$out"
   check "Fragen: Abbruch ändert nichts" not test -e /etc/bashclub/zci-setup5.conf
@@ -715,6 +715,31 @@ zfs_auto_snapshot_label_match=legacy"
   zsync
   check "nächster Lauf repliziert die umbenannte Kette neu" exists "$ZCI_POOL_DST/maintenance/$ZCI_POOL_SRC/broken@zfs-auto-snap_daily-02"
 }
+# Anzahl am Backupserver je Label (snapshot_filter="daily=3"): unabhängig davon, was die Quelle löscht; daily ohne Zahl
+# folgt der Quelle wie bisher
+case_keep_count() {
+  local d="$ZCI_POOL_DST/keep_count/$ZCI_POOL_SRC"
+  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  zfs create "$ZCI_POOL_SRC/legacy"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/legacy"
+  for n in 01 02 03 04 05; do snap "$ZCI_POOL_SRC/data" $n; done
+  config keep_count 'snapshot_filter="daily=3"'
+  zsync
+  equal "Exit-Code" 0 "$rc"
+  equal "die 3 neuesten bleiben" "zfs-auto-snap_daily-03 zfs-auto-snap_daily-04 zfs-auto-snap_daily-05" "$(snaps "$d/data")"
+  # Angreifer löscht auf der Quelle alles bis auf den neuesten Snapshot
+  for n in 01 02 03 04; do zfs destroy "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-$n"; done
+  snap "$ZCI_POOL_SRC/data" 06
+  zsync
+  equal "Löschen auf der Quelle verkleinert das Backup nicht" "zfs-auto-snap_daily-04 zfs-auto-snap_daily-05 zfs-auto-snap_daily-06" "$(snaps "$d/data")"
+  check "kein Fehler zur Rotation" not grep -q "no snapshots of this interval are deleted" <(last_run_log)
+  # daily=source: wie bisher folgt das Ziel der Quelle (min_keep=1 aus der Config des Tests)
+  for n in 01 02 03; do snap "$ZCI_POOL_SRC/legacy" $n; done
+  sed -i 's/^snapshot_filter=.*/snapshot_filter="daily=source"/' "$conf"
+  zsync
+  zfs destroy "$ZCI_POOL_SRC/legacy@zfs-auto-snap_daily-01"; snap "$ZCI_POOL_SRC/legacy" 04
+  zsync
+  equal "daily=source folgt der Quelle" "zfs-auto-snap_daily-02 zfs-auto-snap_daily-03 zfs-auto-snap_daily-04" "$(snaps "$d/legacy")"
+}
 # fehlt der älteste Quell-Snapshot am Ziel, ist nur die Rotation blockiert: Warnung, Exit 0, Status cleanup_blocked
 case_cleanup_blocked() {
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
@@ -762,7 +787,7 @@ case_checkmk() {
   check "Statusdatei des Laufs entfernt" test -z "$(status_path state)"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance permissions checkmk)
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten und Pools): ein zweiter wartet

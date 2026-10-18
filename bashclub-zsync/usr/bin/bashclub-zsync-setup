@@ -34,6 +34,8 @@ usage: $prog [options] <name>
     --schedule "<cron>"     schedule in cron format (*/15 * * * *)
     --keep <n>              snapshots to keep per label on the source (internal snapshot engine) (14)
     --label <label>         snapshot label (zsync-<this host>)
+    --filter "<labels>"     labels to replicate and how many snapshots of each stay on this host, independent of the
+                            source (hourly=24|daily=30|weekly=8|monthly=12|<label>=<keep on the source>)
     --login auto|zsync|root login on the source to set it up (auto: zsync, then root)
     --root                  no job users: replicate as root with root@<source> (as before 2.0)
     --autorun               removable disk (bashclub-zsync-disk, zsync-autorun runs it as root): trigger=autorun,
@@ -67,7 +69,7 @@ job_name() {
     echo "${job:0:26}"
 }
 
-source= port= target= tag= tag_datasets= schedule= keep= label= login=auto as_root=0 autorun=0 run=0 yes=0 name=
+source= port= target= tag= tag_datasets= schedule= keep= label= filter= login=auto as_root=0 autorun=0 run=0 yes=0 name=
 while [ $# -gt 0 ]; do
     case $1 in
         -s|--source) source=$2; shift ;;
@@ -77,6 +79,7 @@ while [ $# -gt 0 ]; do
         --tag-datasets) tag_datasets=$2; shift ;;
         --schedule) schedule=$2; shift ;;
         --keep) keep=$2; shift ;;
+        --filter) filter=$2; shift ;;
         --label) label=$2; shift ;;
         --login) login=$2; shift ;;
         --root) as_root=1 ;;
@@ -122,6 +125,12 @@ ask keep "Snapshots to keep per label on the source" 14
 [[ $keep =~ ^[0-9]+$ ]] || die "invalid number of snapshots '$keep'"
 ask label "Snapshot label" "zsync-$host"
 valid_label "$label" || die "invalid snapshot label '$label' (letters, digits, _ . : -)"
+ask filter "Labels and snapshots to keep on this host" "hourly=24|daily=30|weekly=8|monthly=12|$label=$keep"
+IFS='|' read -ra entries <<< "$filter"
+for entry in "${entries[@]}"; do
+    valid_label "${entry%%=*}" && [[ $entry != *=* || ${entry#*=} =~ ^([0-9]+|source)$ ]] \
+        || die "invalid entry '$entry' in the labels (label, label=<number> or label=source, separated by |)"
+done
 [[ $source == "local" ]] && as_root=1
 
 job=$(job_name "$name")
@@ -135,6 +144,7 @@ if [[ $source == "local" ]]; then echo "source         local, datasets with $tag
 echo "target         $target"
 if [ $autorun -eq 1 ]; then echo "schedule       removable disk (zsync-autorun), snapshots $label (keep $keep)"
 else echo "schedule       $schedule, snapshots $label (keep $keep)"; fi
+echo "keep here      $filter"
 if [ $as_root -eq 1 ]; then echo "users          root"
 elif [ $autorun -eq 1 ]; then echo "users          root on $host, $source_user on $source"
 else echo "users          $user on $host, $source_user on $source"; fi
@@ -184,7 +194,8 @@ mkdir -p "$conf_dir"
 bashclub-zsync -c "$conf" > /dev/null 2>&1
 [[ -f $conf ]] || die "creating $conf with bashclub-zsync failed"
 { set_conf_value "$conf" target "$target" && set_conf_value "$conf" sshport "$port" && set_conf_value "$conf" tag "$tag" \
-    && set_conf_value "$conf" zfs_auto_snapshot_keep "$keep" && set_conf_value "$conf" zfs_auto_snapshot_label "$label"; } \
+    && set_conf_value "$conf" zfs_auto_snapshot_keep "$keep" && set_conf_value "$conf" zfs_auto_snapshot_label "$label" \
+    && set_conf_value "$conf" snapshot_filter "$filter"; } \
     || die "writing $conf failed"
 if [ $autorun -eq 1 ]; then
     set_conf_value "$conf" trigger autorun
