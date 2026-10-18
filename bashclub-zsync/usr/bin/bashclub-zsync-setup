@@ -40,6 +40,8 @@ usage: $prog [options] <name>
     --root                  no job users: replicate as root with root@<source> (as before 2.0)
     --autorun               removable disk (bashclub-zsync-disk, zsync-autorun runs it as root): trigger=autorun,
                             no timer, the job user on the source gets the key of root
+    --external              started by another tool (e.g. Miyagi): trigger=external, no timer; shows the command
+                            the tool runs (as the job user)
     --run                   start the first run right away (systemctl start bashclub-zsync@<name>)
     -y, --yes               no questions, defaults for everything not given
 EOF
@@ -69,7 +71,7 @@ job_name() {
     echo "${job:0:26}"
 }
 
-source= port= target= tag= tag_datasets= schedule= keep= label= filter= login=auto as_root=0 autorun=0 run=0 yes=0 name=
+source= port= target= tag= tag_datasets= schedule= keep= label= filter= login=auto as_root=0 autorun=0 external=0 run=0 yes=0 name=
 while [ $# -gt 0 ]; do
     case $1 in
         -s|--source) source=$2; shift ;;
@@ -84,6 +86,7 @@ while [ $# -gt 0 ]; do
         --login) login=$2; shift ;;
         --root) as_root=1 ;;
         --autorun) autorun=1 ;;
+        --external) external=1 ;;
         --run) run=1 ;;
         -y|--yes) yes=1 ;;
         -h|--help) usage ;;
@@ -117,7 +120,8 @@ valid_dataset "$target" || die "invalid target dataset '$target'"
 ask tag "Tag of the datasets to replicate on the source" bashclub:zsync
 valid_tag "$tag" || die "invalid tag '$tag' (user property, e.g. bashclub:zsync)"
 for ds in $tag_datasets; do valid_dataset "$ds" || die "invalid dataset '$ds' in --tag-datasets"; done
-if [ $autorun -eq 0 ]; then
+[ $autorun -eq 1 ] && [ $external -eq 1 ] && die "--autorun and --external exclude each other"
+if [ $autorun -eq 0 ] && [ $external -eq 0 ]; then
     ask schedule "Schedule (cron format)" "*/15 * * * *"
     schedule_calendars "$schedule" > /dev/null || die "invalid schedule '$schedule' (cron format, e.g. \"*/15 * * * *\" or @hourly)"
 fi
@@ -143,6 +147,7 @@ echo "configuration  $conf"
 if [[ $source == "local" ]]; then echo "source         local, datasets with $tag"; else echo "source         $source (port $port), datasets with $tag"; fi
 echo "target         $target"
 if [ $autorun -eq 1 ]; then echo "schedule       removable disk (zsync-autorun), snapshots $label (keep $keep)"
+elif [ $external -eq 1 ]; then echo "schedule       started by another tool (trigger=external), snapshots $label (keep $keep)"
 else echo "schedule       $schedule, snapshots $label (keep $keep)"; fi
 echo "keep here      $filter"
 if [ $as_root -eq 1 ]; then echo "users          root"
@@ -199,6 +204,8 @@ bashclub-zsync -c "$conf" > /dev/null 2>&1
     || die "writing $conf failed"
 if [ $autorun -eq 1 ]; then
     set_conf_value "$conf" trigger autorun
+elif [ $external -eq 1 ]; then
+    set_conf_value "$conf" trigger external
 else
     set_conf_value "$conf" trigger systemd
     set_conf_value "$conf" schedule "$schedule"
@@ -292,11 +299,16 @@ fi
 #### timer (removable disk: zsync-autorun when the disk is connected)
 if [ $autorun -eq 1 ]; then
     echo "removable disk: prepare it with  bashclub-zsync-disk create <disk> ${target%%/*} --luks --config $name"
+elif [ $external -eq 1 ]; then
+    # the tool starts the runs and does not write the configuration again
+    echo "started by another tool, no timer; the tool runs each run as root with:"
+    if [ ${#run_cmd[@]} -gt 0 ]; then echo "    runuser -u $user -- bashclub-zsync -c $conf"
+    else echo "    bashclub-zsync -c $conf"; fi
 else
     step "timer bashclub-zsync@$name.timer"
     bashclub-zsync-timer sync | grep -F "bashclub-zsync@$name.timer"
 fi
-if [ $run -eq 1 ] && [ $autorun -eq 0 ]; then
+if [ $run -eq 1 ] && [ $autorun -eq 0 ] && [ $external -eq 0 ]; then
     step "first run (journalctl -u bashclub-zsync@$name -f)"
     systemctl start --no-block "bashclub-zsync@$name.service"
 fi

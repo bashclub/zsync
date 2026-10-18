@@ -588,10 +588,23 @@ EOT
   out=$(bashclub-zsync-setup -y -s local -t "$ZCI_POOL_DST/setup4" zci-setup4 2>&1); rc=$?
   equal "Setup lokal als root" 0 "$rc" || echo "$out" | tail -5 | sed 's/^/       /'
   check "lokal: source=local, run_as leer" grep -qx 'source=local' /etc/bashclub/zci-setup4.conf
+  # von einem anderen Werkzeug gestartet (Miyagi): trigger=external, kein Timer, ausgegebener Befehl läuft als Jobbenutzer
+  out=$(bashclub-zsync-setup -y -s localhost -t "$ZCI_POOL_DST/setup7" --login root --external zci-setup7 2>&1); rc=$?
+  equal "Setup --external" 0 "$rc" || echo "$out" | tail -5 | sed 's/^/       /'
+  check "external: trigger=external" grep -qx 'trigger=external' /etc/bashclub/zci-setup7.conf
+  check "external: Jobbenutzer als run_as" grep -qx 'run_as=zsync-zci-setup7' /etc/bashclub/zci-setup7.conf
+  check "external: kein Timer" not systemctl is-active --quiet bashclub-zsync@zci-setup7.timer
+  check "external: Timer-Liste zeigt external" grep -qE '^zci-setup7 +external ' <<< "$(bashclub-zsync-timer list)"
+  local ext_cmd; ext_cmd=$(grep '^    runuser -u zsync-zci-setup7 -- bashclub-zsync -c /etc/bashclub/zci-setup7.conf$' <<< "$out" | sed 's/^ *//')
+  check "external: Befehl für das Werkzeug ausgegeben ($out)" test -n "$ext_cmd"
+  bash -c "$ext_cmd" >> "$log" 2>&1; rc=$?
+  equal "external: Lauf mit dem ausgegebenen Befehl" 0 "$rc"
+  check "external: repliziert" test "$(zfs list -H -o name -t snapshot "$ZCI_POOL_DST/setup7/$ZCI_POOL_SRC/data" 2>/dev/null | wc -l)" -ge 1
+  check "--autorun und --external zusammen abgewiesen" not bashclub-zsync-setup -y -s localhost --login root --autorun --external zci-setup8
   # aufräumen
   rm -f /var/lib/zsync/.ssh/authorized_keys
   remove_timer_configs /etc/bashclub/zci-setup*.conf
-  for n in zci-setup zci-setup2 zci-setup3; do
+  for n in zci-setup zci-setup2 zci-setup3 zci-setup7; do
     bashclub-zsync-job-user remove "$(echo "$host-$n" | tr 'A-Z_.' 'a-z--' | cut -c1-26)" > /dev/null 2>&1
     id "zsync-$n" > /dev/null 2>&1 && { pkill -u "zsync-$n"; sleep 1; userdel -r "zsync-$n"; }
   done

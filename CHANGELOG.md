@@ -7,6 +7,9 @@
 - license: GPL-3.0-or-later instead of MIT from 2.0.0 on (both packages, SPDX headers in all files, DEP-5 copyright file `/usr/share/doc/<package>/copyright` with the MIT notice of the versions up to 1.0.19); contributions with Developer Certificate of Origin (`Signed-off-by`, CONTRIBUTING.md) (#72)
 
 ### Added
+- `trigger=external` for configurations started by another tool, e.g. Miyagi (#98).
+  - There is no timer, `bashclub-zsync-timer migrate` takes no cron job into such a configuration, and the age check learns the interval from the previous runs.
+  - `bashclub-zsync-setup --external` creates the configuration once with job users and prints the command for each run (`runuser -u zsync-<name> -- bashclub-zsync -c <config>`), so the tool no longer writes the configuration on every run.
 - `bashclub-zsync-restore server`: full restore of all replicas of a configuration (#59).
   - Selection: `--pool`, `--exclude` and `--map <from>=<to>` (the longest wins); `--snapshot` gives one point in time for all.
   - Pool roots are never replaced, a missing pool stops the plan, existing datasets need `--force`.

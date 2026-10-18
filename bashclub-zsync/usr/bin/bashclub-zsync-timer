@@ -225,8 +225,8 @@ cmd_migrate() {
         if [[ $(dirname "$conf") != "$conf_dir" ]]; then
             echo "skip  $file:$n: $conf is not in $conf_dir (the timer needs $conf_dir/<name>.conf)"; continue
         fi
-        if [[ $(conf_trigger "$conf") == "autorun" ]]; then
-            echo "skip  $file:$n: $conf has trigger=autorun"; continue
+        if [[ $(conf_trigger "$conf") == "autorun" || $(conf_trigger "$conf") == "external" ]]; then
+            echo "skip  $file:$n: $conf has trigger=$(conf_trigger "$conf")"; continue
         fi
         if ! schedule_calendars "$schedule" > /dev/null; then
             echo "skip  $file:$n: schedule '$schedule' cannot be converted, set it in $conf and run: $prog enable $name"; continue

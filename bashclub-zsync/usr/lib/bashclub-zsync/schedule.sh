@@ -47,12 +47,13 @@ valid_user() { [[ $1 =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; }
 # absolute path without spaces, quotes, % (systemd specifiers) and ..
 valid_path() { [[ $1 =~ ^/[A-Za-z0-9_./-]+$ ]] && [[ $1 != *..* ]]; }
 
-# trigger of a configuration: systemd, autorun or cron (also without the setting: legacy)
+# trigger of a configuration: systemd, autorun, external (started by another tool, e.g. Miyagi) or cron (also
+# without the setting: legacy)
 conf_trigger() {
     local trigger
     trigger=$(conf_value "$1" trigger)
     case $trigger in
-        systemd|autorun) echo "$trigger" ;;
+        systemd|autorun|external) echo "$trigger" ;;
         *) echo cron ;;
     esac
 }

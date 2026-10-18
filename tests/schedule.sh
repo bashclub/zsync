@@ -36,6 +36,12 @@ no "Wert mit \\ abgewiesen" set_conf_value "$conf" label 'a\b'
 no "Wert mit Zeilenumbruch abgewiesen" set_conf_value "$conf" label $'a\nb'
 no "ungültiger Name abgewiesen" set_conf_value "$conf" 'x;y' 1
 
+# Trigger einer Config
+printf 'trigger=external\n' > "$w/ext.conf"; printf 'trigger=bogus\n' > "$w/bogus.conf"; printf 'target=x\n' > "$w/none.conf"
+equal "trigger external" external "$(conf_trigger "$w/ext.conf")"
+equal "unbekannter trigger wie cron" cron "$(conf_trigger "$w/bogus.conf")"
+equal "ohne trigger: cron (legacy)" cron "$(conf_trigger "$w/none.conf")"
+
 # Prüfungen von Eingaben
 yes "Dataset" valid_dataset rpool/data/subvol-100-disk-0
 no "Dataset mit Befehl" valid_dataset 'rpool/$(id)'
