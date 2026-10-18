@@ -1158,7 +1158,57 @@ case_restore_server() {
   check "Wizard: nichts ausgeführt" not exists "$ZCI_POOL_SRC/wiz"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_server)
+# Hooks vor und nach einem Lauf: global und je Config, Umgebung, Ausgabe im Log; pre-run mit Fehler überspringt den Lauf,
+# post-run mit Fehler nur Warnung; nur Dateien von root, die nur root schreiben darf; Zeitlimit
+case_hooks() {
+  local hd=$CONF_DIR/hooks.d mark=/tmp/zci-hooks R
+  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; write "$ZCI_POOL_SRC/data" 1; snap "$ZCI_POOL_SRC/data" 01
+  config hooks; R=$ZCI_POOL_DST/hooks/$ZCI_POOL_SRC/data
+  rm -rf "$hd" $mark.*; install -d -m 755 "$hd" "$hd/pre-run" "$hd/hooks" "$hd/hooks/post-run"
+  printf '#!/bin/bash\necho "$ZSYNC_NAME $ZSYNC_TARGET $ZSYNC_PHASE $ZSYNC_CONFIG" > %s.pre\necho "hello from pre"\n' $mark > "$hd/pre-run/10-pre"
+  printf '#!/bin/bash\necho "$ZSYNC_RC" > %s.post\n' $mark > "$hd/hooks/post-run/10-post"
+  chmod 755 "$hd/pre-run/10-pre" "$hd/hooks/post-run/10-post"
+  ZSYNC_HOOKS_DIR=$hd zsync
+  equal "Hooks: Exit-Code" 0 "$rc"
+  equal "pre-run: Umgebung" "hooks $ZCI_POOL_DST/hooks pre-run $conf" "$(cat $mark.pre 2>/dev/null)"
+  check "pre-run: Ausgabe im Log" grep -q "10-pre: hello from pre" <<< "$(last_run_log)"
+  equal "post-run je Config: Exit-Code des Laufs" 0 "$(cat $mark.post 2>/dev/null)"
+  check "repliziert" exists "$R@zfs-auto-snap_daily-01"
+  # pre-run mit Fehler: Lauf übersprungen, post-run läuft mit dem Exit-Code
+  printf '#!/bin/bash\nexit 3\n' > "$hd/pre-run/20-fail"; chmod 755 "$hd/pre-run/20-fail"
+  snap "$ZCI_POOL_SRC/data" 02
+  ZSYNC_HOOKS_DIR=$hd zsync
+  equal "pre-run Fehler: Exit-Code" 1 "$rc"
+  check "pre-run Fehler: Meldung" grep -q "a pre-run hook failed, the run is skipped" <<< "$(last_run_log)"
+  check "pre-run Fehler: nichts repliziert" not exists "$R@zfs-auto-snap_daily-02"
+  equal "pre-run Fehler: post-run mit Exit-Code 1" 1 "$(cat $mark.post 2>/dev/null)"
+  rm -f "$hd/pre-run/20-fail"
+  # post-run mit Fehler: nur Warnung
+  printf '#!/bin/bash\nexit 5\n' > "$hd/hooks/post-run/20-fail"; chmod 755 "$hd/hooks/post-run/20-fail"
+  ZSYNC_HOOKS_DIR=$hd zsync
+  equal "post-run Fehler: Exit-Code unverändert" 0 "$rc"
+  check "post-run Fehler: Warnung" grep -q "a post-run hook failed, the exit code of the run stays 0" <<< "$(last_run_log)"
+  check "post-run Fehler: repliziert" exists "$R@zfs-auto-snap_daily-02"
+  rm -f "$hd/hooks/post-run/20-fail"
+  # nicht vertrauenswürdig: für andere schreibbar
+  chmod 757 "$hd/pre-run/10-pre"
+  ZSYNC_HOOKS_DIR=$hd zsync
+  equal "für andere schreibbarer Hook: Lauf übersprungen" 1 "$rc"
+  check "für andere schreibbarer Hook: Meldung" grep -q "is not an executable file of root that only root may write" <<< "$(last_run_log)"
+  chmod 755 "$hd/pre-run/10-pre"
+  # Zeitlimit
+  printf '#!/bin/bash\nsleep 30\n' > "$hd/pre-run/30-slow"; chmod 755 "$hd/pre-run/30-slow"
+  echo "hook_timeout=2" >> "$conf"
+  ZSYNC_HOOKS_DIR=$hd zsync
+  equal "Zeitlimit: Lauf übersprungen" 1 "$rc"
+  check "Zeitlimit: Meldung" grep -q "stopped after 2s" <<< "$(last_run_log)"
+  rm -rf "$hd" $mark.*
+  # ohne Hook-Ordner wie bisher
+  zsync
+  equal "ohne Hooks: Exit-Code" 0 "$rc"
+}
+
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_server hooks)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten und Pools): ein zweiter wartet
