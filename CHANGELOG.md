@@ -3,9 +3,11 @@
 ## [Unreleased]
 
 ### Changed
+- the Checkmk check of the runs comes as spool file `<checkzfs_spool_maxage>_bashclub-zsync-<config>` instead of a local check: written at the end of each run (also after errors), every 5 minutes during a run (watchdog, on the source only when the state changes) and with `-s`, locally or on the source like checkzfs (`checkzfs_spool`), so the services stay visible while the backup server is switched off between the runs; the package no longer links the local check and removes the link of the testing versions (#85)
 - license: GPL-3.0-or-later instead of MIT from 2.0.0 on (both packages, SPDX headers in all files, DEP-5 copyright file `/usr/share/doc/<package>/copyright` with the MIT notice of the versions up to 1.0.19); contributions with Developer Certificate of Origin (`Signed-off-by`, CONTRIBUTING.md) (#72)
 
 ### Added
+- `bashclub-zsync -s [checkmk]`: runs checkzfs, refreshes both spool files and shows the state of a configuration (without `-c` of all configurations), without snapshots, replication, deletion or a change of the run status; exit code 0 OK, 1 WARN, 2 CRIT (#85)
 - number of snapshots to keep on the backup server per label in `snapshot_filter` (`daily=30`): kept whatever happens on the source, so deleting snapshots on the source cannot shrink the backup; a label alone or `label=source` behaves as before, existing configurations are unchanged; `bashclub-zsync-setup` asks for it; `min_keep` is deprecated (#66)
 - `bashclub-zsync-maintenance`: open decisions of all configurations (replicas without source, broken chains, snapshot leftovers of another name scheme), interactive with context, options, preview and confirmation, or `--list`/`--decide` for scripts; actions run only on the backup server under the lock of the configuration and are logged; the Checkmk check points to it (#67)
 - `zfs-auto-snapshot` is recommended instead of required (`bashclub-zsync`: only needed for `source=local`; `bashclub-zsync-source`: recommended), with the engine `zas` a warning is logged if it is missing on the source (previously no snapshots and no message); the exit code is unchanged (#69)

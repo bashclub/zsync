@@ -1,8 +1,10 @@
 #!/bin/bash
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Checkmk local check for bashclub-zsync: one service "zsync <config>" per configuration
-# Installed by the package as /usr/lib/check_mk_agent/local/bashclub_zsync (link), if the agent is installed.
+# Checkmk check for bashclub-zsync: one service "zsync <config>" per configuration, in the format of a local check.
+# bashclub-zsync runs it at the end of each run, during a run (watchdog) and with -s, and writes the output as spool
+# file <maxage>_bashclub-zsync-<config> (locally or on the source), so the state is also there while the backup server
+# is switched off. Without options all configurations, with --config <file> only this one.
 #
 # Reads only the status files written by bashclub-zsync and /proc, never calls zfs (it could hang the same way).
 # The status files are written by the runs, also by unprivileged users: they are data, never code. The check
@@ -16,8 +18,8 @@
 #   /var/lib/bashclub-zsync/<user>/<config>.history start times of the last runs
 #   /var/lib/bashclub-zsync/<user>/<config>.skipped times of runs skipped because of an active run
 #   /var/lib/bashclub-zsync/<user>/<config>.datasets state per dataset: dataset, state, since, detail
-#   /var/lib/bashclub-zsync/root/<config>.check     state of this check (transfer progress, blocked processes),
-#                                                   written only into this folder of root
+#   /var/lib/bashclub-zsync/<user>/<config>.check   state of this check (transfer progress, blocked processes),
+#                                                   in the folder of the user that runs the check
 #
 # Checks:
 #   age of the last successful run   not for removable disks (trigger=autorun or zsync-autorun@) without monitor_max_age;
@@ -39,7 +41,9 @@
 
 RUN_DIR=${ZSYNC_RUN_DIR:-/run/bashclub-zsync}
 LIB_DIR=${ZSYNC_LIB_DIR:-/var/lib/bashclub-zsync}
-CHECK_DIR=${ZSYNC_CHECK_DIR:-$LIB_DIR/root}
+CHECK_DIR=${ZSYNC_CHECK_DIR:-$LIB_DIR/$(id -un)}
+only_id=
+if [[ $1 == "--config" ]] && [[ -n $2 ]]; then only_id=$(readlink -m "$2" | tr '/' '_'); fi
 PROC=${ZSYNC_PROC:-/proc}
 SYSTEMCTL=${ZSYNC_SYSTEMCTL:-systemctl}
 CONF_DIR=${ZSYNC_CONF_DIR:-/etc/bashclub}
@@ -169,6 +173,7 @@ function user_dirs() {
 users=$( { user_dirs "$RUN_DIR"; user_dirs "$LIB_DIR"; } | sort -u | paste -sd' ')
 ids=$(for u in $users; do ls "$RUN_DIR/$u" "$LIB_DIR/$u" 2>/dev/null; done | sed -nE 's/\.(state|last|history)$//p' | sort -u)
 for id in $ids; do
+    if [[ -n $only_id ]] && [[ $id != "$only_id" ]]; then continue; fi
     declare -A st=() last=() chk=()
     # configuration: from a status file of any user, it has to match the name of the status file
     conf=

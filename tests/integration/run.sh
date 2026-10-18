@@ -780,11 +780,33 @@ case_permissions() {
   check "keine Status-Datei im Basisordner" test -z "$(find /var/lib/bashclub-zsync /run/bashclub-zsync -maxdepth 1 -type f)"
 }
 case_checkmk() {
+  local spool=/var/lib/check_mk_agent/spool/87000_bashclub-zsync-checkmk out before mid
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; snap "$ZCI_POOL_SRC/data" 01
-  config checkmk; zsync
-  local out; out=$(check_output)
+  config checkmk; rm -f $spool; zsync
+  out=$(check_output)
   check "Service OK in der Lernphase ($out)" grep -qE '^0 "zsync checkmk" .*learning 0/5' <<< "$out"
   check "Statusdatei des Laufs entfernt" test -z "$(status_path state)"
+  # Ergebnis des Laufs als Spool-Datei, kein local check mehr
+  check "Spool-Datei nach dem Lauf" grep -qE '^0 "zsync checkmk"' $spool
+  check "Spool-Datei mit Abschnitt local" grep -qx '<<<local>>>' $spool
+  check "kein Link als local check" not test -L /usr/lib/check_mk_agent/local/bashclub_zsync
+  # -s: Spool und Anzeige, ohne Lauf (Status-Dateien unverändert)
+  before=$(cat "$(status_path last)" "$(status_path history)" | md5sum)
+  rm -f $spool
+  out=$(bashclub-zsync -c "$conf" -s 2>&1); rc=$?
+  equal "-s: Exit-Code" 0 "$rc"
+  check "-s: lesbare Ausgabe ($out)" grep -qE '^OK +zsync checkmk +last successful run' <<< "$out"
+  check "-s: Spool neu geschrieben" grep -qE '^0 "zsync checkmk"' $spool
+  equal "-s: Laufstatus unverändert" "$before" "$(cat "$(status_path last)" "$(status_path history)" | md5sum)"
+  check "-s checkmk: Rohformat" grep -qE '^0 "zsync checkmk" ' <<< "$(bashclub-zsync -c "$conf" -s checkmk 2>/dev/null)"
+  check "-s ohne -c: alle Configs (hier keine unter /etc/bashclub)" bashclub-zsync -s
+  # Watchdog: während eines langsamen Laufs wird der Spool laufend geschrieben
+  write "$ZCI_POOL_SRC/data" 6 big; snap "$ZCI_POOL_SRC/data" 02
+  echo "bandwidth_limit=1m" >> "$conf"; rm -f $spool
+  ZSYNC_WATCHDOG_INTERVAL=1 bashclub-zsync -c "$conf" >> "$log" 2>&1 &
+  sleep 4; mid=$(cat $spool 2>/dev/null); wait
+  check "Watchdog: Spool während des Laufs ($mid)" grep -q 'running for' <<< "$mid"
+  check "nach dem Lauf: endgültiger Stand" not grep -q 'running for' $spool
 }
 
 all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk)

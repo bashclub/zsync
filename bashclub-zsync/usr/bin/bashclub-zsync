@@ -119,10 +119,12 @@ usage() {
 	cat >&2 << EOF
 $prog Version $__version__
 -------------------------------------------------------------------------------
-usage: $prog [-h] [-d] [-c CONFIG]
+usage: $prog [-h] [-d] [-c CONFIG] [-s [checkmk]]
     creates a mirrored replication of configured zfs filesystems / volumes
     -c CONFIG    Configuration file for this script
     -d           Debug mode
+    -s           Status: run checkzfs, write the checkmk spool files and show the state, without replication
+                 (without -c for all configurations in /etc/bashclub); -s checkmk shows the raw checkmk output
 -------------------------------------------------------------------------------
     (C) 2024     by Spille IT Solutions for bashclub (github.com/bashclub)
                  Author: Thorsten Spille <thorsten@spille-edv.de>
@@ -132,17 +134,39 @@ EOF
 }
 
 args=("$@")
-while getopts "hdc:" opt; do
+status_mode=0
+conf_given=0
+while getopts "hdc:s" opt; do
   case $opt in
     h) usage 0 ;;
-    c) conf=$OPTARG ;;
+    c) conf=$OPTARG; conf_given=1 ;;
     d) debug=-v ;;
+    s) status_mode=1 ;;
     *) usage 1 ;;
   esac
 done
 shift $((OPTIND-1))
+status_format=table
+if [ $status_mode -eq 1 ] && [[ $1 == "checkmk" ]]; then status_format=checkmk; fi
+
+# -s without -c: the status of all configurations, exit code of the worst one
+if [ $status_mode -eq 1 ] && [ $conf_given -eq 0 ]; then
+    worst=0
+    for c in /etc/bashclub/*.conf; do
+        [[ -f $c ]] || continue
+        "$BASH" "$0" -c "$c" -s ${1:+"$1"}
+        state=$?
+        if [ $state -gt $worst ]; then worst=$state; fi
+    done
+    exit $worst
+fi
 
 function log() {
+    # status mode (-s): only warnings and errors, on stderr (stdout is the state)
+    if [ $status_mode -eq 1 ]; then
+        if [[ $1 == *"[ERROR]"* || $1 == *"[WARN]"* ]]; then echo -e "$1" >&2; fi
+        return
+    fi
     echo -e "$(date +'%b %d %T') $1"
 }
 
@@ -246,7 +270,7 @@ function finish_status() {
 # connection (ControlPersist) does not keep the lock after the run has finished
 # only flock from util-linux (Linux): the options -o and -E are not available everywhere
 # without the configuration (the initial config file is created below) there is nothing to lock
-if [[ -z $ZSYNC_LOCK ]] && [[ -r $conf_path ]]; then
+if [[ -z $ZSYNC_LOCK ]] && [[ -r $conf_path ]] && [ $status_mode -eq 0 ]; then
     if flock --version 2>/dev/null | grep -q util-linux; then
         export ZSYNC_LOCK=$conf_path
         flock -n -o -E 75 "$ZSYNC_LOCK" "$BASH" "$0" "${args[@]}"
@@ -326,7 +350,9 @@ datasets_failed=0
 # own directories of this user below the base directories (the package lets the group bashclub-zsync create them,
 # root creates the base directories on a manual installation)
 if [ "$(id -u)" -eq 0 ]; then mkdir -p /run/bashclub-zsync /var/lib/bashclub-zsync 2>/dev/null; fi
-if own_dir "$status_run_dir" && own_dir "$status_lib_dir"; then
+if [ $status_mode -eq 1 ]; then
+    : # status mode: no run, the run status stays as it is
+elif own_dir "$status_run_dir" && own_dir "$status_lib_dir"; then
     status_file=$status_run_dir/$status_id.state
     # start time of the process, to tell a reused pid apart
     pid_start=$(sed 's/.*) //' /proc/$$/stat 2>/dev/null | cut -d' ' -f20)
@@ -337,13 +363,78 @@ else
     log "[WARN] $status_run_dir or $status_lib_dir cannot be used by $(id -un) (missing, of another user, or $(id -un) is not in the group bashclub-zsync), no run status for the monitoring."
 fi
 
+#### checkmk spool (/var/lib/check_mk_agent/spool), local or on the source (checkzfs_spool), atomically: a new file of
+# its own in the spool (mktemp) is renamed, the agent never reads a partial file and nothing follows a link
+spooldir=/var/lib/check_mk_agent/spool
+source_reachable=0
+# write_spool <spool name> <file with the content>; the file is removed
+function write_spool() {
+    local spoolname=$1 file=$2 spooltmp
+    chmod 644 "$file"
+    if [ $checkzfs_spool -eq 0 ] || [ $checkzfs_local -gt 0 ] || [ $source_reachable -eq 0 ]; then
+        mkdir -p $spooldir 2>/dev/null
+        if [ -w $spooldir ]; then
+            spooltmp=$(mktemp $spooldir/.$spoolname.XXXXXX) && cat "$file" > $spooltmp && chmod 644 $spooltmp \
+                && mv -f $spooltmp $spooldir/$spoolname
+        else
+            log "[WARN] $spooldir is not writable for $(id -un), $spoolname is not stored."
+        fi
+    else
+        # over the ssh connection of the run (no scp: works with the forced command bashclub-zsync-remote)
+        spooltmp=$spooldir/$(basename "$file")
+        remote "mkdir -p $spooldir"
+        remote "cat > $spooltmp" < "$file" && remote "mv $spooltmp $spooldir/$spoolname"
+    fi
+    rm -f "$file"
+}
+
+#### state of this configuration as checkmk service "zsync <config>" (the evaluation of the check bashclub_zsync) in
+# the spool: at the end of each run, during a run (watchdog) and with -s; with the spool on the source the state stays
+# visible while the backup server is switched off (Miyagi workflow), until the spool file is older than its maxage
+status_check=/usr/share/bashclub-zsync/checkmk/bashclub_zsync
+status_spool=${checkzfs_spool_maxage}_bashclub-zsync-$(basename "$conf" .conf | tr -c 'A-Za-z0-9_.\n-' '_')
+function status_lines() {
+    [[ -x $status_check ]] && [[ ! -e /etc/bashclub/zsync-checkmk.disabled ]] || return 0
+    "$status_check" --config "$conf_path" 2>/dev/null
+}
+function write_status_spool() {
+    local lines file
+    lines=$(status_lines)
+    [[ -n $lines ]] || return 0
+    file=$(mktemp /tmp/.$status_spool.XXXXXX) || return 0
+    printf '<<<local>>>\n%s\n' "$lines" > "$file"
+    write_spool "$status_spool" "$file"
+}
+# during a run: every ZSYNC_WATCHDOG_INTERVAL seconds (default 5 min), on the source only if the state changed
+watchdog_pid=
+function start_watchdog() {
+    [[ -x $status_check ]] && [[ ! -e /etc/bashclub/zsync-checkmk.disabled ]] || return 0
+    (
+        trap - EXIT
+        written=
+        while sleep "${ZSYNC_WATCHDOG_INTERVAL:-300}"; do
+            level=$(status_lines | head -1 | cut -d' ' -f1)
+            if [ $checkzfs_spool -eq 0 ] || [ $checkzfs_local -gt 0 ] || [[ $level != "$written" ]]; then
+                write_status_spool > /dev/null 2>&1
+                written=$level
+            fi
+        done
+    ) &
+    watchdog_pid=$!
+}
+
 # end of the run (also on errors): release the holds on the source, write the result for the monitoring
 function on_exit() {
     local code=$?
+    if [[ -n $watchdog_pid ]]; then kill $watchdog_pid 2>/dev/null; fi
     release_snaps
-    if [[ -n $status_file ]]; then finish_status $code; fi
+    if [[ -n $status_file ]]; then
+        finish_status $code
+        write_status_spool
+    fi
 }
 trap on_exit EXIT
+if [[ -n $status_file ]]; then start_watchdog; fi
 
 # checked after loading the config, so checkzfs_disabled from the config is respected
 if [[ -n $checkzfs ]]; then
@@ -441,6 +532,7 @@ if [ $remote_rc -ne 0 ]; then
     fi
     exit 1
 fi
+source_reachable=1
 IFS=$'\n'
 for zvol in $tagged; do
     # property source: local, received, inherited from <dataset> or default
@@ -487,6 +579,37 @@ done <<< "$(remote "zfs get -H -o name,property,value,source -t filesystem,volum
 log "$include_list"
 log "$exclude_list"
 log "$checkzfs_headline\ncheckzfs_filter=$checkzfs_filter\n"
+
+#### status mode (-s): checkzfs and the state of this configuration into the spool and onto the terminal, nothing else
+# (no snapshot, replication, deletion or change of the run status); exit code like checkmk: 0 OK, 1 WARN, 2 CRIT, 3 UNKNOWN
+if [ $status_mode -eq 1 ]; then
+    shown=$(mktemp)
+    if [ $checkzfs_disabled -eq 0 ]; then
+        run_checkzfs "$shown"
+    else
+        echo "checkzfs is disabled or not installed, no checkzfs services" >&2
+    fi
+    status_now=$(status_lines)
+    write_status_spool
+    printf '%s\n' "$status_now" >> "$shown"
+    if [[ -n $(sed -n 's/^pid=//p' "$status_run_dir/$status_id.state" /run/bashclub-zsync/*/"$status_id.state" 2>/dev/null) ]]; then
+        echo "a run of $conf is active, it writes the spool again at its end" >&2
+    fi
+    worst=0
+    while IFS= read -r line; do
+        [[ $line =~ ^[0-3P]\  ]] || continue
+        state=${line%% *}; [[ $state == P ]] && state=0
+        if [ $state -gt $worst ]; then worst=$state; fi
+        if [[ $status_format == "checkmk" ]]; then echo "$line"; continue; fi
+        rest=${line#* }
+        if [[ $rest == \"* ]]; then service=${rest#\"}; service=${service%%\"*}; rest=${rest#\"$service\" }
+        else service=${rest%% *}; rest=${rest#* }; fi
+        text=${rest#* }
+        printf '%-5s %-40s %s\n' "$(case $state in 0) echo OK ;; 1) echo WARN ;; 2) echo CRIT ;; *) echo UNKN ;; esac)" "$service" "$text"
+    done < "$shown"
+    rm -f "$shown"
+    exit $worst
+fi
 
 #### target dataset, never snapshotted by zfs-auto-snapshot on this host
 if ! zfs list $target > /dev/null 2>&1 ; then
@@ -1049,45 +1172,25 @@ if [[ -n $status_file ]]; then
 fi
 
 #### monitoring: checkzfs output into the checkmk spool (local or on the source)
-# the output goes to a temporary file of this run, is copied next to the spool file as dot file
-# (ignored by the checkmk agent) and then renamed, so the agent never reads a partial file
-if [ $checkzfs_disabled -eq 0 ]; then
-    log "[INFO] Running checkzfs..."
-    status checkzfs
-    spooldir=/var/lib/check_mk_agent/spool
-    spoolname=${checkzfs_spool_maxage}_${checkzfs_prefix}
-    # temporary file of this run, created exclusively (never through a link of another user)
-    spoolfile=$(mktemp /tmp/.$spoolname.XXXXXX)
-    spooltmp=$spooldir/$(basename $spoolfile)
+# the output goes to a temporary file of this run and then through write_spool, so the agent never reads a partial file
+# run_checkzfs [file]: with a file name the output is also copied there (status mode -s)
+function run_checkzfs() {
+    local spoolfile c_key= c_value=
+    spoolfile=$(mktemp /tmp/.${checkzfs_spool_maxage}_${checkzfs_prefix}.XXXXXX)
     echo "<<<local>>>" > $spoolfile
-
     if [[ $checkzfs_local -eq 0 ]]; then
         c_key=--source
         c_value=$source:$sshport
     fi
-
     debug "Command:\n$checkzfs $c_key $c_value --output checkmk --threshold $checkzfs_max_age --maxsnapshots $checkzfs_max_snapshot_count --prefix $checkzfs_prefix --replicafilter "^${target}" --filter \"$checkzfs_filter\" >> $spoolfile"
     $checkzfs $c_key $c_value --output checkmk --threshold $checkzfs_max_age --maxsnapshots $checkzfs_max_snapshot_count --prefix $checkzfs_prefix --replicafilter "^${target}" --filter "$checkzfs_filter" >> $spoolfile
-    # mktemp creates the file with mode 600, keep the previous mode of the spool file
-    chmod 644 $spoolfile
-    if [ $checkzfs_spool -eq 0 ] || [ $checkzfs_local -gt 0 ]; then
-        mkdir -p $spooldir 2>/dev/null
-        if [ -w $spooldir ]; then
-            # the spool may be writable for the group bashclub-zsync: a new file of its own in the spool (mktemp),
-            # then renamed, both never follow a link
-            spooltmp=$(mktemp $spooldir/.$spoolname.XXXXXX) && cat $spoolfile > $spooltmp && chmod 644 $spooltmp \
-                && mv -f $spooltmp $spooldir/$spoolname
-            rm -f $spoolfile
-        else
-            log "[WARN] $spooldir is not writable for $(id -un), the checkzfs output is not stored."
-            rm -f $spoolfile
-        fi
-    else
-        remote "mkdir -p $spooldir"
-        # over the ssh connection of the run (no scp: works with the forced command bashclub-zsync-remote)
-        remote "cat > $spooltmp" < $spoolfile && remote "mv $spooltmp $spooldir/$spoolname"
-        rm -f $spoolfile
-    fi
+    if [[ -n $1 ]]; then cat $spoolfile > "$1"; fi
+    write_spool "${checkzfs_spool_maxage}_${checkzfs_prefix}" $spoolfile
+}
+if [ $checkzfs_disabled -eq 0 ]; then
+    log "[INFO] Running checkzfs..."
+    status checkzfs
+    run_checkzfs
 fi
 
 exit $rc

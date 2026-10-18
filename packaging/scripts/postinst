@@ -49,14 +49,10 @@ if [ ! -f /etc/bashclub/zsync.conf ] && [ -f /etc/bashclub/zsync.conf.backup_$(d
   cp /etc/bashclub/zsync.conf.backup_$(date +%Y-%m-%d) /etc/bashclub/zsync.conf
 fi
 
-# checkmk local check: link into the agent if it is installed (also when the agent is installed later,
-# via dpkg trigger) and unless disabled with /etc/bashclub/zsync-checkmk.disabled
-check=/usr/share/bashclub-zsync/checkmk/bashclub_zsync
+# checkmk: the state of each configuration comes as spool file from the runs (also while the backup server is
+# switched off), the link as local check of testing versions before 2.0 would show the services twice
 link=/usr/lib/check_mk_agent/local/bashclub_zsync
-if [ -d /usr/lib/check_mk_agent ] && [ ! -e /etc/bashclub/zsync-checkmk.disabled ]; then
-  mkdir -p /usr/lib/check_mk_agent/local
-  ln -sfn $check $link
-elif [ -L $link ]; then
+if [ -L $link ] && [ "$(readlink $link)" = /usr/share/bashclub-zsync/checkmk/bashclub_zsync ]; then
   rm -f $link
 fi
 
