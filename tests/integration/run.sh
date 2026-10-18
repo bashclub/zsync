@@ -1208,7 +1208,60 @@ case_hooks() {
   equal "ohne Hooks: Exit-Code" 0 "$rc"
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_server hooks)
+# Schnittstelle für übergeordnete Abläufe: --result (key=value), busy (auch --wait), Inhibitor während eines Laufs,
+# unterbrochener Transfer im Ergebnis
+case_result_busy() {
+  local out R
+  if ! command -v pv > /dev/null; then skip "pv fehlt"; return; fi
+  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; write "$ZCI_POOL_SRC/data" 1; snap "$ZCI_POOL_SRC/data" 01
+  config result "transfer_resume=1"; R=$ZCI_POOL_DST/result/$ZCI_POOL_SRC/data
+  zsync
+  out=$(bashclub-zsync -c "$conf" --result); echo "$out" >> "$log"
+  equal "--result: erste Zeile" "format=1" "$(head -1 <<< "$out")"
+  check "--result: rc=0 ($out)" grep -qx 'rc=0' <<< "$out"
+  check "--result: läuft nicht" grep -qx 'running=0' <<< "$out"
+  check "--result: Zustand ok" grep -qx 'state.ok=1' <<< "$out"
+  check "--result: keine offenen Entscheidungen" grep -qx 'decisions=0' <<< "$out"
+  check "--result: kein unterbrochener Transfer" grep -qx 'resume_datasets=0' <<< "$out"
+  check "busy: nichts aktiv" bashclub-zsync busy
+  # langsamer Lauf: busy meldet ihn, Inhibitor gesetzt, Ergebnis zeigt running=1
+  write "$ZCI_POOL_SRC/data" 8 big; snap "$ZCI_POOL_SRC/data" 02
+  echo "bandwidth_limit=1m" >> "$conf"
+  bashclub-zsync -c "$conf" >> "$log" 2>&1 &
+  local runpid=$!
+  sleep 3
+  out=$(bashclub-zsync busy); local brc=$?
+  equal "busy während des Laufs: Exit-Code" 1 "$brc"
+  check "busy: nennt die Config ($out)" grep -q "replication: $conf" <<< "$out"
+  check "Inhibitor während des Laufs" grep -q "bashclub-zsync" <<< "$(systemd-inhibit --list --no-pager 2>/dev/null)"
+  check "--result während des Laufs: running=1" grep -qx 'running=1' <<< "$(bashclub-zsync -c "$conf" --result)"
+  # Transfer unterbrechen: receive abbrechen, der Lauf endet mit Fehler, der Teilstand bleibt für den nächsten Lauf
+  pkill -f "zfs receive -s" ; wait $runpid
+  out=$(bashclub-zsync -c "$conf" --result); echo "$out" >> "$log"
+  check "--result nach Abbruch: rc=1 ($out)" grep -qx 'rc=1' <<< "$out"
+  check "--result: unterbrochener Transfer" grep -qx 'resume_datasets=1' <<< "$out"
+  check "--result: Dataset mit Teilstand" grep -qx "resume.$ZCI_POOL_SRC/data=1" <<< "$out"
+  check "kein Inhibitor nach dem Lauf" not grep -q "bashclub-zsync" <<< "$(systemd-inhibit --list --no-pager 2>/dev/null)"
+  check "busy nach dem Lauf: nichts aktiv" bashclub-zsync busy
+  # busy --wait wartet auf das Ende des Laufs
+  sed -i '/^bandwidth_limit=/d' "$conf"; echo "bandwidth_limit=4m" >> "$conf"
+  bashclub-zsync -c "$conf" >> "$log" 2>&1 &
+  sleep 2
+  check "busy --wait: wartet bis zum Ende" bashclub-zsync busy --wait 120
+  check "busy --wait: Lauf beendet" not kill -0 $! 2>/dev/null
+  wait
+  out=$(bashclub-zsync -c "$conf" --result)
+  check "--result danach: rc=0 und fortgesetzt ($out)" grep -qx 'rc=0' <<< "$out"
+  check "--result danach: kein Teilstand" grep -qx 'resume_datasets=0' <<< "$out"
+  # gehaltene Sperre einer Config in /etc/bashclub (z. B. Wartungsaktion): aktiv, --wait endet nach dem Zeitlimit
+  local lockconf=/etc/bashclub/zci-busy.conf; cp "$conf" $lockconf
+  check "busy --wait mit Zeitlimit: Exit 1 solange gesperrt" bash -c "exec 9< $lockconf; flock 9; ! bashclub-zsync busy --wait 6 > /dev/null"
+  out=$(bash -c "exec 9< $lockconf; flock 9; bashclub-zsync busy")
+  check "busy: gesperrte Config ($out)" grep -q "replication or maintenance: $lockconf" <<< "$out"
+  rm -f $lockconf
+}
+
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_server hooks result_busy)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten und Pools): ein zweiter wartet

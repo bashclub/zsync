@@ -122,12 +122,16 @@ usage() {
 	cat >&2 << EOF
 $prog Version $__version__
 -------------------------------------------------------------------------------
-usage: $prog [-h] [-d] [-c CONFIG] [-s [checkmk]]
+usage: $prog [-h] [-d] [-c CONFIG] [-s [checkmk]] [--result]
+       $prog busy [--wait [SECONDS]]
     creates a mirrored replication of configured zfs filesystems / volumes
     -c CONFIG    Configuration file for this script
     -d           Debug mode
     -s           Status: run checkzfs, write the checkmk spool files and show the state, without replication
                  (without -c for all configurations in /etc/bashclub); -s checkmk shows the raw checkmk output
+    --result     result of the last run of CONFIG as key=value (format=1), read from the run status, for scripts
+    busy         is a replication, restore, maintenance action or removable disk run active? exit code 0 = nothing,
+                 1 = active (listed); --wait waits until nothing is active (at most SECONDS, then exit code 1)
 -------------------------------------------------------------------------------
     (C) 2024     by Spille IT Solutions for bashclub (github.com/bashclub)
                  Author: Thorsten Spille <thorsten@spille-edv.de>
@@ -135,6 +139,54 @@ usage: $prog [-h] [-d] [-c CONFIG] [-s [checkmk]]
 EOF
 	exit $1
 }
+
+#### busy: is anything of bashclub-zsync active (for a tool that wants to shut the host down)
+# replication or maintenance action: the lock of a configuration is held; restore job; removable disk (zsync-autorun,
+# bashclub-zsync-disk); exit code 0 = nothing active, 1 = active
+function busy_list() {
+    local c pid phase f
+    # runs of any configuration (also outside of /etc/bashclub): state file with a living process
+    for f in /run/bashclub-zsync/*/*.state; do
+        [[ -f $f ]] || continue
+        pid=$(sed -n 's/^pid=//p' "$f"); c=$(sed -n 's/^config=//p' "$f")
+        if [[ $pid =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then echo "replication: $c ($(sed -n 's/^phase=//p' "$f"))"; fi
+    done
+    # held lock of a configuration: a run without state (no status folder) or a maintenance action
+    for c in /etc/bashclub/*.conf; do
+        [[ -f $c ]] || continue
+        if ! flock -n "$c" true 2>/dev/null; then echo "replication or maintenance: $c"; fi
+    done
+    for f in /run/bashclub-zsync-restore/*.state; do
+        [[ -f $f ]] || continue
+        pid=$(sed -n 's/^pid=//p' "$f"); phase=$(sed -n 's/^phase=//p' "$f")
+        if [[ $phase =~ ^(planning|transfer|waiting|verify)$ ]] && [[ $pid =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+            echo "restore job $(basename "$f" .state): $phase"
+        fi
+    done
+    if command -v systemctl > /dev/null; then
+        systemctl list-units --state=active --no-legend --plain 'zsync-autorun@*' 2>/dev/null | awk '{ print "removable disk: " $1 }'
+    fi
+    pgrep -f '^(/bin/bash |bash )?(/usr/bin/)?bashclub-zsync-disk create' > /dev/null && echo "removable disk: bashclub-zsync-disk create"
+    return 0
+}
+if [[ $1 == "busy" ]]; then
+    wait_s=
+    if [[ $2 == "--wait" ]]; then wait_s=${3:-0}; [[ $wait_s =~ ^[0-9]+$ ]] || { echo "busy --wait: seconds expected" >&2; exit 2; }; fi
+    start_s=$(date +%s)
+    while true; do
+        active=$(busy_list)
+        if [[ -z $active ]]; then exit 0; fi
+        if [[ -z $wait_s ]]; then echo "$active"; exit 1; fi
+        if [ "$wait_s" -gt 0 ] && [ $(( $(date +%s) - start_s )) -ge "$wait_s" ]; then echo "$active"; exit 1; fi
+        sleep 5
+    done
+fi
+
+# --result (no short option): taken out before getopts
+result_mode=0
+filtered=()
+for a in "$@"; do if [[ $a == "--result" ]]; then result_mode=1; else filtered+=("$a"); fi; done
+set -- "${filtered[@]}"
 
 args=("$@")
 status_mode=0
@@ -234,6 +286,46 @@ status_run_dir=/run/bashclub-zsync/$(id -un)
 status_lib_dir=/var/lib/bashclub-zsync/$(id -un)
 status_lib=$status_lib_dir/$status_id
 
+#### --result: the last run of this configuration as key=value, from the status of the user that runs it (run_as,
+# otherwise root, otherwise the newest); nothing is run, the source is not asked; unknown values are left out
+if [ $result_mode -eq 1 ]; then
+    owner=$(sed -n 's/^[[:space:]]*run_as=//p' "$conf_path" 2>/dev/null | tail -1 | tr -d "\"'" | cut -d' ' -f1)
+    lib=
+    d=/var/lib/bashclub-zsync/${owner:-root}
+    if [[ -f $d/$status_id.last ]] && [[ $(stat -c %U "$d") == "$(basename "$d")" ]]; then lib=$d/$status_id; fi
+    if [[ -z $lib ]]; then
+        newest=0
+        for f in /var/lib/bashclub-zsync/*/"$status_id.last"; do
+            [[ -f $f ]] && [[ $(stat -c %U "$(dirname "$f")") == "$(basename "$(dirname "$f")")" ]] || continue
+            if [ "$(stat -c %Y "$f")" -gt "$newest" ]; then newest=$(stat -c %Y "$f"); lib=${f%.last}; fi
+        done
+    fi
+    echo "format=1"
+    echo "config=$conf_path"
+    running=0
+    if [[ -f $conf_path ]] && ! flock -n "$conf_path" true 2>/dev/null; then running=1; fi
+    echo "running=$running"
+    if [[ -z $lib ]]; then echo "last_run=none"; exit 1; fi
+    # result of the last run and of the last successful one (numbers only)
+    while IFS='=' read -r key value; do
+        case $key in
+            start|end|duration|rc|datasets|datasets_failed|ok_start|ok_end|ok_duration)
+                [[ $value =~ ^[0-9]*$ ]] && echo "$key=$value" ;;
+        esac
+    done < "$lib.last"
+    # states of the datasets (see the Checkmk check) and the open decisions of bashclub-zsync-maintenance
+    if [[ -f $lib.datasets ]]; then
+        awk -F'\t' '$2 ~ /^[a-z_]+$/ { n[$2]++ } $2 ~ /^(orphan_missing|orphan_unselected|broken|empty|branch)$/ { cases++ }
+            END { for (s in n) print "state." s "=" n[s]; print "decisions=" cases + 0 }' "$lib.datasets" | sort
+    fi
+    # transfers interrupted in the last run (receive_resume_token on the target): continued by the next run
+    if [[ -f $lib.resume ]]; then
+        echo "resume_datasets=$(grep -c . "$lib.resume")"
+        while read -r ds; do [[ -n $ds ]] && echo "resume.$ds=1"; done < "$lib.resume"
+    fi
+    exit 0
+fi
+
 # own directory of this user: created if missing, used only if it is a directory of this user (not a link)
 function own_dir() {
     mkdir -p -m 755 "$1" 2>/dev/null
@@ -263,6 +355,13 @@ function finish_status() {
         "$conf_path" $run_start $end $((end - run_start)) $code $datasets_total $datasets_failed \
         "${prev[ok_start]}" "${prev[ok_end]}" "${prev[ok_duration]}" > "$status_lib.last.tmp" \
         && mv -f "$status_lib.last.tmp" "$status_lib.last"
+    # transfers left for the next run (receive_resume_token on the target), for --result
+    if [[ $transfer_resume == "1" ]] && [[ -n $target ]]; then
+        zfs get -H -o name,value -r receive_resume_token "$target" 2>/dev/null | awk -F'\t' -v t="$target/" '$2 != "-" && index($1, t) == 1 { print substr($1, length(t) + 1) }' \
+            > "$status_lib.resume.tmp" && mv -f "$status_lib.resume.tmp" "$status_lib.resume"
+    else
+        rm -f "$status_lib.resume"
+    fi
     rm -f "$status_file"
 }
 
@@ -486,6 +585,7 @@ function on_exit() {
     fi
     # status mode (-s) wrote it itself
     if [ $status_mode -eq 0 ]; then write_monitor_spool; fi
+    if [[ -n $inhibit_pid ]]; then kill $inhibit_pid 2>/dev/null; fi
 }
 #### hooks: executable files in /etc/bashclub/hooks.d/<pre-run|post-run>/ (all configurations) and in
 # /etc/bashclub/hooks.d/<config>/<pre-run|post-run>/, in lexical order, with the environment ZSYNC_CONFIG, ZSYNC_NAME,
@@ -529,6 +629,13 @@ function run_hooks() {
     return 0
 }
 trap on_exit EXIT
+# no shutdown or sleep in the middle of a run (systemd-inhibit; root can override it, a tool asks "bashclub-zsync busy");
+# a user without the polkit right gets none, the run goes on
+inhibit_pid=
+if [ $status_mode -eq 0 ] && [ -d /run/systemd/system ] && command -v systemd-inhibit > /dev/null; then
+    systemd-inhibit --what=shutdown:sleep --mode=block --who=bashclub-zsync --why="replication $conf_path" tail --pid=$$ -f /dev/null > /dev/null 2>&1 &
+    inhibit_pid=$!
+fi
 
 # checked after loading the config, so checkzfs_disabled from the config is respected
 if [[ -n $checkzfs ]]; then
