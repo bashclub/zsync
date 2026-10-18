@@ -23,7 +23,8 @@ zsync_lib=${ZSYNC_LIB:-/usr/lib/bashclub-zsync/schedule.sh}
 
 usage() {
     cat >&2 << EOF
-usage: $prog <command> [--from <user>@<backup server>[:<port>] | --to <system>[:<port>]] [--config <name>] ...
+usage: $prog                    guided restore: questions, then the command and confirmation
+       $prog <command> [--from <user>@<backup server>[:<port>] | --to <system>[:<port>]] [--config <name>] ...
   connection:     --from  pull: on the system to restore, read from the backup server as restore user
                   --to    push: on the backup server, write to root@<system> with the push key
                   neither: both on this host; --config <name>: the replicas of this configuration
@@ -38,12 +39,26 @@ usage: $prog <command> [--from <user>@<backup server>[:<port>] | --to <system>[:
                   send only the snapshots missing on the system after the common one (after a rollback or a loss
                   there), the replication then continues without a full replication; snapshots or changes on the
                   system after the common one only with --rollback (destroys them)
+  server [--pool <pool>]... [--map <from>=<to>]... [--exclude <dataset>]... [--snapshot <name>] [--force]
+         [--bwlimit <rate>] [--scrub] [--dry-run] [--start]
+                  full restore of a server: all replicas of the configuration (--config, or the one of --from),
+                  parents first, with the original properties; --map renames (the longest <from> wins, e.g.
+                  --map rpool/data=tank/vm), --pool only these pools, --exclude without these datasets (names on the
+                  source, e.g. rpool/ROOT on a fresh Proxmox); --snapshot: one point in time for all; pool roots
+                  are not replaced; existing datasets only with --force (renamed); lists what to check afterwards
   jobs | status [<job>] [--follow]
                   restore jobs, or progress and report of a job (--follow: redrawn until it ends)
   start <job> | stop <job> | resume <job>
                   run a job in the background (systemd unit bashclub-zsync-restore@<job>), stop it, continue it
                   (done datasets are skipped)
   run <job>       run a job in the foreground (used by start)
+  on the backup server, single files:
+  mount <replica>@<snapshot>
+                  read-only clone of the snapshot, mounted below $run_dir/mnt (a volume: its partitions,
+                  otherwise its device); the rotation keeps the snapshot while the clone exists
+  mounts          the clones
+  cleanup <clone>|--all
+                  unmount and destroy a clone (only clones of mount)
 
   access <command>  accesses for a restore:
   on the backup server:
@@ -925,7 +940,7 @@ function show_report() {
     done < "$1"
 }
 
-#### create a job: dataset, reattach
+#### create a job: dataset, reattach, server
 function new_job_id() { echo "$(date +%Y%m%d-%H%M%S)-$(od -An -N2 -tx1 /dev/urandom | tr -d ' \n')"; }
 
 # items of a replica: itself and with --recursive its children with snapshots (parents first, no old chains of
@@ -949,35 +964,86 @@ function job_items() {
     done < <(replicas "$r" | sort)
 }
 
+# server: all replicas of the root, names mapped (--map <from>=<to>, the longest <from> wins), only some pools
+# (--pool), without subtrees (--exclude, names on the source); one point in time: --snapshot <name> where it exists,
+# otherwise the newest snapshot not newer than it; pool roots are never replaced, their children are restored
+function server_items() {
+    local snap=$1 name original d m from best s t= e skip
+    if [[ -n $snap ]]; then
+        t=$(backup_zfs list -Hp -o name,creation -t snapshot -r "$root" | awk -F'\t' -v s="@$snap" 'substr($1, length($1) - length(s) + 1) == s { print $2; exit }')
+        [[ -n $t ]] || die "no replica has a snapshot $snap"
+    fi
+    while IFS=$'\t' read -r name _; do
+        original=${name#"$root/"}
+        if [[ $original =~ \.(zsync-branch|broken|before-restore)-[0-9-]+(/|$) ]]; then continue; fi
+        [ ${#pools[@]} -eq 0 ] || [[ " ${pools[*]} " == *" ${original%%/*} "* ]] || continue
+        skip=0; for e in "${excludes[@]}"; do [[ $original == "$e" || $original == "$e/"* ]] && skip=1; done
+        [ $skip -eq 0 ] || continue
+        d=$original best=
+        for m in "${maps[@]}"; do
+            from=${m%%=*}
+            if [[ $original == "$from" || $original == "$from/"* ]] && [ ${#from} -gt ${#best} ]; then best=$from; d=${m#*=}${original#"$from"}; fi
+        done
+        if [[ $d != */* ]]; then echo "pool root $d: not replaced, its children are restored" >&2; continue; fi
+        if [[ -z $snap ]]; then s=$(backup_zfs list -H -o name -S createtxg -t snapshot -d 1 "$name" | head -1 | cut -d@ -f2)
+        elif backup_zfs list -H -o name "$name@$snap" > /dev/null 2>&1; then s=$snap
+        else s=$(backup_zfs list -Hp -o name,creation -s createtxg -t snapshot -d 1 "$name" | awk -F'\t' -v t="$t" '$2 <= t { n = $1 } END { sub(/.*@/, "", n); print n }'); fi
+        [[ -n $s ]] || { echo "skipped: $original (no snapshot up to $snap)" >&2; continue; }
+        printf '%s\t%s\t%s\n' "$name" "$d" "$s"
+    done < <(replicas "$root") | sort -t$'\t' -k2,2
+}
+# what a full restore does not do, as a list for the admin
+function server_hints() {
+    local line pools_from pools_to
+    pools_from=$(for line in "$@"; do cut -f1 <<< "$line"; done | sed "s|^$root/||; s|/.*||" | sort -u | paste -sd' ')
+    pools_to=$(for line in "$@"; do cut -f2 <<< "$line"; done | sed 's|/.*||' | sort -u | paste -sd' ')
+    echo "after the restore, check on $(system_name) (not changed automatically):"
+    [[ $pools_from != "$pools_to" ]] && echo "  - pool names changed ($pools_from -> $pools_to): storages in /etc/pve/storage.cfg (zfspool: pool ...)"
+    echo "  - VM and CT configurations (/etc/pve/qemu-server, /etc/pve/lxc) name storages: with the same storage names they work unchanged"
+    for line in "$@"; do [[ $(cut -f2 <<< "$line") == */ROOT/* ]] && { echo "  - boot: proxmox-boot-tool refresh (root file system restored)"; break; }; done
+    echo "  - network (/etc/network/interfaces), host name and keys of the system"
+    echo "  - encrypted datasets: load the keys (see the report)"
+}
+
 function cmd_job() {
     local mode=$1; shift
     local arg= as= snap= recursive=0 force=0 rollback=0 scrub=0 bwlimit= dry=0 start=0 r line rr d s a errors=0 id
-    local plan=() total=0 flags action cmp common missing diverged first size_item src want dst
+    local plan=() total=0 flags action cmp common missing diverged first size_item src want dst maps=() excludes=() pools=()
     while [ $# -gt 0 ]; do
         case $1 in
             --from|--to) parse_connection "$1" "$2"; shift ;;
             --config) use_config "$2"; shift ;;
             --as) [[ $mode == dataset ]] || usage; valid_dataset "$2" || die "invalid --as '$2'"; as=$2; shift ;;
+            --map)
+                [[ $mode == server && $2 == *=* ]] && valid_dataset "${2%%=*}" && valid_dataset "${2#*=}" || die "invalid --map '$2' (<dataset>=<dataset>)"
+                maps+=("$2"); shift ;;
+            --exclude) [[ $mode == server ]] && valid_dataset "$2" || die "invalid --exclude '$2'"; excludes+=("$2"); shift ;;
+            --pool) [[ $mode == server ]] && valid_dataset "$2" && [[ $2 != */* ]] || die "invalid --pool '$2'"; pools+=("$2"); shift ;;
             --snapshot) [[ $2 =~ ^[A-Za-z0-9_.:-]+$ ]] || die "invalid --snapshot '$2'"; snap=$2; shift ;;
             --recursive|-r) recursive=1 ;;
-            --force) [[ $mode == dataset ]] || usage; force=1 ;;
+            --force) [[ $mode != reattach ]] || usage; force=1 ;;
             --rollback) [[ $mode == reattach ]] || usage; rollback=1 ;;
             --scrub) scrub=1 ;;
             --bwlimit) [[ $2 =~ ^[0-9]+[kmgKMG]?$ ]] || die "invalid --bwlimit '$2' (e.g. 10m)"; bwlimit=$2; shift ;;
             --dry-run|-n) dry=1 ;;
             --start) start=1 ;;
             -*) usage ;;
-            *) [[ -z $arg ]] || usage; arg=$1 ;;
+            *) [[ -z $arg && $mode != server ]] || usage; arg=$1 ;;
         esac
         shift
     done
-    [[ -n $arg ]] || usage
+    [[ -n $arg || $mode == server ]] || usage
     need_root; connect
-    r=$(resolve_replica "$arg") || exit 1
-    [[ $direction == pull || -n $config ]] || config_of "$r"
-    [[ -n $as ]] || as=${r#"$root/"}
-    mapfile -t plan < <(job_items "$r" "$as" "$snap" "$recursive")
-    [ ${#plan[@]} -gt 0 ] || exit 1
+    if [[ $mode == server ]]; then
+        [[ -n $root ]] || die "server: which replicas? --config <configuration> (push, on this host) or --from (pull)"
+        mapfile -t plan < <(server_items "$snap")
+    else
+        r=$(resolve_replica "$arg") || exit 1
+        [[ $direction == pull || -n $config ]] || config_of "$r"
+        [[ -n $as ]] || as=${r#"$root/"}
+        mapfile -t plan < <(job_items "$r" "$as" "$snap" "$recursive")
+    fi
+    [ ${#plan[@]} -gt 0 ] || die "nothing to restore"
     job_mode=$mode job_rollback=$rollback job_id=none
     echo "restore plan ($mode, $([[ $direction == local ]] && echo "on this host" || echo "$direction ${login}")):"
     printf '  %-50s %-40s %-26s %10s  %s\n' REPLICA "ON $(system_name)" "UP TO" SIZE ACTION
@@ -989,7 +1055,7 @@ function cmd_job() {
         src=$(chain_of_backup "$rr"); want=$(chain_upto "$src" "$s"); first=$(head -1 <<< "$want" | cut -f2)
         size_item=0
         if [[ -n $flags ]]; then
-            if [[ $mode == dataset ]]; then
+            if [[ $mode != reattach ]]; then
                 if [[ -n $covered && $d == "$covered/"* ]]; then
                     action="full, $(grep -c . <<< "$want") snapshots"
                 elif system_exists "$d"; then
@@ -997,6 +1063,8 @@ function cmd_job() {
                         a=1; covered=$d; action="exists: renamed to $d.before-restore-<time>, then full, $(grep -c . <<< "$want") snapshots"
                     elif [[ $d != */* ]]; then action="ERROR: pool $d exists, restore below it (--as)"; ((errors++))
                     else action="ERROR: exists (--force renames it, or --as another name)"; ((errors++)); fi
+                elif ! system_exists "${d%%/*}"; then
+                    action="ERROR: pool ${d%%/*} does not exist on $(system_name) (create it, or --map to another pool)"; ((errors++))
                 else
                     action="full, $(grep -c . <<< "$want") snapshots"
                     [[ $d == */* ]] && ! system_exists "${d%/*}" && ! printf '%s\n' "${plan[@]}" | cut -f2 | grep -qxF "${d%/*}" && action+=", creates ${d%/*}"
@@ -1038,6 +1106,7 @@ function cmd_job() {
         done < <(sed -n 's/^item=//p' "$f")
     done
     echo "  total about $(size "$total")$([[ $direction == push ]] && echo ", the replicas are held while the restore runs")"
+    [[ $mode == server ]] && server_hints "${items_out[@]}"
     [ $errors -eq 0 ] || die "$errors datasets cannot be restored like this"
     if [ $dry -eq 1 ]; then
         echo "commands (the executor plans each step again from what is on the system when it runs):"
@@ -1190,15 +1259,195 @@ function cmd_status() {
     [[ $(job_phase "$id") == done ]]
 }
 
+#### files from a snapshot on the backup server: read-only clone in <pool>/zsync-restore-clones (outside of the
+# targets), marked with bashclub:zsync-restore-clone=<snapshot>, mounted below $run_dir/mnt/<clone>
+clone_prop=bashclub:zsync-restore-clone
+function clones() {
+    zfs get -H -o name,value -t filesystem,volume -s local "$clone_prop" 2> /dev/null | awk -F'\t' '$2 != "-"'
+}
+# mount ro a file system found on a device (journal not replayed: the clone stays unchanged)
+function mount_device() {
+    local dev=$1 dir=$2 type opts=ro
+    type=$(blkid -o value -s TYPE "$dev" 2> /dev/null)
+    case $type in
+        "") return 1 ;;
+        ext3|ext4) opts=ro,noload ;;
+        xfs) opts=ro,norecovery ;;
+        swap|LVM2_member|crypto_LUKS|zfs_member|linux_raid_member) echo "  $dev: $type, not mounted"; return 1 ;;
+    esac
+    mkdir -p "$dir"
+    if mount -o "$opts" "$dev" "$dir" 2> /dev/null; then echo "  $dev ($type): $dir"
+    else rmdir "$dir" 2> /dev/null; echo "  $dev: $type, cannot be mounted here"; return 1; fi
+}
+function cmd_mount() {
+    local arg=$1 snap replica pool container id clone type keystatus encroot dir dev found=0 i
+    [[ -n $arg && -z $2 ]] || usage
+    need_root
+    [[ $arg == *@* ]] || die "give a snapshot: <replica>@<snapshot> ($prog show <replica>)"
+    valid_dataset "${arg%@*}" && [[ ${arg#*@} =~ ^[A-Za-z0-9_.:-]+$ ]] || die "invalid snapshot '$arg'"
+    zfs list -H -o name -t snapshot "$arg" > /dev/null 2>&1 || die "snapshot $arg does not exist on this host"
+    replica=${arg%@*}; snap=$arg; pool=${replica%%/*}
+    IFS=$'\t' read -r type keystatus encroot < <(zfs get -H -o value type,keystatus,encryptionroot "$replica" | paste -sd$'\t')
+    if [[ $keystatus == unavailable ]]; then
+        die "$replica is encrypted and its key is not loaded on this host: zfs load-key $encroot (then mount again)"
+    fi
+    container=$pool/zsync-restore-clones
+    zfs list -H -o name "$container" > /dev/null 2>&1 || zfs create -o canmount=off -o mountpoint=none -o com.sun:auto-snapshot=false "$container" || die "cannot create $container"
+    id=$(date +%Y%m%d-%H%M%S)
+    while zfs list -H -o name "$container/$id" > /dev/null 2>&1; do sleep 1; id=$(date +%Y%m%d-%H%M%S); done
+    clone=$container/$id
+    dir=$run_dir/mnt/$id
+    if [[ $type == filesystem ]]; then
+        zfs clone -o readonly=on -o canmount=noauto -o "mountpoint=$dir" -o "$clone_prop=$snap" "$snap" "$clone" || die "zfs clone failed"
+        zfs mount "$clone" || { zfs destroy "$clone"; die "mounting $clone failed"; }
+        echo "$snap (read only): $dir"
+    else
+        # volmode full: partitions get their own devices
+        zfs clone -o readonly=on -o volmode=full -o "$clone_prop=$snap" "$snap" "$clone" || die "zfs clone failed"
+        udevadm settle 2> /dev/null
+        for i in $(seq 1 20); do [[ -e /dev/zvol/$clone ]] && break; sleep 0.5; done
+        [[ -e /dev/zvol/$clone ]] || die "device /dev/zvol/$clone does not appear (clone: $clone)"
+        echo "$snap (read only): /dev/zvol/$clone"
+        for dev in /dev/zvol/"$clone"-part*; do
+            [[ -e $dev ]] || continue
+            mount_device "$dev" "$dir/${dev##*-}" && found=1
+        done
+        [[ -e /dev/zvol/$clone-part1 ]] || { mount_device "/dev/zvol/$clone" "$dir" && found=1; }
+        [ $found -eq 1 ] || echo "  no file system mounted, use the device: /dev/zvol/$clone"
+    fi
+    echo "remove it: $prog cleanup $id"
+    echo "while it exists, the rotation of bashclub-zsync keeps $snap (it logs that a clone depends on it)"
+}
+function cmd_mounts() {
+    local name value
+    need_root
+    while IFS=$'\t' read -r name value; do
+        printf '%-20s %-50s %s\n' "${name##*/}" "$value" "$( [[ $(zfs get -H -o value type "$name") == volume ]] && echo "/dev/zvol/$name" || zfs get -H -o value mountpoint "$name")"
+    done < <(clones)
+}
+function cmd_cleanup() {
+    local what=$1 name value id m
+    [[ -n $what ]] || usage
+    need_root
+    [[ $what == --all || $what =~ ^[0-9]{8}-[0-9]{6}$ ]] || die "invalid clone '$what' ($prog mounts)"
+    while IFS=$'\t' read -r name value; do
+        id=${name##*/}
+        [[ $what == --all || $what == "$id" ]] || continue
+        # mounts of the partitions of a volume first
+        for m in $(findmnt -rn -o TARGET | grep -E "^$run_dir/mnt/$id(/|$)" | sort -r); do umount "$m" || die "umount $m failed (in use?)"; done
+        zfs destroy "$name" || die "zfs destroy $name failed"
+        rm -rf --one-file-system "${run_dir:?}/mnt/$id"
+        echo "$name ($value) removed"
+    done < <(clones)
+}
+
+#### guided restore without parameters: questions, then the command (to copy and document) and confirmation
+# choose <variable> <question> <option>...: number of the chosen option (1 = default)
+function choose() {
+    local var=$1 question=$2 _i _reply; shift 2
+    echo "$question"
+    for _i in $(seq 1 $#); do echo "    $_i) ${!_i}"; done
+    while true; do
+        read -r -p "choice [1]: " _reply
+        _reply=${_reply:-1}
+        [[ $_reply =~ ^[0-9]+$ ]] && [ "$_reply" -ge 1 ] && [ "$_reply" -le $# ] && break
+    done
+    printf -v "$var" '%s' "$_reply"
+}
+# ask <variable> <question> [default] (local names with _: the variable of the caller is set, not a local one)
+function ask() {
+    local _var=$1 _question=$2 _default=$3 _reply
+    read -r -p "$_question${_default:+ [$_default]}: " _reply
+    printf -v "$_var" '%s' "${_reply:-$_default}"
+}
+function cmd_wizard() {
+    local args=() conn=() way what n host login list replica snaps snap answer original as cmd e i
+    need_root
+    [ -t 0 ] || usage
+    echo "Guided restore (Enter takes the value in brackets, Ctrl-C ends without changes)"
+    if declare -F conf_value > /dev/null && [[ -n $(configs) ]]; then
+        choose way "Restore to:" "another system (push, root@<system> with a one-time key)" "this host (e.g. another pool)"
+        if [ "$way" -eq 1 ]; then
+            ask host "address of the system to restore"
+            valid_host "$host" || die "invalid address '$host'"
+            if ! push_key "$host" > /dev/null; then
+                echo "no push key for $host yet:"
+                access_push "$host"
+                echo "then start $prog again"
+                return 0
+            fi
+            conn=(--to "$host")
+        fi
+        mapfile -t list < <(configs)
+        local names=(); for i in "${list[@]}"; do names+=("${i%%$'\t'*} (${i#*$'\t'})"); done
+        choose n "Replicas of the configuration:" "${names[@]}"
+        conn+=(--config "${list[$((n - 1))]%%$'\t'*}")
+        use_config "${list[$((n - 1))]%%$'\t'*}"
+    else
+        echo "This host has no configurations of bashclub-zsync: pull from the backup server."
+        [[ -f $pull_key ]] || { echo "no key for pull yet:"; access_key; echo "then start $prog again"; return 0; }
+        ask login "restore user on the backup server (zsync-restore-<configuration>@<backup server>)"
+        conn=(--from "$login")
+        parse_connection --from "$login"
+    fi
+    for i in "${!conn[@]}"; do [[ ${conn[$i]} == --from || ${conn[$i]} == --to ]] && parse_connection "${conn[$i]}" "${conn[$((i + 1))]}"; done
+    connect
+    local whats=("one dataset (with its children)" "snapshots missing on the system after a rollback there (reattach)" "the whole server (full restore)")
+    [[ $direction == local ]] && whats+=("single files from a snapshot (read-only clone here)")
+    choose what "What to restore:" "${whats[@]}"
+    if [ "$what" -eq 3 ]; then
+        args=(server "${conn[@]}")
+        ask answer "only these pools (space separated, empty = all)"
+        for e in $answer; do args+=(--pool "$e"); done
+        ask answer "leave out (space separated, e.g. rpool/ROOT on a fresh Proxmox)" "$(replicas "$root" | cut -f1 | sed "s|^$root/||" | grep -qx 'rpool/ROOT' && echo rpool/ROOT)"
+        for e in $answer; do args+=(--exclude "$e"); done
+        ask answer "other names on the system (<from>=<to> space separated, e.g. rpool/data=tank/vm, empty = same names)"
+        for e in $answer; do args+=(--map "$e"); done
+    else
+        mapfile -t list < <(replicas "$root" | cut -f1 | sed "s|^$root/||")
+        [ ${#list[@]} -gt 0 ] || die "no replicas below $root"
+        choose n "Dataset:" "${list[@]}"
+        original=${list[$((n - 1))]}
+        replica=$root/$original
+        mapfile -t snaps < <(backup_zfs list -H -o name,creation -S createtxg -t snapshot -d 1 "$replica" | head -15 | sed 's/^[^@]*@//; s/\t/   /')
+        choose n "Snapshot (newest first):" "${snaps[@]}"
+        snap=${snaps[$((n - 1))]%%   *}
+        if [ "$what" -eq 4 ]; then
+            args=(mount "$replica@$snap")
+        else
+            [ "$what" -eq 1 ] && args=(dataset) || args=(reattach)
+            args+=("${conn[@]}" "$original" --snapshot "$snap")
+            if replicas "$replica" | grep -q .; then
+                ask answer "with its children? [y/N]"; [[ $answer =~ ^[yYjJ] ]] && args+=(--recursive)
+            fi
+            if [ "$what" -eq 1 ]; then
+                ask as "name on the system" "$original"
+                [[ $as != "$original" ]] && args+=(--as "$as")
+            fi
+        fi
+    fi
+    cmd=$(printf '%q ' "$prog" "${args[@]}")
+    echo
+    echo "command (it shows the plan and asks before it starts):"
+    echo "    ${cmd% }"
+    ask answer "run it now? [Y/n]"
+    [[ -z $answer || $answer =~ ^[yYjJ] ]] || return 0
+    exec "$0" "${args[@]}"
+}
+
 case $1 in
+    "") cmd_wizard ;;
     list) shift; cmd_list "$@" ;;
     show) shift; cmd_show "$@" ;;
-    dataset|reattach) cmd_job "$@" ;;
+    dataset|reattach|server) cmd_job "$@" ;;
     jobs) cmd_status ;;
     status) shift; cmd_status "$@" ;;
     start|resume) [[ -n $2 ]] || usage; cmd_start "$2"; [ -t 1 ] && cmd_status "$2" --follow ;;
     stop) [[ -n $2 ]] || usage; cmd_stop "$2" ;;
     run) [[ -n $2 ]] || usage; cmd_run "$2" ;;
+    mount) shift; cmd_mount "$@" ;;
+    mounts) cmd_mounts ;;
+    cleanup) cmd_cleanup "$2" ;;
     access)
         sub=$2; shift 2
         case $sub in

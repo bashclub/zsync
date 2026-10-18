@@ -7,6 +7,15 @@
 - license: GPL-3.0-or-later instead of MIT from 2.0.0 on (both packages, SPDX headers in all files, DEP-5 copyright file `/usr/share/doc/<package>/copyright` with the MIT notice of the versions up to 1.0.19); contributions with Developer Certificate of Origin (`Signed-off-by`, CONTRIBUTING.md) (#72)
 
 ### Added
+- `bashclub-zsync-restore server`: full restore of all replicas of a configuration (#59).
+  - Selection: `--pool`, `--exclude` and `--map <from>=<to>` (the longest wins); `--snapshot` gives one point in time for all.
+  - Pool roots are never replaced, a missing pool stops the plan, existing datasets need `--force`.
+  - At the end, a list of what to check (storage.cfg, guest configurations, boot loader, network).
+  - Without parameters `bashclub-zsync-restore` asks step by step and prints the complete command before it runs it (#56).
+- `bashclub-zsync-restore mount <replica>@<snapshot>`, `mounts`, `cleanup`: read-only clone on the backup server for single files (#60).
+  - Volumes: partitions mounted read-only without journal replay, otherwise the device.
+  - Encrypted replicas only with their key loaded.
+  - While a clone exists, the rotation keeps its snapshot.
 - `bashclub-zsync-restore list`, `show`, `dataset`, `reattach` (#58), plus restore jobs: `jobs`, `status [--follow]`, `start`, `stop`, `resume` and `run` (#62).
   - **All commands:** pull (`--from`), push (`--to`) or on the backup server itself.
   - **`list`, `show`:** replicas and their snapshot chains, compared with the system by GUID: common snapshot, missing there, only there.

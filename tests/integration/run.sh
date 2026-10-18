@@ -1028,7 +1028,86 @@ case_restore_resume() {
   check "resume: Daten gleich" cmp -s /zci/src/data/file /zci/src/slow/file
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume)
+# Einzelne Dateien: Snapshot als lesender Clone am Backupserver (Dateisystem, Volume mit Partition), die Rotation
+# behält den Snapshot solange, cleanup entfernt nur die Clones; verschlüsselt ohne Schlüssel nur Hinweis
+case_restore_mount() {
+  local R=$ZCI_POOL_DST/restore/$ZCI_POOL_SRC r=bashclub-zsync-restore out id dir
+  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  echo "version 1" > /zci/src/data/doc.txt; snap "$ZCI_POOL_SRC/data" 01
+  echo "version 2" > /zci/src/data/doc.txt; snap "$ZCI_POOL_SRC/data" 02
+  zfs create -V 64M "$ZCI_POOL_SRC/vol"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/vol"
+  udevadm settle
+  echo 'type=83' | sfdisk -q /dev/zvol/$ZCI_POOL_SRC/vol; udevadm settle
+  for i in $(seq 1 20); do [[ -e /dev/zvol/$ZCI_POOL_SRC/vol-part1 ]] && break; sleep 0.5; done
+  mkfs.ext4 -q /dev/zvol/$ZCI_POOL_SRC/vol-part1
+  mkdir -p /zci/volmnt && mount /dev/zvol/$ZCI_POOL_SRC/vol-part1 /zci/volmnt && echo "in the vm" > /zci/volmnt/vm.txt && umount /zci/volmnt
+  snap "$ZCI_POOL_SRC/vol" 01
+  echo "zsync-ci-passphrase" | zfs create -o encryption=on -o keyformat=passphrase "$ZCI_POOL_SRC/enc"
+  zfs set bashclub:zsync=all "$ZCI_POOL_SRC/enc"; snap "$ZCI_POOL_SRC/enc" 01
+  config restore; zsync
+  # Dateisystem
+  out=$($r mount "$R/data@zfs-auto-snap_daily-01" 2>&1); echo "$out" >> "$log"
+  dir=$(sed -n 's/^.*(read only): //p' <<< "$out"); id=$(sed -n 's/^remove it: .* cleanup //p' <<< "$out")
+  equal "mount: alter Stand lesbar ($out)" "version 1" "$(cat "$dir/doc.txt" 2>&1)"
+  check "mount: nur lesend" not touch "$dir/new" 2>/dev/null
+  check "mounts: Clone gelistet" grep -q "$R/data@zfs-auto-snap_daily-01" <<< "$($r mounts)"
+  # Rotation (daily=1) würde 01 löschen: der Clone hält ihn
+  set_conf "$conf" snapshot_filter '"daily=1"'
+  snap "$ZCI_POOL_SRC/data" 03; zsync
+  check "Rotation: Snapshot des Clones bleibt" exists "$R/data@zfs-auto-snap_daily-01"
+  check "Rotation: anderer alter Snapshot gelöscht" not exists "$R/data@zfs-auto-snap_daily-02"
+  # Volume mit Partition
+  out=$($r mount "$R/vol@zfs-auto-snap_daily-01" 2>&1); echo "$out" >> "$log"
+  local vid; vid=$(sed -n 's/^remove it: .* cleanup //p' <<< "$out")
+  equal "Volume: Datei der Partition lesbar ($out)" "in the vm" "$(cat "/run/bashclub-zsync-restore/mnt/$vid/part1/vm.txt" 2>&1)"
+  # verschlüsselt ohne Schlüssel
+  out=$($r mount "$R/enc@zfs-auto-snap_daily-01" 2>&1)
+  check "verschlüsselt: Hinweis auf load-key ($out)" grep -q "zfs load-key $R/enc" <<< "$out"
+  check "verschlüsselt: kein Clone" not grep -q "$R/enc" <<< "$($r mounts)"
+  # aufräumen
+  check "cleanup Dateisystem" $r cleanup "$id"
+  check "cleanup: Clone weg" not exists "$ZCI_POOL_DST/zsync-restore-clones/$id"
+  check "cleanup --all" $r cleanup --all
+  check "cleanup: Partition ausgehängt" not grep -q "/run/bashclub-zsync-restore/mnt/$vid" /proc/mounts
+  equal "keine Clones mehr" "" "$($r mounts)"
+  check "Replikate unverändert" exists "$R/vol@zfs-auto-snap_daily-01"
+  zsync
+  check "Rotation nach cleanup: alter Snapshot gelöscht" not exists "$R/data@zfs-auto-snap_daily-01"
+}
+
+# Full Restore eines Servers: alle Replikate der Config mit Umbenennung, Ausschluss und einem Zeitpunkt; fehlender
+# Pool im Plan abgewiesen; geführter Ablauf (Wizard) gibt den passenden Befehl aus
+case_restore_server() {
+  local R=$ZCI_POOL_DST/restore/$ZCI_POOL_SRC out n
+  zfs create "$ZCI_POOL_SRC/data"; zfs create "$ZCI_POOL_SRC/data/child"; zfs create "$ZCI_POOL_SRC/other"
+  zfs create -V 32M "$ZCI_POOL_SRC/vol"
+  for d in data other vol; do zfs set bashclub:zsync=all "$ZCI_POOL_SRC/$d"; done
+  write "$ZCI_POOL_SRC/data" 1; write "$ZCI_POOL_SRC/data/child" 1
+  snap "$ZCI_POOL_SRC/vol" 01
+  for n in 01 02 03; do snap "$ZCI_POOL_SRC/data" $n; snap "$ZCI_POOL_SRC/data/child" $n; snap "$ZCI_POOL_SRC/other" $n; done
+  config restore; zsync
+  out=$(ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-restore server --config restore --map "$ZCI_POOL_SRC/data=nopool/data" --dry-run 2>&1)
+  echo "$out" >> "$log"
+  check "fehlender Pool: im Plan abgewiesen" grep -q "ERROR: pool nopool does not exist" <<< "$out"
+  restore server --config restore --map "$ZCI_POOL_SRC=$ZCI_POOL_SRC/srv" --exclude "$ZCI_POOL_SRC/other" --snapshot zfs-auto-snap_daily-02
+  equal "server: Job fertig" done "$phase"
+  check "server: Hinweise nach dem Restore" grep -q "after the restore, check on" <<< "$(last_restore_output)"
+  equal "server: Kette bis zum Zeitpunkt" "zfs-auto-snap_daily-01 zfs-auto-snap_daily-02" "$(snaps "$ZCI_POOL_SRC/srv/data")"
+  equal "server: Kind" "zfs-auto-snap_daily-01 zfs-auto-snap_daily-02" "$(snaps "$ZCI_POOL_SRC/srv/data/child")"
+  equal "server: Volume ohne den Snapshot nimmt den älteren" "zfs-auto-snap_daily-01" "$(snaps "$ZCI_POOL_SRC/srv/vol")"
+  check "server: ausgeschlossen" not exists "$ZCI_POOL_SRC/srv/other"
+  check "server: Bericht ohne Fehler" not grep -q "^ERROR" "/var/lib/bashclub-zsync-restore/jobs/$job.report"
+  # Wizard: auf diesem Host, Config, ein Dataset, neuester Snapshot, ohne Kinder, anderer Name, nicht ausführen
+  n=$(ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-restore list --config restore | awk '$1 ~ /^zci/ { print $1 }' | grep -nx "$ZCI_POOL_SRC/data" | cut -d: -f1)
+  local jobs_before; jobs_before=$(ls /var/lib/bashclub-zsync-restore/jobs/*.job | wc -l)
+  out=$(printf '2\n1\n1\n%s\n1\ny\n%s\nn\n' "$n" "$ZCI_POOL_SRC/wiz" | ZSYNC_CONF_DIR=$CONF_DIR script -qec bashclub-zsync-restore /dev/null 2>&1 | tr -d '\r')
+  echo "$out" >> "$log"
+  check "Wizard: fertiger Befehl ($out)" grep -qx "    bashclub-zsync-restore dataset --config restore $ZCI_POOL_SRC/data --snapshot zfs-auto-snap_daily-03 --recursive --as $ZCI_POOL_SRC/wiz" <<< "$out"
+  equal "Wizard: mit n kein Job angelegt" "$jobs_before" "$(ls /var/lib/bashclub-zsync-restore/jobs/*.job | wc -l)"
+  check "Wizard: nichts ausgeführt" not exists "$ZCI_POOL_SRC/wiz"
+}
+
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_server)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten und Pools): ein zweiter wartet
