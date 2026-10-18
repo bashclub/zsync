@@ -39,13 +39,15 @@ monitor_max_age=""
 
 # who starts the runs of this configuration: cron (also without this setting), systemd (timer
 # bashclub-zsync@<name>.timer from the settings below, activate with: bashclub-zsync-timer sync)
-# or autorun (removable disk, zsync-autorun: no timer, no age check in the monitoring)
+# autorun (removable disk, zsync-autorun: no timer, no age check in the monitoring) or external (started by another
+# tool, e.g. Miyagi: no timer, bashclub-zsync-setup --external shows the command for the tool)
 trigger=systemd
 
 # trigger=systemd: schedule in cron format, several separated by ";", e.g. "*/15 6-22 * * 1-5" or "@daily"
 schedule="@daily"
 
-# trigger=systemd: user of the run (operation without root, see README), empty = root
+# trigger=systemd: user of the run (operation without root, see README), empty = root; trigger=external: the user the tool
+# runs it as (runuser -u <user> -- bashclub-zsync -c <config>)
 run_as=""
 
 # trigger=systemd: append the output to this file, empty = journal (journalctl -u bashclub-zsync@<name>)

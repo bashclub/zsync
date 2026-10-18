@@ -124,7 +124,7 @@ The source is set up over ssh, as its management user `zsync` (no root access ne
 ~~~
 bashclub-zsync-setup zsync
 ~~~
-For automation every question has an option, `--yes` takes the defaults for the rest, e.g. (source, datasets and name are examples) `bashclub-zsync-setup --yes --source pve1 --login root --tag-datasets "rpool/data" --run pve1`. All options: `bashclub-zsync-setup --help`. `--source local` replicates pools of the backup server, `--root` sets up a replication as root without job users (as before 2.0). An existing configuration is never overwritten.
+For automation every question has an option, `--yes` takes the defaults for the rest, e.g. (source, datasets and name are examples) `bashclub-zsync-setup --yes --source pve1 --login root --tag-datasets "rpool/data" --run pve1`. All options: `bashclub-zsync-setup --help`. `--source local` replicates pools of the backup server, `--root` sets up a replication as root without job users (as before 2.0), `--external` a configuration that another tool starts (`trigger=external`, see [Run with systemd timers](#run-with-systemd-timers)). An existing configuration is never overwritten.
 
 ## Configuration
 After first execution bashclub-zsync will create `/etc/bashclub/zsync.conf` if no configuration parameter is given and file not exists.
@@ -417,6 +417,9 @@ The configuration decides who starts its runs (`trigger`):
 - `cron` – also without the setting: the configuration runs as before from cron (or by hand), nothing is changed by an update
 - `systemd` – a timer `bashclub-zsync@<name>.timer` for `/etc/bashclub/<name>.conf`, created from the settings `schedule` (cron format, several separated by `;`), `run_as` (user, empty = root) and `log_file` (empty = journal)
 - `autorun` – removable disk (`zsync-autorun@`, udev): no timer, no age check in the Checkmk check (unless `monitor_max_age` is set)
+- `external` – started by another tool, e.g. Miyagi. There is no timer, `migrate` takes no cron job into it, and the age check learns the interval from the previous runs.
+  - Create the configuration once with `bashclub-zsync-setup --external <name>`. It sets up the job users as usual and prints the command for each run, e.g. `runuser -u zsync-<name> -- bashclub-zsync -c /etc/bashclub/<name>.conf`.
+  - The tool runs this command and does not write the configuration again.
 
 A run missed while the host was off is started after the next boot, a timer never starts a second run while the previous one is still active, and the Checkmk check takes the interval for the age check from the timer.
 
