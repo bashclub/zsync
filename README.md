@@ -258,12 +258,15 @@ Without root the user needs the permissions `clone`, `promote` and `rename` on i
 The `refquota` of a filesystem is replicated with the initial replication only. If it is raised on the source later, the target keeps the old value and the replication fails with "quota exceeded" as soon as the data exceeds it. Before each incremental replication `bashclub-zsync` therefore raises the `refquota` on the target to the value of the source, or removes it if the source has none. It never lowers it, and `quota` is not changed.
 
 ### Monitoring with Checkmk
-The package contains the local check `bashclub_zsync`. If the Checkmk agent is installed (`/usr/lib/check_mk_agent` exists, also when the agent is installed later), it is linked to `/usr/lib/check_mk_agent/local/bashclub_zsync`. To disable it:
+`bashclub-zsync` writes the state of each configuration as Checkmk service `zsync <config>` into the spool of the Checkmk agent (`/var/lib/check_mk_agent/spool/<checkzfs_spool_maxage>_bashclub-zsync-<config>`), next to the checkzfs output and to the same place: on the backup server, or with `checkzfs_spool=1` on the source. It writes it at the end of each run (also after an error), every 5 minutes during a run (on the source only when the state changes), and on request. With the spool on the source the services stay visible while the backup server is switched off between the runs (e.g. a backup server that only starts for the replication); if no run comes anymore, the spool file becomes older than its maxage and Checkmk reports the services as missing. To disable it: `touch /etc/bashclub/zsync-checkmk.disabled`.
+
+Show the state and refresh the spool at once (checkzfs and the services of `bashclub-zsync`, without snapshots, replication or deletion; exit code 0 OK, 1 WARN, 2 CRIT), for `/etc/bashclub/zsync.conf`, for all configurations, or in the raw Checkmk format:
 ~~~
-touch /etc/bashclub/zsync-checkmk.disabled
-dpkg-reconfigure bashclub-zsync
+bashclub-zsync -c /etc/bashclub/zsync.conf -s
+bashclub-zsync -s
+bashclub-zsync -c /etc/bashclub/zsync.conf -s checkmk
 ~~~
-It shows one service `zsync <config>` per configuration and reads only status files of `bashclub-zsync` and `/proc`, it never calls `zfs` itself:
+The evaluation reads only status files of `bashclub-zsync` and `/proc`, it never calls `zfs` itself (the check `/usr/share/bashclub-zsync/checkmk/bashclub_zsync`):
 
 | State | Detection |
 |---|---|
@@ -276,7 +279,7 @@ It shows one service `zsync <config>` per configuration and reads only status fi
 | 3 or more runs skipped during one active run | WARN |
 | dataset without common snapshot with the source, or replica without snapshots (full replication needed) | CRIT, with cause |
 | replication of a dataset failed and its base is the oldest snapshot of its interval on the source (chain at risk) | WARN |
-| newest snapshot of the replica missing on the source (rollback or deleted on the source) | WARN |
+| old chain after a rollback on the source (see [Rollback on the source](#rollback-on-the-source)) | WARN until kept or deleted |
 | replica without source dataset, or source no longer selected (after 1 day) | WARN |
 
 The interval is the median of the start intervals of the last 10 runs, so it needs no configuration and manual runs do not change it. Until 5 intervals are known (learning phase) the age check is at most WARN. `monitor_max_age` in the configuration sets the maximum age instead (WARN, CRIT at 3 times the value), `monitor_max_age=0` disables the age check, e.g. for removable disks. All other checks are active from the first run. The thresholds can be changed in `/etc/bashclub/zsync-checkmk.conf`, e.g. `stall_crit=3600` (variables at the top of the check).

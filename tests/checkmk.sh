@@ -37,7 +37,7 @@ state() {
   printf 'config=%s\npid=%s\npid_start=%s\nrun_start=%s\nphase=%s\ndataset=%s\nphase_since=%s\n' \
     "$conf" ${4:-100} ${5:-555} ${6:-$((T - 600))} $1 "${3:-}" $2 > "$w/run/$id.state"
 }
-run() { ZSYNC_NOW=${2:-$T} bash "$check"; }
+run() { ZSYNC_NOW=${2:-$T} bash "$check" ${CHECK_ARGS[@]+"${CHECK_ARGS[@]}"}; }
 # expect <beschreibung> <zustand> <text-regex> [zeitpunkt]
 expect() {
   local out; out=$(run "" "${4:-$T}"); ((count++))
@@ -146,6 +146,11 @@ reset 'monitor_max_age="$(touch '"$w"'/EXECUTED)"'; last 0 $((T - 1800)); histor
 expect "ungültiges monitor_max_age ignoriert" 0 "invalid monitor_max_age"
 # Status-Datei mit einer Config, die nicht zum Namen der Datei passt: kein Service
 reset; last 0 $((T - 1800)); mv "$w/lib/$id.last" "$w/lib/_etc_bashclub_other.conf.last"; expect_none "Config passt nicht zum Namen der Status-Datei: ignoriert"
+# --config: nur diese Config (bashclub-zsync ruft den Check pro Config auf)
+reset; last 0 $((T - 1800)); history 3600 6
+CHECK_ARGS=(--config "$conf"); expect "--config: Service dieser Config" 0 "interval 1h 0m from 5 runs"
+CHECK_ARGS=(--config "$w/etc/other.conf"); expect_none "--config einer anderen Config: kein Service"
+CHECK_ARGS=()
 # weiterer Ordner (hier root mit anderem Besitzer, mehrere echte Benutzer prüft die Integration): stört nicht
 reset; last 0 $((T - 1800)); history 3600 6; mkdir "$w/libbase/root" "$w/runbase/root" 2>/dev/null
 expect "weiterer Ordner stört nicht" 0 "interval 1h 0m from 5 runs"
