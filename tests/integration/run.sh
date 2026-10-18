@@ -780,9 +780,15 @@ case_permissions() {
   check "keine Status-Datei im Basisordner" test -z "$(find /var/lib/bashclub-zsync /run/bashclub-zsync -maxdepth 1 -type f)"
 }
 case_checkmk() {
-  local spool=/var/lib/check_mk_agent/spool/87000_bashclub-zsync-checkmk out before mid
+  # eine Spool-Datei je Lauf unter dem Namen von checkzfs: <maxage>_<checkzfs_prefix>
+  local spool=/var/lib/check_mk_agent/spool/87000_zsync out before mid host
+  local old1=/var/lib/check_mk_agent/spool/87000_bashclub-zsync-checkmk old2
+  host=$(hostname -s); old2=/var/lib/check_mk_agent/spool/87000_bashclub-zsync-$host-checkmk
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; snap "$ZCI_POOL_SRC/data" 01
+  # Dateien der testing-Versionen mit eigenem Namen für den Status
+  echo '0 "zsync checkmk" - alt' > $old1; echo '0 "zsync x checkmk" - alt' > $old2
   config checkmk; rm -f $spool; zsync
+  check "alte Status-Dateien der testing-Versionen entfernt" not test -e $old1 -o -e $old2
   out=$(check_output)
   check "Service OK in der Lernphase ($out)" grep -qE '^0 "zsync checkmk" .*learning 0/5' <<< "$out"
   check "Statusdatei des Laufs entfernt" test -z "$(status_path state)"
@@ -808,33 +814,37 @@ case_checkmk() {
   check "Watchdog: Spool während des Laufs ($mid)" grep -q 'running for' <<< "$mid"
   check "nach dem Lauf: endgültiger Stand" not grep -q 'running for' $spool
   sed -i '/^bandwidth_limit=/d' "$conf"
-  # -s mit checkzfs: checkzfs läuft, sein Spool wird neu geschrieben, seine Services zählen im Exit-Code (#106)
-  local czspool=/var/lib/check_mk_agent/spool/87000_zsync host; host=$(hostname -s)
+  # mit checkzfs: checkzfs-Services und Laufstatus in derselben Datei; -s führt checkzfs aus (#106)
   set_conf "$conf" checkzfs_disabled 0
-  rm -f $czspool
+  rm -f $spool; zsync
+  check "eine Datei: checkzfs-Service" grep -q "$ZCI_POOL_SRC/data" $spool
+  check "eine Datei: Laufstatus" grep -qE '^0 "zsync checkmk"' $spool
+  equal "eine Datei: ein Abschnitt" 1 "$(grep -c '^<<<local>>>' $spool)"
+  rm -f $spool
   out=$(bashclub-zsync -c "$conf" -s 2>&1); rc=$?
   echo "$out" >> "$log"
   check "-s mit checkzfs: keine Meldung command not found ($out)" not grep -q "command not found" <<< "$out"
-  check "-s mit checkzfs: checkzfs-Spool geschrieben" test -s $czspool
+  check "-s mit checkzfs: checkzfs-Service in der Datei" grep -q "$ZCI_POOL_SRC/data" $spool
+  check "-s mit checkzfs: Laufstatus in der Datei" grep -qE '^0 "zsync checkmk"' $spool
   check "-s mit checkzfs: checkzfs-Services in der Ausgabe" grep -q "$ZCI_POOL_SRC/data" <<< "$out"
-  # Spool auf der Quelle (hier derselbe Host): Service und Datei mit dem Namen des Backup-Hosts, die alte Datei einer
-  # testing-Version wird einmal entfernt
-  local onsource=/var/lib/check_mk_agent/spool/87000_bashclub-zsync-$host-checkmk
-  set_conf "$conf" checkzfs_spool 1
-  echo '0 "zsync checkmk" - alte Datei' > $spool; rm -f $onsource
-  zsync
-  check "Spool auf der Quelle: Service mit Backup-Host" grep -qE "^0 \"zsync $host checkmk\"" $onsource
-  check "Spool auf der Quelle: alte Datei entfernt" not test -e $spool
-  out=$(bashclub-zsync -c "$conf" -s 2>&1)
-  check "-s: Service mit Backup-Host ($out)" grep -qE "^OK +zsync $host checkmk " <<< "$out"
-  # Watchdog schreibt mit dem Spool auf der Quelle dorthin (startet erst, wenn die Quelle geantwortet hat)
+  # Watchdog: schreibt die checkzfs-Services des letzten Laufs mit, sie verschwinden während eines Laufs nicht
   write "$ZCI_POOL_SRC/data" 6 big2; snap "$ZCI_POOL_SRC/data" 03
-  echo "bandwidth_limit=1m" >> "$conf"; set_conf "$conf" checkzfs_disabled 1; rm -f $onsource $spool
+  echo "bandwidth_limit=1m" >> "$conf"
   ZSYNC_WATCHDOG_INTERVAL=1 bashclub-zsync -c "$conf" >> "$log" 2>&1 &
-  sleep 4; mid=$(cat $onsource 2>/dev/null); wait
-  check "Watchdog auf der Quelle: Spool während des Laufs ($mid)" grep -q "zsync $host checkmk.*running for" <<< "$mid"
-  check "Watchdog auf der Quelle: kein lokaler Spool unter altem Namen" not test -e $spool
-  rm -f $onsource $czspool
+  sleep 4; mid=$(cat $spool 2>/dev/null); wait
+  check "Watchdog: Laufstatus während des Laufs ($mid)" grep -q 'running for' <<< "$mid"
+  check "Watchdog: checkzfs-Services bleiben" grep -q "$ZCI_POOL_SRC/data" <<< "$mid"
+  sed -i '/^bandwidth_limit=/d' "$conf"
+  # Spool auf der Quelle (hier derselbe Host), anderer Prefix: Datei und Service mit dem Prefix
+  local onsource=/var/lib/check_mk_agent/spool/87000_backup1
+  set_conf "$conf" checkzfs_spool 1; set_conf "$conf" checkzfs_prefix backup1
+  rm -f $onsource $spool; zsync
+  check "Prefix: Laufstatus als <prefix> <config>" grep -qE '^0 "backup1 checkmk"' $onsource
+  check "Prefix: checkzfs-Service in derselben Datei" grep -q "$ZCI_POOL_SRC/data" $onsource
+  check "Prefix: keine Datei unter dem Standard-Prefix" not test -e $spool
+  out=$(bashclub-zsync -c "$conf" -s 2>&1)
+  check "-s: Service mit Prefix ($out)" grep -qE "^OK +backup1 checkmk " <<< "$out"
+  rm -f $onsource $spool
 }
 
 # Restore-Zugang: Pull-Benutzer liest nur die Replikate seiner Config, Push-Key mit Ablaufdatum; die ausgegebenen

@@ -3,7 +3,8 @@
 #
 # Checkmk check for bashclub-zsync: one service "zsync <config>" per configuration, in the format of a local check.
 # bashclub-zsync runs it at the end of each run, during a run (watchdog) and with -s, and writes the output as spool
-# file <maxage>_bashclub-zsync-<config> (locally or on the source), so the state is also there while the backup server
+# file <maxage>_<checkzfs_prefix> together with the checkzfs output (locally or on the source; the service is named
+# "<checkzfs_prefix> <config>" there), so the state is also there while the backup server
 # is switched off. Without options all configurations, with --config <file> only this one.
 #
 # Reads only the status files written by bashclub-zsync and /proc, never calls zfs (it could hang the same way).

@@ -3,7 +3,7 @@
 ## [Unreleased]
 
 ### Changed
-- the Checkmk check of the runs comes as spool file `<checkzfs_spool_maxage>_bashclub-zsync-<config>` instead of a local check: written at the end of each run (also after errors), every 5 minutes during a run (watchdog, on the source only when the state changes) and with `-s`, locally or on the source like checkzfs (`checkzfs_spool`), so the services stay visible while the backup server is switched off between the runs; the package no longer links the local check and removes the link of the testing versions (#85)
+- the Checkmk check of the runs comes as service `<checkzfs_prefix> <config>` in the spool file of checkzfs (`<checkzfs_spool_maxage>_<checkzfs_prefix>`, one file per run with the checkzfs services) instead of a local check: written at the end of each run (also after errors), every 5 minutes during a run (watchdog, on the source only when the state changes) and with `-s`, locally or on the source like checkzfs (`checkzfs_spool`), so the services stay visible while the backup server is switched off between the runs; the package no longer links the local check and removes the link of the testing versions (#85)
 - license: GPL-3.0-or-later instead of MIT from 2.0.0 on (both packages, SPDX headers in all files, DEP-5 copyright file `/usr/share/doc/<package>/copyright` with the MIT notice of the versions up to 1.0.19); contributions with Developer Certificate of Origin (`Signed-off-by`, CONTRIBUTING.md) (#72)
 
 ### Added
@@ -64,7 +64,7 @@
 
 ### Fixed
 - `bashclub-zsync -s` did not run checkzfs (`run_checkzfs: command not found`), so its spool was not renewed and its services were missing from the output and the exit code (#106).
-- With the spool on the source (`checkzfs_spool=1`), service and spool file of the state now contain the backup server: `zsync <backup server> <config>` in `<maxage>_bashclub-zsync-<backup server>-<config>`, so two backup servers with configurations of the same name no longer overwrite each other. The local spool keeps its name. The file of the testing versions is removed once, with `rm -f` of a spool file allowed in `bashclub-zsync-remote` (#106).
+- The state of a run and the checkzfs services are in one spool file, `<maxage>_<checkzfs_prefix>` as before 2.0; the state service is named `<checkzfs_prefix> <config>`, so backup servers with different prefixes on one source stay apart. The watchdog writes the checkzfs services of the last run along, so they do not disappear during a run. The separate state files of the testing versions are removed once, on the source with `rm -f` of a spool file, now allowed in `bashclub-zsync-remote` (#106).
 - The watchdog wrote locally even with the spool on the source: it now starts once the source has answered (#106).
 - security: packages up to 1.0.19 created `/etc/bashclub` (configurations, run as root) and the doc folder with the owner of the build user (uid 995), which an update does not change; the package sets root as owner and removes write access of group and others (#80)
 - security: `bashclub-zsync-setup`, `bashclub-zsync-timer`, the generator and `bashclub-zsync-disk` check every value before it goes into a configuration, a unit or a command on the source (host, port, datasets, tag, label, user, log file); settings are written in single quotes if needed, values with `'`, `\` or line breaks are refused (#53)

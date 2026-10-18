@@ -76,7 +76,8 @@ checkzfs_disabled=0
 # do not connect to source host (if replication is local)
 checkzfs_local=0
 
-# set checkzfs parameter "--prefix"
+# set checkzfs parameter "--prefix", also the name of the spool file <checkzfs_spool_maxage>_<prefix> and of the
+# service "<prefix> <config>" of the runs; several backup servers writing into the spool of one source need different ones
 checkzfs_prefix=zsync
 
 # set checkzfs maximum age of last snapshot in minutes (comma separated => warn,crit)

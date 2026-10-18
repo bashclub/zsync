@@ -193,7 +193,8 @@ transfer_resume=1
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
-# set checkzfs parameter "--prefix"
+# set checkzfs parameter "--prefix", also the name of the spool file <checkzfs_spool_maxage>_<prefix> and of the
+# service "<prefix> <config>" of the runs; several backup servers writing into the spool of one source need different ones
 checkzfs_prefix=zsync
 
 # set checkzfs maximum age of last snapshot in minutes (comma separated => warn,crit)
@@ -258,7 +259,11 @@ Without root the user needs the permissions `clone`, `promote` and `rename` on i
 The `refquota` of a filesystem is replicated with the initial replication only. If it is raised on the source later, the target keeps the old value and the replication fails with "quota exceeded" as soon as the data exceeds it. Before each incremental replication `bashclub-zsync` therefore raises the `refquota` on the target to the value of the source, or removes it if the source has none. It never lowers it, and `quota` is not changed.
 
 ### Monitoring with Checkmk
-`bashclub-zsync` writes the state of each configuration as Checkmk service `zsync <config>` into the spool of the Checkmk agent (`/var/lib/check_mk_agent/spool/<checkzfs_spool_maxage>_bashclub-zsync-<config>`), next to the checkzfs output and to the same place: on the backup server, or with `checkzfs_spool=1` on the source. On the source, several backup servers can write into the same spool, so there service and file contain the short host name of the backup server: `zsync <backup server> <config>` in `<checkzfs_spool_maxage>_bashclub-zsync-<backup server>-<config>`. It writes it at the end of each run (also after an error), every 5 minutes during a run (on the source only when the state changes), and on request. With the spool on the source the services stay visible while the backup server is switched off between the runs (e.g. a backup server that only starts for the replication); if no run comes anymore, the spool file becomes older than its maxage and Checkmk reports the services as missing. To disable it: `touch /etc/bashclub/zsync-checkmk.disabled`.
+`bashclub-zsync` writes the state of each configuration as Checkmk service `<checkzfs_prefix> <config>` (with the default prefix `zsync <config>`). It goes into the spool of the Checkmk agent, in the same file as the checkzfs output: `/var/lib/check_mk_agent/spool/<checkzfs_spool_maxage>_<checkzfs_prefix>`, the name checkzfs used before 2.0. The number in the name is the maximum age the agent accepts for the file.
+- **Where:** on the backup server, or with `checkzfs_spool=1` on the source.
+- **Several backup servers on one source** need different `checkzfs_prefix` values, as for checkzfs before; otherwise they overwrite each other's file. The same applies to several configurations with the same prefix on one backup server.
+
+It writes it at the end of each run (also after an error), every 5 minutes during a run (on the source only when the state changes), and on request. With the spool on the source the services stay visible while the backup server is switched off between the runs (e.g. a backup server that only starts for the replication); if no run comes anymore, the spool file becomes older than its maxage and Checkmk reports the services as missing. To disable it: `touch /etc/bashclub/zsync-checkmk.disabled`.
 
 Show the state and refresh the spool at once (checkzfs and the services of `bashclub-zsync`, without snapshots, replication or deletion; exit code 0 OK, 1 WARN, 2 CRIT), for `/etc/bashclub/zsync.conf`, for all configurations, or in the raw Checkmk format:
 ~~~
