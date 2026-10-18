@@ -53,6 +53,9 @@ run_as=""
 # trigger=systemd: append the output to this file, empty = journal (journalctl -u bashclub-zsync@<name>)
 log_file=""
 
+# maximum run time of a hook in seconds (hooks: /etc/bashclub/hooks.d, see README)
+hook_timeout=600
+
 # bandwidth limit of the transfer in bytes per second with suffix k, m, g (1024 based), e.g. 10m = 10 MiB/s
 # (about 84 Mbit/s); applied on this host with pv (package pv), empty = no limit
 bandwidth_limit=""

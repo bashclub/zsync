@@ -171,6 +171,9 @@ zfs_auto_snapshot_label_match="strict"
 # empty = derived from the start times of the previous runs, 0 = no age check (e.g. removable disks)
 monitor_max_age=""
 
+# maximum run time of a hook in seconds (hooks: /etc/bashclub/hooks.d, see README)
+hook_timeout=600
+
 # bandwidth limit of the transfer in bytes per second with suffix k, m, g (1024 based), e.g. 10m = 10 MiB/s
 # (about 84 Mbit/s); applied on this host with pv (package pv), empty = no limit
 bandwidth_limit=""
@@ -328,6 +331,30 @@ After a restore, the values that were set locally on the source are set again on
 ~~~
 restored=rpool/data
 zfs get -H -o name,property,value -s local -r all "$restored" | awk -F'\t' '$2 ~ /^bashclub:zsync-source\./ && $3 ~ /^local:/ { sub(/^bashclub:zsync-source\./, "", $2); sub(/^local:/, "", $3); printf "zfs set \"%s=%s\" %s\n", $2, $3, $1 }'
+~~~
+
+### Hooks before and after a run
+Own steps before and after the replication (e.g. for a tool like Miyagi, or a notification), without changing bashclub-zsync. They run inside the lock of the run, as the user of the run, in lexical order:
+- `/etc/bashclub/hooks.d/pre-run/` and `/etc/bashclub/hooks.d/post-run/` for all configurations;
+- `/etc/bashclub/hooks.d/<config>/pre-run/` and `.../post-run/` for one configuration.
+
+Rules:
+- Only executable files of root that only root may write are run, in folders of root that only root may write. Otherwise the run is skipped with an error, as for a failing pre-run hook.
+- **pre-run:** an exit code other than 0 skips the run (`[ERROR]`, exit code 1).
+- **post-run:** runs after every run once the pre-run hooks started, also after an error or a skipped run. An exit code other than 0 only logs a warning; the exit code of the run stays.
+- **Environment:** `ZSYNC_CONFIG`, `ZSYNC_NAME`, `ZSYNC_TARGET`, `ZSYNC_SOURCE`, `ZSYNC_PHASE`, and after the run `ZSYNC_RC` and `ZSYNC_DURATION` (seconds).
+- The output of a hook goes into the log of the run.
+- A hook is stopped after `hook_timeout` seconds (600).
+- Without these folders nothing changes.
+
+A hook for all configurations that logs the result to syslog:
+~~~
+install -d -m 755 /etc/bashclub/hooks.d/post-run
+cat > /etc/bashclub/hooks.d/post-run/50-syslog << 'EOF'
+#!/bin/bash
+logger -t bashclub-zsync "$ZSYNC_NAME: exit code $ZSYNC_RC after ${ZSYNC_DURATION}s"
+EOF
+chmod 755 /etc/bashclub/hooks.d/post-run/50-syslog
 ~~~
 
 ### Exit code

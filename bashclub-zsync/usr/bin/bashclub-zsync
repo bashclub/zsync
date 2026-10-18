@@ -62,8 +62,8 @@ zfs_auto_snapshot_label_match="legacy"
 monitor_max_age=""
 
 # who starts the runs of this configuration: cron (also without this setting, as before), systemd (timer
-# bashclub-zsync@<name>.timer, activate with: bashclub-zsync-timer sync) or autorun (removable disk, zsync-autorun:
-# no timer, no age check in the monitoring)
+# bashclub-zsync@<name>.timer, activate with: bashclub-zsync-timer sync), autorun (removable disk, zsync-autorun:
+# no timer, no age check in the monitoring) or external (started by another tool, e.g. Miyagi)
 trigger=""
 
 # trigger=systemd: schedule in cron format, several separated by ";", e.g. "*/15 6-22 * * 1-5" or "@daily"
@@ -74,6 +74,9 @@ run_as=""
 
 # trigger=systemd: append the output to this file, empty = journal (journalctl -u bashclub-zsync@<name>)
 log_file=""
+
+# maximum run time of a hook in seconds (hooks: /etc/bashclub/hooks.d, see README)
+hook_timeout=600
 
 # bandwidth limit of the transfer in bytes per second with suffix k, m, g (1024 based), e.g. 10m = 10 MiB/s
 # (about 84 Mbit/s); applied on this host with pv (package pv), empty = no limit
@@ -476,8 +479,54 @@ function on_exit() {
     if [[ -n $watchdog_pid ]]; then kill $watchdog_pid 2>/dev/null; fi
     release_snaps
     if [[ -n $status_file ]]; then finish_status $code; fi
+    # hooks after the run, also after an error or a skipped run (e.g. to undo what pre-run did); exit code unchanged
+    if [ $hooks_started -eq 1 ]; then
+        hook_rc=$code
+        run_hooks post-run || log "[WARN] a post-run hook failed, the exit code of the run stays $code."
+    fi
     # status mode (-s) wrote it itself
     if [ $status_mode -eq 0 ]; then write_monitor_spool; fi
+}
+#### hooks: executable files in /etc/bashclub/hooks.d/<pre-run|post-run>/ (all configurations) and in
+# /etc/bashclub/hooks.d/<config>/<pre-run|post-run>/, in lexical order, with the environment ZSYNC_CONFIG, ZSYNC_NAME,
+# ZSYNC_TARGET, ZSYNC_SOURCE, ZSYNC_PHASE and after the run ZSYNC_RC and ZSYNC_DURATION; only files and folders of root
+# that only root may write (like the configuration), their output goes into the log of the run
+hooks_dir=${ZSYNC_HOOKS_DIR:-/etc/bashclub/hooks.d}
+hooks_started=0
+hook_rc=
+function root_only() {
+    [[ ! -L $1 ]] && [[ $(stat -c %u "$1" 2>/dev/null) == "${ZSYNC_CONF_OWNER:-0}" ]] \
+        && [ $(( 8#$(stat -c %a "$1") & 8#022 )) -eq 0 ]
+}
+# run_hooks <pre-run|post-run>: 1 if a hook failed or cannot be trusted (the hooks after it are not run)
+function run_hooks() {
+    local phase=$1 dir hook hrc timeout_s=$hook_timeout name
+    name=$(basename "$conf" .conf)
+    [[ $timeout_s =~ ^[0-9]+$ ]] && [ $timeout_s -gt 0 ] || timeout_s=600
+    for dir in "$hooks_dir/$phase" "$hooks_dir/$name/$phase"; do
+        [[ -e $dir ]] || continue
+        if ! [[ -d $dir ]] || ! root_only "$hooks_dir" || ! root_only "$dir" || { [[ $dir == "$hooks_dir/$name/"* ]] && ! root_only "$hooks_dir/$name"; }; then
+            log "[ERROR] $dir is not a folder of root that only root may write, its hooks are not run."
+            return 1
+        fi
+        for hook in "$dir"/*; do
+            [[ -e $hook ]] || continue
+            if ! [[ -f $hook && -x $hook ]] || ! root_only "$hook"; then
+                log "[ERROR] $hook is not an executable file of root that only root may write, it is not run."
+                return 1
+            fi
+            log "[INFO] $phase hook $hook"
+            ZSYNC_CONFIG=$conf_path ZSYNC_NAME=$name ZSYNC_TARGET=$target ZSYNC_SOURCE=$source ZSYNC_PHASE=$phase \
+                ZSYNC_RC=$hook_rc ZSYNC_DURATION=$(( $(date +%s) - run_start )) \
+                timeout "$timeout_s" "$hook" < /dev/null 2>&1 | while IFS= read -r line; do log "[INFO] ${hook##*/}: $line"; done
+            hrc=${PIPESTATUS[0]}
+            if [ $hrc -ne 0 ]; then
+                log "[$([[ $phase == pre-run ]] && echo ERROR || echo WARN)] $phase hook $hook failed (exit code $hrc$([ $hrc -eq 124 ] && echo ", stopped after ${timeout_s}s"))."
+                return 1
+            fi
+        done
+    done
+    return 0
 }
 trap on_exit EXIT
 
@@ -507,6 +556,16 @@ for setting in target source sshport tag snapshot_filter min_keep zfs_auto_snaps
     config_log+="\n\t$setting=${!setting}"
 done
 log "$config_log\n"
+
+#### hooks before the run (inside the lock of the run): a failing one skips the run
+if [ $status_mode -eq 0 ]; then
+    status hooks
+    hooks_started=1
+    if ! run_hooks pre-run; then
+        log "[ERROR] a pre-run hook failed, the run is skipped."
+        exit 1
+    fi
+fi
 
 status prepare
 

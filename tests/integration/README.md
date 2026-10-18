@@ -23,7 +23,8 @@ Namen und an der alten Stelle, `--force`, `--dry-run`, Replikation danach inkrem
 auf der Quelle, `--rollback`), `restore_pull_push` (Volume und raw-verschlüsselt per Pull, Push mit Statuskopie),
 `restore_resume` (Abbruch per `stop`, Holds, Fortsetzen per Resume-Token, kein zweiter Job auf dasselbe Ziel),
 `restore_mount` (Clone eines Dateisystems und einer Partition im Volume, Rotation behält den Snapshot, cleanup),
-`restore_server` (Full Restore mit `--map`, `--exclude`, `--snapshot`, fehlender Pool, Wizard über ein Pseudo-Terminal).
+`restore_server` (Full Restore mit `--map`, `--exclude`, `--snapshot`, fehlender Pool, Wizard über ein Pseudo-Terminal),
+`hooks` (pre-run und post-run global und je Config, Umgebung, Fehler, nicht vertrauenswürdige Datei, Zeitlimit).
 
 ## Test-VM einrichten
 Eine **VM** (kein LXC-Container: der teilt das ZFS-Modul des Hosts), Debian 13, zwei leere Platten

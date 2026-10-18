@@ -7,6 +7,11 @@
 - license: GPL-3.0-or-later instead of MIT from 2.0.0 on (both packages, SPDX headers in all files, DEP-5 copyright file `/usr/share/doc/<package>/copyright` with the MIT notice of the versions up to 1.0.19); contributions with Developer Certificate of Origin (`Signed-off-by`, CONTRIBUTING.md) (#72)
 
 ### Added
+- Hooks before and after a run (#100).
+  - Executable files in `/etc/bashclub/hooks.d/{pre-run,post-run}/` (all configurations) and `/etc/bashclub/hooks.d/<config>/{pre-run,post-run}/`, run inside the lock in lexical order; only files and folders of root that only root may write.
+  - The environment has the configuration, target, source, exit code and duration; the output goes into the log.
+  - A failing pre-run hook skips the run. A failing post-run hook only logs a warning.
+  - Setting `hook_timeout` (600 s). Without the folders nothing changes.
 - `trigger=external` for configurations started by another tool, e.g. Miyagi (#98).
   - There is no timer, `bashclub-zsync-timer migrate` takes no cron job into such a configuration, and the age check learns the interval from the previous runs.
   - `bashclub-zsync-setup --external` creates the configuration once with job users and prints the command for each run (`runuser -u zsync-<name> -- bashclub-zsync -c <config>`), so the tool no longer writes the configuration on every run.
