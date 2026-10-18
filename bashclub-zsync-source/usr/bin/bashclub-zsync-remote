@@ -200,12 +200,16 @@ esac
 # checkzfs output for the checkmk agent on the source (checkzfs_spool=1): only in the spool directory
 form_cat='^cat > ('"$spoolfile"')$'
 form_mv='^mv ('"$spoolfile"') ('"$spoolfile"')$'
+# the state spool of a backup server under its old name (testing versions of 2.0); mv may replace any spool file anyway
+form_rm='^rm -f ('"$spoolfile"')$'
 if [[ $cmd == "mkdir -p $spooldir" ]]; then
     exec mkdir -p "$spooldir"
 elif [[ $cmd =~ $form_cat ]]; then
     exec cat > "${BASH_REMATCH[1]}"
 elif [[ $cmd =~ $form_mv ]]; then
     exec mv "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+elif [[ $cmd =~ $form_rm ]]; then
+    exec rm -f "${BASH_REMATCH[1]}"
 fi
 
 # single zfs command, optionally with stderr discarded
