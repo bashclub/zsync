@@ -11,10 +11,13 @@ sshport=22
 # zfs user parameter to identify filesystems/volumes to replicate
 tag=bashclub:zsync
 
-# pipe separated list of snapshot name filters
-snapshot_filter="hourly|daily|weekly|monthly"
+# pipe separated list of the snapshot labels to replicate, each with the number of its snapshots to keep on the
+# backup server: daily=30 keeps the 30 newest daily snapshots here, whatever the source deletes;
+# daily or daily=source follows the source (deletes what the source deleted, at least min_keep remain)
+snapshot_filter="hourly=24|daily=30|weekly=8|monthly=12"
 
-# minimum count of snapshots per filter to keep
+# deprecated (will be removed in a later version): minimum number of snapshots per label that stay on the backup
+# server for labels with "source"; use a number in snapshot_filter instead
 min_keep=3
 
 # number of zfs snapshots to keep on source (0 or 1 = snapshot function disabled)

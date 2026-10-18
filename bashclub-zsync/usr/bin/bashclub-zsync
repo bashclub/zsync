@@ -33,10 +33,13 @@ sshport=22
 # zfs user parameter to identify filesystems/volumes to replicate
 tag=bashclub:zsync
 
-# pipe separated list of snapshot name filters
+# pipe separated list of the snapshot labels to replicate, each with the number of its snapshots to keep on this host:
+#   daily or daily=source  the target follows the source (deletes what the source deleted, at least min_keep remain)
+#   daily=30               the 30 newest snapshots of the label stay on this host, whatever the source deletes
 snapshot_filter="hourly|daily|weekly|monthly"
 
-# minimum count of snapshots per filter to keep
+# deprecated (will be removed in a later version): minimum number of snapshots per label that stay on this host for
+# labels with "source"; use a number in snapshot_filter instead, e.g. daily=30
 min_keep=3
 
 # number of zfs snapshots to keep on source (0 or 1 = snapshot function disabled)
@@ -496,6 +499,27 @@ else
     fi
 fi
 
+#### snapshots to keep per label (snapshot_filter="hourly|daily=30"): label=N keeps the N newest snapshots of the label on
+# this host, independent of the source; label, label=source and label=0 follow the source (with min_keep, as before)
+# snapshot_filter keeps only the labels from here on
+declare -A target_keep=()
+filter_labels=
+IFS='|' read -ra filter_entries <<< "$snapshot_filter"
+for entry in "${filter_entries[@]}"; do
+    filter_label=${entry%%=*}
+    if [[ -z $filter_label ]]; then continue; fi
+    if [[ $entry == *=* ]]; then
+        keep_value=${entry#*=}
+        if [[ $keep_value =~ ^[0-9]+$ ]] && [ $keep_value -gt 0 ]; then
+            target_keep[$filter_label]=$keep_value
+        elif [[ $keep_value != "source" ]] && [[ $keep_value != "0" ]]; then
+            log "[WARN] Invalid number of snapshots to keep in snapshot_filter: $entry (a number or source), the target follows the source for $filter_label."
+        fi
+    fi
+    filter_labels+="${filter_labels:+|}$filter_label"
+done
+snapshot_filter=$filter_labels
+
 #### snapshots on the source before replication (zas: once for all datasets, internal: per dataset below)
 if [ $zfs_auto_snapshot_keep -gt 1 ]; then
     if [[ $zfs_auto_snapshot_engine == "zas" ]]; then
@@ -889,7 +913,8 @@ for name in "${syncvols[@]}"; do
 
         release_snaps
 
-        # delete target snapshots older than the oldest source snapshot of each interval, keep at least min_keep
+        # delete target snapshots: per label the newest target_keep[label] stay, otherwise those older than the oldest
+        # source snapshot of the label are deleted (at least min_keep stay)
         debug "$name - Start deletion of old snapshots"
         status delete "$name"
         # source snapshots (newest first), queried again after the replication
@@ -898,6 +923,20 @@ for name in "${syncvols[@]}"; do
         IFS=$'\n'
         for interval in $filter ; do
             debug "$name - Checking interval $interval"
+            # fixed number on this host: the oldest beyond the newest target_keep snapshots, whatever the source deleted
+            if [[ -n ${target_keep[$interval]} ]]; then
+                target_snaps=$(zfs list -H -o name -S createtxg -t snapshot $target/$name | grep -E "${interval_regex[$interval]}")
+                for snap in $(tail -n +$((target_keep[$interval] + 1)) <<< "$target_snaps"); do
+                    clones=$(zfs get -H -o value clones $snap 2>/dev/null)
+                    if [[ -n $clones && $clones != "-" ]]; then
+                        log "[INFO] $name - keeping $snap, the old chain $clones depends on it."
+                    else
+                        log "[INFO] Deleting $snap (more than ${target_keep[$interval]} snapshots of $interval)"
+                        zfs destroy $debug $snap
+                    fi
+                done
+                continue
+            fi
             guid=$(grep -E "${interval_regex[$interval]}" <<< "$source_snaps" | cut -f1 | tail -1)
             if [[ -n $guid ]]; then
                 target_snaps=$(zfs list -H -o name,guid -S createtxg -t snapshot $target/$name | grep -E "${interval_regex[$interval]}")

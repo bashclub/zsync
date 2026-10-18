@@ -143,10 +143,13 @@ sshport=22
 # zfs user parameter to identify filesystems/volumes to replicate
 tag=bashclub:zsync
 
-# pipe separated list of snapshot name filters
+# pipe separated list of the snapshot labels to replicate, each with the number of its snapshots to keep on the
+# backup server: daily=30 keeps the 30 newest daily snapshots here, whatever the source deletes;
+# daily or daily=source follows the source (deletes what the source deleted, at least min_keep remain)
 snapshot_filter="hourly|daily|weekly|monthly"
 
-# minimum count of snapshots per filter to keep
+# deprecated (will be removed in a later version): minimum number of snapshots per label that stay on the backup
+# server for labels with "source"; use a number in snapshot_filter instead
 min_keep=3
 
 # number of zfs snapshots to keep on source (0 or 1 = snapshot function disabled)
@@ -302,6 +305,11 @@ All open cases one after the other:
 bashclub-zsync-maintenance
 ~~~
 Without questions, e.g. for scripts: `bashclub-zsync-maintenance --list [--tsv]` and `bashclub-zsync-maintenance --decide <case> <option> [--dry-run]`.
+
+### Snapshots to keep on the backup server
+Each label in `snapshot_filter` can have the number of its snapshots that stay on the backup server: `snapshot_filter="hourly=24|daily=30|weekly=8|monthly=12"`. These snapshots are kept whatever happens on the source, so deleting snapshots on the source (also by an attacker) cannot shrink the backup. A label alone or `label=source` keeps the previous behavior: the backup server deletes what the source deleted, at least `min_keep` remain (deprecated, it will be removed in a later version). Existing configurations keep working unchanged; `bashclub-zsync-setup` writes numbers for new ones.
+
+Limit: who controls the source can still create many new snapshots of a label, so they push the older ones out of the number kept on the backup server.
 
 ### Original properties of the source
 The replication changes or leaves out some properties: `mountpoint` (not received), `canmount` (`noauto`), `com.sun:auto-snapshot` and the tag (not received), `refquota` (raised on the target, see [refquota](#refquota)); without root also the properties a job user may not set. After each dataset `bashclub-zsync` saves their values on the source and where they come from on the replica, as user properties `bashclub:zsync-source.<property>=<local|inherited|default|received>:<value>`. Show them for the replicas of `/etc/bashclub/zsync.conf`:
