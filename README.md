@@ -463,6 +463,43 @@ Only one run per configuration is active at a time, a second run is skipped with
 Append to the log (`>>`): `>` would empty the log of a run that is still active, even if the new run is skipped.
 Logs in `/var/log/bashclub-zsync/` are rotated weekly by logrotate. A log file in a directory that no logrotate config mentions is rotated by `bashclub-zsync` itself at 10 MiB (4 compressed old logs are kept).
 
+## Restore
+The package `bashclub-zsync-restore` restores replicas in both directions, whichever the network allows:
+- **pull**: the system to restore reads from the backup server. It logs in as a restore user who can only read the replicas of one configuration. The backup server needs no access to the system, and the system cannot change or delete any backup.
+- **push**: the backup server writes to the system to restore, typically a fresh Proxmox or a rescue system with sshd and zfs. It uses a one-time key that expires and only works from the backup server.
+
+It is recommended by `bashclub-zsync`, so it is installed on the backup server with it. For pull, install it on the system to restore as well (repository as in [Installation](#installation)): `apt install bashclub-zsync-restore`.
+
+### Access for a restore
+**Pull.** 1. On the system to restore, create its key and print the command for the backup server:
+~~~
+bashclub-zsync-restore access key
+~~~
+2. On the backup server as root, run the printed command and choose the configuration. It creates the user `zsync-restore-<configuration>`:
+   - Its key works only from the address of the system and only runs `bashclub-zsync-restore-remote`: `zfs list`, `get` and `send` and holds with a restore tag, all below the target of the configuration.
+   - ZFS allows it only `send,hold,release` on this target (`zfs allow`), no `destroy`, `rename` or `receive`.
+   - Denied commands end with exit code 126 and are logged to syslog: `journalctl -t bashclub-zsync-restore-remote`.
+
+3. On the system to restore, run the printed connection test.
+
+With NAT in between, the backup server sees another address than the system: replace the address in the printed command by the one the backup server sees. `bashclub-zsync-restore access key <backup server>` prints the address of the system towards the backup server instead of all its addresses.
+
+**Push.** On the backup server as root, set the address of the system to restore in the first line:
+~~~
+host=192.0.2.10
+bashclub-zsync-restore access push "$host"
+~~~
+It prints three commands:
+- the line for `/root/.ssh/authorized_keys` on the system, with `restrict`, `from=<address of the backup server>` and `expiry-time` (valid for 3 days, `--days <n>`; needs OpenSSH 8.2 or newer);
+- the connection test on the backup server;
+- the command that removes the line again after the restore.
+
+Each push gets its own key, never the key of a replication job.
+
+On the backup server:
+- `bashclub-zsync-restore access list` shows the restore users and push keys
+- `bashclub-zsync-restore access remove <user|push key>` removes a restore user with its permissions, or a push key; for a push key it prints the command for the system
+
 ## Releases
 Packages are built by Forgejo CI on https://code.bashclub.org/bashclub/zsync:
 - pull request: build and test only

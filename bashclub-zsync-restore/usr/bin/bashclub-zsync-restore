@@ -1,0 +1,310 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# bashclub-zsync-restore: restore replicas of bashclub-zsync, in both directions:
+#   pull  the system to restore reads from the backup server as a restore user, who can only read the replicas of
+#         one configuration (bashclub-zsync-restore-remote): the backup server needs no access to the system
+#   push  the backup server writes to the system to restore with a one-time key that expires
+# access: set up and remove these accesses.
+
+PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
+prog=$(basename "$0")
+conf_dir=${ZSYNC_CONF_DIR:-/etc/bashclub}
+lib_dir=${ZSYNC_RESTORE_LIB_DIR:-/var/lib/bashclub-zsync-restore}
+users_home=${ZSYNC_RESTORE_USERS_HOME:-/var/lib/bashclub-zsync-restore-users}
+pull_key=${ZSYNC_RESTORE_PULL_KEY:-/root/.ssh/id_ed25519_bashclub-zsync-restore}
+# configurations of bashclub-zsync (only on the backup server)
+zsync_lib=${ZSYNC_LIB:-/usr/lib/bashclub-zsync/schedule.sh}
+[[ -r $zsync_lib ]] && . "$zsync_lib"
+
+usage() {
+    cat >&2 << EOF
+usage: $prog access <command>     accesses for a restore
+  on the backup server:
+    access pull [--config <name>] [--name <name>] <from> '<ssh-ed25519 key>'
+                    restore user zsync-restore-<name> (default: name of the configuration): the system with the key
+                    may read the replicas of the configuration from <from> (addresses or networks, comma
+                    separated, as in authorized_keys from=), nothing else; without --config: choose the configuration
+    access push [--days <n>] [--from <address>] <host>
+                    one-time key for a restore to <host> (system to restore, user root), valid for <n> days (3);
+                    shows the line for /root/.ssh/authorized_keys there, only usable from <from> (address of this
+                    host towards <host>)
+    access list     restore users and push keys
+    access remove <user|push key>
+                    remove a restore user or a push key (and show the command to remove it on the system)
+  on both:
+    access test <user>@<host>[:<port>]
+                    connection test: root@<system> with the push key, zsync-restore-<name>@<backup server> with the
+                    key of this host
+  on the system to restore:
+    access key [<backup server>]
+                    key of this host for pull (created if missing), shows the command for the backup server
+EOF
+    exit 2
+}
+
+die() { echo "$prog: $*" >&2; exit 1; }
+
+#### checks of names (bashclub-zsync has the same in schedule.sh, this package works without it)
+valid_dataset() { [[ $1 =~ ^[A-Za-z0-9][A-Za-z0-9_.:-]*(/[A-Za-z0-9_.:-]+)*$ ]]; }
+valid_host() { [[ $1 =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ ]] || [[ $1 =~ ^[0-9A-Fa-f:]+$ ]]; }
+valid_from() { [[ $1 =~ ^[A-Za-z0-9.:/,*?-]+$ ]]; }
+valid_key() { [[ $1 =~ ^ssh-ed25519\ [A-Za-z0-9+/]+={0,2}(\ [A-Za-z0-9_.@:-]+)?$ ]] && ssh-keygen -l -f <(echo "$1") > /dev/null 2>&1; }
+
+need_root() { [ "$(id -u)" -eq 0 ] || die "must run as root"; }
+need_zsync() { declare -F conf_value > /dev/null || die "bashclub-zsync is not installed on this host (no configurations)"; }
+
+# address of this host towards <host> (source address of the route)
+function address_towards() {
+    local ip
+    ip=$(getent ahosts "$1" 2> /dev/null | awk 'NR == 1 { print $1 }')
+    [[ -n $ip ]] || return 1
+    ip -o route get "$ip" 2> /dev/null | grep -o 'src [^ ]*' | cut -d' ' -f2
+}
+# all global addresses of this host, comma separated
+function own_addresses() {
+    ip -o addr show scope global 2> /dev/null | awk '{ sub(/\/.*/, "", $4); print $4 }' | paste -sd,
+}
+
+#### restore users on the backup server: zsync-restore-<name>, home below $users_home (key file belongs to root)
+function restore_name() {
+    local name=${1,,}
+    name=${name//[._]/-}
+    name=${name//[^a-z0-9-]/}
+    echo "${name:0:18}"
+}
+function restore_user_exists() {
+    getent passwd "$1" > /dev/null && [[ $(getent passwd "$1" | cut -d: -f6) == "$users_home/"* ]]
+}
+# root of a restore user: --root of its forced command
+function restore_root() {
+    grep -o 'command="[^"]*"' "$users_home/${1#zsync-restore-}/.ssh/authorized_keys" 2> /dev/null | sed -n 's/.*--root \([^"]*\)"$/\1/p'
+}
+
+# configurations of bashclub-zsync: name<TAB>target
+function configs() {
+    local conf target
+    for conf in "$conf_dir"/*.conf; do
+        [[ -f $conf ]] || continue
+        target=$(conf_value "$conf" target)
+        valid_dataset "$target" || continue
+        printf '%s\t%s\n' "$(basename "$conf" .conf)" "$target"
+    done
+}
+
+function access_pull() {
+    local config= name= from key conf target user home list n answer address
+    while [[ $1 == --* ]]; do
+        case $1 in
+            --config) config=$2 ;;
+            --name) name=$2 ;;
+            *) usage ;;
+        esac
+        shift 2
+    done
+    [ $# -ge 2 ] || usage
+    from=$1; shift; key="$*"
+    need_root; need_zsync
+    valid_from "$from" || die "invalid from '$from'"
+    valid_key "$key" || die "only one ssh-ed25519 public key is accepted"
+    if [[ -z $config ]]; then
+        list=$(configs)
+        [[ -n $list ]] || die "no configuration in $conf_dir"
+        echo "configurations:"
+        awk -F'\t' '{ printf "    %d) %-20s %s\n", NR, $1, $2 }' <<< "$list"
+        read -r -p "restore from configuration [1-$(grep -c . <<< "$list")]: " answer
+        [[ $answer =~ ^[0-9]+$ ]] && config=$(sed -n "${answer}p" <<< "$list" | cut -f1)
+        [[ -n $config ]] || die "no configuration chosen"
+    fi
+    [[ $config =~ ^[A-Za-z0-9_.-]+$ ]] || die "invalid configuration name '$config'"
+    conf=$conf_dir/$config.conf
+    [[ -f $conf ]] || die "configuration $conf does not exist"
+    target=$(conf_value "$conf" target)
+    valid_dataset "$target" || die "invalid target '$target' in $conf"
+    zfs list "$target" > /dev/null 2>&1 || die "target $target of $config does not exist"
+    name=${name:-$(restore_name "$config")}
+    [[ $name =~ ^[a-z0-9][a-z0-9-]{0,17}$ ]] || die "invalid name '$name' (--name): lower case letters, digits and -, at most 18 characters"
+    user=zsync-restore-$name
+    home=$users_home/$name
+    if getent passwd "$user" > /dev/null; then
+        restore_user_exists "$user" || die "$user exists, but is not a restore user of $prog"
+        [[ $(restore_root "$user") == "$target" ]] || die "$user reads $(restore_root "$user"), not $target (other --name)"
+    else
+        # shell: sshd runs the forced command with it; no password, login only with the key
+        install -d -m 755 "$users_home"
+        useradd --system --home-dir "$home" --create-home --shell /bin/bash --comment "bashclub-zsync restore" "$user" \
+            || die "useradd $user failed"
+    fi
+    # read only: send, hold and release below the target, no destroy, rename or receive
+    zfs allow -u "$user" send,hold,release "$target" || die "zfs allow on $target failed"
+    # key file belongs to root: the user cannot change its own restriction
+    install -d -m 755 -o root -g root "$home/.ssh"
+    echo "restrict,from=\"$from\",command=\"/usr/bin/bashclub-zsync-restore-remote --root $target\" $key" > "$home/.ssh/authorized_keys.new"
+    chmod 644 "$home/.ssh/authorized_keys.new"
+    mv "$home/.ssh/authorized_keys.new" "$home/.ssh/authorized_keys"
+    echo "$user: may read $target from $from"
+    address=$(address_towards "${from%%[,/]*}")
+    echo
+    echo "connection test on the system to restore:"
+    echo "    bashclub-zsync-restore access test $user@${address:-$(hostname -f)}"
+}
+
+#### push keys on the backup server: $lib_dir/keys/<id> (private key), <id>.access (host, from, expiry)
+function access_push() {
+    local days=3 from= host id expiry stamp line
+    while [[ $1 == --* ]]; do
+        case $1 in
+            --days) days=$2 ;;
+            --from) from=$2 ;;
+            *) usage ;;
+        esac
+        shift 2
+    done
+    [ $# -eq 1 ] || usage
+    host=$1
+    need_root
+    valid_host "$host" || die "invalid host '$host'"
+    [[ $days =~ ^[0-9]+$ ]] && [ "$days" -ge 1 ] && [ "$days" -le 30 ] || die "--days: 1 to 30"
+    if [[ -z $from ]]; then
+        from=$(address_towards "$host") || true
+        [[ -n $from ]] || die "no route to $host, give the address of this host with --from"
+    fi
+    valid_from "$from" || die "invalid from '$from'"
+    stamp=$(date +%Y%m%d-%H%M%S)
+    id=push-${host//[^A-Za-z0-9.-]/-}-$stamp
+    # expiry-time in the time zone of the system to restore: days, so a difference of hours does not matter
+    expiry=$(date -d "+$days days" +%Y%m%d%H%M)
+    install -d -m 700 "$lib_dir" "$lib_dir/keys"
+    ssh-keygen -q -t ed25519 -N '' -C "bashclub-zsync-restore-$id" -f "$lib_dir/keys/$id" || die "ssh-keygen failed"
+    printf 'host=%s\nfrom=%s\nexpires=%s\n' "$host" "$from" "$(date -d "+$days days" +%s)" > "$lib_dir/keys/$id.access"
+    line="restrict,from=\"$from\",expiry-time=\"$expiry\" $(cat "$lib_dir/keys/$id.pub")"
+    echo "push key $id for root@$host, valid until $(date -d "+$days days" '+%Y-%m-%d %H:%M')"
+    echo
+    echo "on $host as root (needs OpenSSH 8.2 or newer for expiry-time):"
+    echo "    install -d -m 700 /root/.ssh && echo '$line' >> /root/.ssh/authorized_keys"
+    echo
+    echo "connection test on this host:"
+    echo "    $prog access test root@$host"
+    echo
+    echo "after the restore, on $host:"
+    echo "    sed -i '/ bashclub-zsync-restore-$id\$/d' /root/.ssh/authorized_keys"
+}
+
+# newest valid push key for a host
+function push_key() {
+    local host=$1 f newest= expires
+    for f in "$lib_dir"/keys/push-*.access; do
+        [[ -f $f ]] || continue
+        [[ $(sed -n 's/^host=//p' "$f") == "$host" ]] || continue
+        expires=$(sed -n 's/^expires=//p' "$f")
+        [[ $expires =~ ^[0-9]+$ ]] && [ "$expires" -gt "$(date +%s)" ] || continue
+        newest=${f%.access}
+    done
+    [[ -n $newest ]] && echo "$newest"
+}
+
+#### key of the system to restore for pull
+function access_key() {
+    local backup=$1 from
+    need_root
+    if [[ ! -f $pull_key ]]; then
+        install -d -m 700 "$(dirname "$pull_key")"
+        ssh-keygen -q -t ed25519 -N '' -C "bashclub-zsync-restore@$(hostname)" -f "$pull_key" || die "ssh-keygen failed"
+    fi
+    if [[ -n $backup ]]; then
+        valid_host "$backup" || die "invalid backup server '$backup'"
+        from=$(address_towards "$backup")
+    fi
+    from=${from:-$(own_addresses)}
+    echo "on the backup server as root (with NAT in between: the address the backup server sees instead):"
+    echo "    bashclub-zsync-restore access pull ${from:-<address of this host>} '$(cut -d' ' -f1-3 "$pull_key.pub")'"
+}
+
+#### connection test: user@host[:port] (pull: restore user on the backup server, push: root on the system)
+function ssh_options() {
+    local key=$1
+    install -d -m 700 "$lib_dir"
+    printf '%s\n' -o BatchMode=yes -o StrictHostKeyChecking=accept-new -o "UserKnownHostsFile=$lib_dir/known_hosts" \
+        -o LogLevel=ERROR -o ConnectTimeout=15 -o ServerAliveInterval=15 -o IdentitiesOnly=yes -i "$key"
+}
+function access_test() {
+    local login=$1 host user port=22 key opts
+    [[ -n $login ]] || usage
+    need_root
+    [[ $login =~ ^([a-z_][a-z0-9_-]{0,31})@([^:]+)(:([0-9]+))?$ ]] || die "invalid login '$login' (user@host[:port])"
+    user=${BASH_REMATCH[1]}; host=${BASH_REMATCH[2]}; port=${BASH_REMATCH[4]:-22}
+    valid_host "$host" || die "invalid host '$host'"
+    if [[ $user == root ]]; then
+        key=$(push_key "$host") || die "no valid push key for $host ($prog access push $host)"
+    else
+        key=$pull_key
+        [[ -f $key ]] || die "no key for pull ($prog access key)"
+    fi
+    mapfile -t opts < <(ssh_options "$key")
+    if [[ $user == root ]]; then
+        ssh "${opts[@]}" -p "$port" "$user@$host" "zfs version" > /dev/null || die "connection to $login failed"
+        echo "$login: connected, zfs available"
+    else
+        root=$(ssh "${opts[@]}" -p "$port" "$user@$host" root) || die "connection to $login failed"
+        echo "$login: connected, may read $root"
+    fi
+}
+
+function access_list() {
+    local user home from root f id host expires state
+    need_root
+    while IFS=: read -r user _ _ _ _ home _; do
+        [[ $user == zsync-restore-* && $home == "$users_home/"* ]] || continue
+        from=$(grep -o '^restrict,from="[^"]*"' "$home/.ssh/authorized_keys" 2> /dev/null | cut -d'"' -f2)
+        root=$(restore_root "$user")
+        printf 'pull\t%s\tfrom %s\treads %s\n' "$user" "${from:--}" "${root:--}"
+    done < <(getent passwd)
+    for f in "$lib_dir"/keys/push-*.access; do
+        [[ -f $f ]] || continue
+        id=$(basename "$f" .access)
+        host=$(sed -n 's/^host=//p' "$f"); expires=$(sed -n 's/^expires=//p' "$f")
+        [[ $expires =~ ^[0-9]+$ ]] || expires=0
+        if [ "$expires" -gt "$(date +%s)" ]; then state="valid until"; else state="expired"; fi
+        printf 'push\t%s\troot@%s\t%s %s\n' "$id" "$host" "$state" "$(date -d "@$expires" '+%Y-%m-%d %H:%M')"
+    done
+}
+
+function access_remove() {
+    local what=$1 root i
+    [[ -n $what ]] || usage
+    need_root
+    if [[ $what == push-* ]]; then
+        [[ $what =~ ^push-[A-Za-z0-9.-]+$ && -f $lib_dir/keys/$what.access ]] || die "no push key $what"
+        local host; host=$(sed -n 's/^host=//p' "$lib_dir/keys/$what.access")
+        rm -f "$lib_dir/keys/$what" "$lib_dir/keys/$what.pub" "$lib_dir/keys/$what.access"
+        echo "push key $what removed"
+        echo "on $host:"
+        echo "    sed -i '/ bashclub-zsync-restore-$what\$/d' /root/.ssh/authorized_keys"
+        return
+    fi
+    [[ $what == zsync-restore-* ]] || what=zsync-restore-$what
+    restore_user_exists "$what" || die "no restore user $what"
+    root=$(restore_root "$what")
+    valid_dataset "$root" && zfs unallow -u "$what" "$root" 2> /dev/null
+    # open connections end first, userdel refuses a user in use
+    pkill -u "$what" 2> /dev/null
+    for i in $(seq 1 20); do pgrep -u "$what" > /dev/null || break; sleep 0.5; done
+    pkill -9 -u "$what" 2> /dev/null
+    userdel -r "$what" 2> /dev/null || userdel "$what" || die "userdel $what failed"
+    echo "$what removed"
+}
+
+case $1 in
+    access)
+        sub=$2; shift 2
+        case $sub in
+            pull) access_pull "$@" ;;
+            push) access_push "$@" ;;
+            key) access_key "$1" ;;
+            test) access_test "$1" ;;
+            list) access_list ;;
+            remove) access_remove "$1" ;;
+            *) usage ;;
+        esac ;;
+    *) usage ;;
+esac

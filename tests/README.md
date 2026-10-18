@@ -21,6 +21,10 @@ diff -r /tmp/zsync-old /tmp/zsync-new
 `checkmk.sh` testet den Checkmk-Check mit Status-Dateien und einem nachgebauten `/proc` (Lernphase, Alter,
 Hänger, D-Zustand, Abbruch, übersprungene Läufe): `tests/checkmk.sh` (ohne root, ohne ZFS).
 
+`restore-remote.sh` testet `bashclub-zsync-restore-remote` (command= des Restore-Benutzers auf dem Backupserver)
+ebenso: lesende Befehle unter `--root` laufen, alles außerhalb, schreibende Befehle und Shell-Versuche werden
+abgewiesen: `tests/restore-remote.sh` (ohne root, ohne ZFS).
+
 `remote.sh` testet `bashclub-zsync-remote` (command= auf der Quelle) mit einem zfs-Stub: erlaubte Befehle
 und abgewiesene Versuche (Shell, Datasets löschen, fremde Optionen und Pfade). Dass jeder Befehl von
 `bashclub-zsync` durchgeht, zeigt `run.sh` mit `ZTEST_WRAPPER`: der ssh-Stub führt dann alles über den Wrapper

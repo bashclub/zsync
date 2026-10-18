@@ -9,7 +9,7 @@ repo=$(cd "$(dirname "$0")/../.." && pwd)
 version=$(git -C "$repo" describe --tags --match 'v[0-9]*' --long | sed -E 's/^v//; s/-([0-9]+)-g([0-9a-f]+)$/+git\1.\2/')
 git -C "$repo" diff --quiet HEAD || version="$version.dirty"
 dist=$(mktemp -d); trap 'rm -rf "$dist"' EXIT
-for f in nfpm.yaml nfpm-source.yaml; do
+for f in nfpm.yaml nfpm-source.yaml nfpm-restore.yaml; do
   podman run --rm -e VERSION="$version" -v "$repo:/src:ro,Z" -v "$dist:/dist:Z" -w /src docker.io/goreleaser/nfpm \
     pkg -f $f -p deb -t /dist/ > /dev/null
 done

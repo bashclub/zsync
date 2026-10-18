@@ -809,7 +809,72 @@ case_checkmk() {
   check "nach dem Lauf: endgültiger Stand" not grep -q 'running for' $spool
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk)
+# Restore-Zugang: Pull-Benutzer liest nur die Replikate seiner Config, Push-Key mit Ablaufdatum; die ausgegebenen
+# Befehle werden so ausgeführt, wie sie ausgegeben werden (kopierbar)
+case_restore_access() {
+  local r=bashclub-zsync-restore key=/root/zci-restore-pull-key out cmd user=zsync-restore-restore-access ak=/root/.ssh/authorized_keys
+  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  write "$ZCI_POOL_SRC/data" 1; snap "$ZCI_POOL_SRC/data" 01
+  zfs create "$ZCI_POOL_DST/other"; zfs snapshot "$ZCI_POOL_DST/other@x"
+  config restore_access; zsync
+  local replica=$ZCI_POOL_DST/restore_access/$ZCI_POOL_SRC/data
+  check "Replikat vorhanden" exists "$replica@zfs-auto-snap_daily-01"
+  # Pull: Schlüssel des wiederherzustellenden Systems, Befehl für den Backupserver, Config per Auswahl
+  rm -f $key $key.pub
+  out=$(ZSYNC_RESTORE_PULL_KEY=$key $r access key 127.0.0.1)
+  check "access key: Schlüssel angelegt" test -f $key
+  cmd=$(grep "access pull" <<< "$out" | sed 's/^ *//')
+  equal "access key: Befehl für den Backupserver" "bashclub-zsync-restore access pull 127.0.0.1 '$(cut -d' ' -f1-3 $key.pub)'" "$cmd"
+  local n; n=$(ls "$CONF_DIR"/*.conf | xargs -n1 basename | sed 's/\.conf$//' | grep -nx restore_access | cut -d: -f1)
+  out=$(echo "$n" | ZSYNC_CONF_DIR=$CONF_DIR bash -c "$cmd" 2>&1)
+  check "access pull: Benutzer angelegt ($out)" user_exists $user
+  check "access pull: zfs allow send,hold,release" grep -qE "user $user hold,release,send" <<< "$(zfs allow "$ZCI_POOL_DST/restore_access")"
+  equal "access pull: Schlüssel mit restrict, from und command" "restrict,from=\"127.0.0.1\",command=\"/usr/bin/bashclub-zsync-restore-remote --root $ZCI_POOL_DST/restore_access\" ssh-ed25519" \
+    "$(cut -d' ' -f1-4 /var/lib/bashclub-zsync-restore-users/restore-access/.ssh/authorized_keys)"
+  cmd=$(grep "access test" <<< "$out" | sed 's/^ *//')
+  out=$(ZSYNC_RESTORE_PULL_KEY=$key bash -c "$cmd" 2>&1)
+  equal "access test (pull)" "$user@127.0.0.1: connected, may read $ZCI_POOL_DST/restore_access" "$out"
+  local s="ssh -o BatchMode=yes -o IdentitiesOnly=yes -i $key $user@127.0.0.1"
+  check "Pull: Replikat lesbar" test "$($s zfs list -H -o name -t snapshot $replica)" == "$replica@zfs-auto-snap_daily-01"
+  check "Pull: send unter der Config" bash -c "$s zfs send -w $replica@zfs-auto-snap_daily-01 > /dev/null"
+  check "Pull: hold und release mit Restore-Tag" $s zfs hold zsync-restore-ci $replica@zfs-auto-snap_daily-01
+  check "Pull: release" $s zfs release zsync-restore-ci $replica@zfs-auto-snap_daily-01
+  check "Pull: fremdes Dataset nicht lesbar" not $s zfs list -H "$ZCI_POOL_DST/other" 2>/dev/null
+  check "Pull: fremdes Dataset nicht sendbar" not bash -c "$s zfs send -w $ZCI_POOL_DST/other@x > /dev/null 2>&1"
+  check "Pull: kein destroy" not $s zfs destroy "$replica@zfs-auto-snap_daily-01" 2>/dev/null
+  check "Pull: keine Shell" not $s id 2>/dev/null
+  # ZFS selbst erlaubt dem Benutzer außerhalb nichts (auch ohne Wrapper)
+  check "ZFS: send außerhalb verweigert" not su -s /bin/bash $user -c "zfs send -w $ZCI_POOL_DST/other@x > /dev/null" 2>/dev/null
+  check "ZFS: destroy am Replikat verweigert" not su -s /bin/bash $user -c "zfs destroy $replica@zfs-auto-snap_daily-01" 2>/dev/null
+  check "Snapshot unverändert" exists "$replica@zfs-auto-snap_daily-01"
+  # Push: Einmal-Key, Zeile für authorized_keys mit Ablaufdatum, Test, Entfernen
+  cp -a $ak $ak.zci 2>/dev/null || touch $ak.zci
+  out=$($r access push --days 2 127.0.0.1)
+  local id; id=$(sed -n 's/^push key \(push-[^ ]*\) .*/\1/p' <<< "$out")
+  check "access push: Zeile mit restrict, from und expiry-time" grep -qE "restrict,from=\"127.0.0.1\",expiry-time=\"$(date -d '+2 days' +%Y%m%d)[0-9]{4}\" ssh-ed25519 " <<< "$out"
+  cmd=$(grep "authorized_keys$" <<< "$out" | grep "^    install" | sed 's/^ *//')
+  bash -c "$cmd"
+  check "Push: Zeile in authorized_keys" grep -q " bashclub-zsync-restore-$id$" $ak
+  cmd=$(grep "access test root@" <<< "$out" | sed 's/^ *//')
+  out2=$(bash -c "$cmd" 2>&1)
+  equal "access test (push)" "root@127.0.0.1: connected, zfs available" "$out2"
+  out2=$($r access list)
+  check "access list: Pull-Benutzer" grep -qE "^pull	$user	from 127.0.0.1	reads $ZCI_POOL_DST/restore_access$" <<< "$out2"
+  check "access list: Push-Key gültig" grep -qE "^push	$id	root@127.0.0.1	valid until " <<< "$out2"
+  cmd=$(grep "^    sed" <<< "$out" | sed 's/^ *//')
+  bash -c "$cmd"
+  check "Push: Zeile entfernt (ausgegebener Befehl)" not grep -q "bashclub-zsync-restore" $ak
+  check "Push: übrige Schlüssel unverändert" cmp -s $ak $ak.zci
+  cat $ak.zci > $ak; rm -f $ak.zci
+  check "access remove: Push-Key" $r access remove "$id" > /dev/null
+  check "Push-Key entfernt" not test -f "/var/lib/bashclub-zsync-restore/keys/$id"
+  check "access remove: Pull-Benutzer" $r access remove $user > /dev/null
+  check "Benutzer entfernt" not user_exists $user
+  check "Rechte entfernt" not grep -q $user <<< "$(zfs allow "$ZCI_POOL_DST/restore_access")"
+  rm -f $key $key.pub
+}
+
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten und Pools): ein zweiter wartet

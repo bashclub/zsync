@@ -1,0 +1,39 @@
+# Paket für den Restore: auf dem Backupserver (Pull-Benutzer, Push) und auf dem wiederherzustellenden System (Pull)
+name: bashclub-zsync-restore
+arch: all
+platform: linux
+version: ${VERSION}
+version_schema: none
+section: admin
+priority: optional
+maintainer: Thorsten Spille <kontakt@spille-it.de>
+description: Restore toolbox of bashclub-zsync ${VERSION} maintained from bashclub (pull and push restores of replicas).
+homepage: https://code.bashclub.org/bashclub/zsync
+license: GPL-3.0-or-later
+
+depends:
+  - iproute2
+  - openssh-client
+  - zfsutils-linux
+
+# Pull: der Backupserver nimmt die Verbindung an; Push: das wiederherzustellende System
+recommends:
+  - openssh-server
+
+contents:
+  - src: bashclub-zsync-restore/usr/bin/bashclub-zsync-restore
+    dst: /usr/bin/bashclub-zsync-restore
+    file_info: { mode: 0755 }
+  # forced command (command= in authorized_keys) of the restore users on the backup server: read only
+  - src: bashclub-zsync-restore/usr/bin/bashclub-zsync-restore-remote
+    dst: /usr/bin/bashclub-zsync-restore-remote
+    file_info: { mode: 0755 }
+
+  # copyright (DEP-5): GPL-3.0-or-later
+  - src: packaging/copyright
+    dst: /usr/share/doc/bashclub-zsync-restore/copyright
+    file_info: { mode: 0644 }
+
+scripts:
+  postinstall: packaging/scripts/restore-postinst
+  postremove: packaging/scripts/restore-postrm

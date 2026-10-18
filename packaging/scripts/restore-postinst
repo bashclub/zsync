@@ -1,0 +1,9 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
+
+# keys, jobs and known hosts only for root; homes of the restore users (key files belong to root)
+install -d -m 700 /var/lib/bashclub-zsync-restore
+install -d -m 755 /var/lib/bashclub-zsync-restore-users
+exit 0
