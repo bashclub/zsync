@@ -21,7 +21,9 @@ in derselben Sekunde), `cleanup_blocked` (Rotation am Ziel blockiert: Warnung, E
 `restore_access` (Pull-Benutzer und Push-Key, ausgegebene Befehle kopiert ausgeführt), `restore_dataset` (Kette unter neuem
 Namen und an der alten Stelle, `--force`, `--dry-run`, Replikation danach inkrementell), `restore_reattach` (nach Rollback
 auf der Quelle, `--rollback`), `restore_pull_push` (Volume und raw-verschlüsselt per Pull, Push mit Statuskopie),
-`restore_resume` (Abbruch per `stop`, Holds, Fortsetzen per Resume-Token, kein zweiter Job auf dasselbe Ziel).
+`restore_resume` (Abbruch per `stop`, Holds, Fortsetzen per Resume-Token, kein zweiter Job auf dasselbe Ziel),
+`restore_mount` (Clone eines Dateisystems und einer Partition im Volume, Rotation behält den Snapshot, cleanup),
+`restore_server` (Full Restore mit `--map`, `--exclude`, `--snapshot`, fehlender Pool, Wizard über ein Pseudo-Terminal).
 
 ## Test-VM einrichten
 Eine **VM** (kein LXC-Container: der teilt das ZFS-Modul des Hosts), Debian 13, zwei leere Platten

@@ -553,6 +553,54 @@ At the end the job checks each dataset against the plan and writes a report: OK,
 
 Jobs, logs and reports are in `/var/lib/bashclub-zsync-restore/jobs`. The log is also in the journal: `journalctl -u bashclub-zsync-restore@<job>`.
 
+### Full restore of a server
+`server` restores all replicas of a configuration in one job: parents first, with the original properties, raw for encrypted datasets.
+- `--pool <pool>` restores only these pools.
+- `--exclude <dataset>` leaves out a dataset and its children (names on the source).
+- `--map <from>=<to>` restores under other names; the longest `<from>` wins (e.g. `--map rpool=tank --map rpool/data=fast/vm`).
+- `--snapshot <name>` gives one point in time: each dataset takes this snapshot, or its newest one that is not newer.
+- Pool roots are never replaced, only their children are restored. A pool missing on the system stops the plan.
+- Existing datasets need `--force` (they are renamed, as with `dataset`).
+
+Restore the data pools onto a fresh Proxmox with the root file system of the new installation, pulled from the backup server (the restore user of the configuration `pve1`):
+~~~
+bashclub-zsync-restore server --from zsync-restore-pve1@192.0.2.20 --exclude rpool/ROOT
+~~~
+If `rpool/data` itself was replicated (tag `all` instead of `subvols`), the plan stops at the `rpool/data` of the fresh installation. Then add `--force`, which renames it to `rpool/data.before-restore-<time>`.
+
+The plan ends with what to check afterwards. It is not changed automatically:
+- `/etc/pve/storage.cfg` if pool names change;
+- the VM and CT configurations: they name storages, so with the same storage names they work unchanged;
+- `proxmox-boot-tool refresh` if a root file system was restored;
+- network, host name and keys.
+
+A root pool (`rpool/ROOT`) is restored from a rescue system with sshd and zfs, by push from the backup server:
+1. create the pool there;
+2. `bashclub-zsync-restore access push <system>`, and add the printed line there;
+3. `bashclub-zsync-restore server --to <system> --config pve1 --pool rpool`;
+4. on the system: `proxmox-boot-tool` and the boot loader.
+
+### Guided restore
+Without parameters, `bashclub-zsync-restore` asks for each step:
+- the way: push, this host or pull;
+- the configuration;
+- what to restore: dataset, reattach, server or files;
+- the dataset and the snapshot (the newest 15);
+- children and name.
+
+At the end it prints the complete command, to copy and document, and runs it after a confirmation. The command then shows the plan and asks again before it starts.
+
+### Single files: read-only clones on the backup server
+~~~
+bashclub-zsync-restore mount <replica>@<snapshot>
+~~~
+`mount` makes a read-only clone of the snapshot in `<pool>/zsync-restore-clones` (outside of the targets) and mounts it below `/run/bashclub-zsync-restore/mnt/<clone>`.
+- **Volumes:** its partitions are mounted read-only. The journal is not replayed: `noload` for ext3/4, `norecovery` for xfs. LVM, LUKS or an unknown file system shows the device instead.
+- **Encrypted replicas:** only with their key loaded on the backup server, otherwise it prints the `zfs load-key` command.
+- **Rotation:** while the clone exists, the rotation of bashclub-zsync keeps its snapshot and logs that a clone depends on it.
+
+`bashclub-zsync-restore mounts` lists the clones. `bashclub-zsync-restore cleanup <clone>` (or `--all`) unmounts and destroys them; it only touches clones made by `mount`.
+
 ## Releases
 Packages are built by Forgejo CI on https://code.bashclub.org/bashclub/zsync:
 - pull request: build and test only
