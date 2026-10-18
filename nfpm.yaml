@@ -16,9 +16,11 @@ depends:
   - udisks2
   - zfsutils-linux
 
+# bashclub-zsync-restore: Restore-Toolbox (Pull-Benutzer, Push, Wiederherstellung)
 # zfs-auto-snapshot: Snapshot-Engine zas, auf dem Backupserver nur im lokalen Modus nötig (sonst auf der Quelle);
 # cryptsetup, mailx: nur für zsync-autorun (Wechseldatenträger mit LUKS, Mailbenachrichtigung)
 recommends:
+  - bashclub-zsync-restore
   - zfs-auto-snapshot
   - cryptsetup
   - bsd-mailx | mailx

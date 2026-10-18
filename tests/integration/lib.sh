@@ -124,6 +124,7 @@ seconds_of() { zfs list -Hp -o creation -t snapshot "$1" | sort -u | wc -l; }
 # Snapshot-Namen (ohne Dataset) älteste zuerst
 snaps() { zfs list -H -o name -t snapshot -s creation "$1" 2>/dev/null | sed 's/.*@//' | paste -sd' '; }
 guid() { zfs get -H -o value guid "$1" 2>/dev/null; }
+user_exists() { getent passwd "$1" > /dev/null; }
 exists() { zfs list "$1" > /dev/null 2>&1; }
 prop() { zfs get -H -o value "$2" "$1" 2>/dev/null; }
 # Status-Dateien des Falls (Ordner des Benutzers, der lief): status_path <endung>

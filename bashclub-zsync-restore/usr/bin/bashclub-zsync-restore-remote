@@ -1,0 +1,121 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Forced command for a restore user on the backup server (authorized_keys, set by bashclub-zsync-restore access pull):
+#   restrict,from="<system to restore>",command="/usr/bin/bashclub-zsync-restore-remote --root <target>" ssh-ed25519 ...
+# The system to restore may only read the replicas below <root>: zfs list, get and send, hold and release with a
+# restore tag. Nothing can be destroyed, renamed or received, so a pulling system cannot change any backup.
+# ZFS limits send, hold and release to <root> as well (zfs allow), the wrapper also limits list and get and runs
+# the command without a shell. Denied commands are logged to syslog (auth) and end with exit code 126.
+# Test without ssh: SSH_ORIGINAL_COMMAND='zfs list -H -o name -r pool/backup' bashclub-zsync-restore-remote --root pool/backup
+prog=bashclub-zsync-restore-remote
+cmd=${SSH_ORIGINAL_COMMAND-}
+root=
+
+#### names (as in bashclub-zsync-remote)
+ds='[A-Za-z0-9][A-Za-z0-9_.:/-]*'
+part='[A-Za-z0-9_.:-]+'
+props='[A-Za-z0-9_.:,-]+'
+types='(filesystem|volume|snapshot|bookmark|all)(,(filesystem|volume|snapshot|bookmark|all))*'
+sources='(local|default|inherited|received|temporary|none)(,(local|default|inherited|received|temporary|none))*'
+token='[A-Za-z0-9-]+'
+tag='zsync-restore-[A-Za-z0-9_.-]+'
+
+function deny() {
+    logger -t $prog -p auth.warning "denied for $(id -un) from ${SSH_CLIENT%% *}: $cmd" 2> /dev/null
+    echo "$prog: command not allowed: $cmd" >&2
+    exit 126
+}
+
+function is() {
+    [[ $2 =~ ^$1$ ]]
+}
+
+# dataset, snapshot or bookmark below the root (or the root itself)
+function inside() {
+    local name=${1%%[@#]*}
+    [[ $1 =~ ^$ds([@#]$part)?$ ]] || return 1
+    [[ $name != *//* && $name != */ && "/$name/" != */../* && "/$name/" != */./* ]] || return 1
+    [[ $name == "$root" || $name == "$root/"* ]]
+}
+
+#### option of the forced command (from authorized_keys, not from the client)
+while [ $# -gt 0 ]; do
+    case $1 in
+        --root) root=$2; shift ;;
+        *) echo "$prog: unknown option $1 in authorized_keys" >&2; exit 126 ;;
+    esac
+    shift
+done
+if ! is "$ds" "$root" || [[ $root == */ ]]; then echo "$prog: invalid or missing --root" >&2; exit 126; fi
+
+#### single zfs command with the options bashclub-zsync-restore uses
+function zfs_command() {
+    local sub=$1 arg operands=()
+    shift
+    local args=("$@") i=0
+    case $sub in
+        list|get|send|hold|release) ;;
+        *) deny ;;
+    esac
+    while [ $i -lt ${#args[@]} ]; do
+        arg=${args[$i]}
+        case $sub:$arg in
+            list:-H|list:-p|list:-Hp|list:-r|get:-H|get:-p|get:-Hp|get:-r) ;;
+            send:-w|send:-p|send:-v|send:-P|send:-n|send:-L|send:-e|send:-c) ;;
+            list:-o|get:-o)
+                ((i++)); is "$props" "${args[$i]}" || deny ;;
+            list:-s|list:-S)
+                ((i++)); is "$part" "${args[$i]}" || deny ;;
+            list:-t|get:-t)
+                ((i++)); is "$types" "${args[$i]}" || deny ;;
+            get:-s)
+                ((i++)); is "$sources" "${args[$i]}" || deny ;;
+            list:-d|get:-d)
+                ((i++)); is '[0-9]+' "${args[$i]}" || deny ;;
+            send:-i|send:-I)
+                ((i++)); is "$ds[@#]$part" "${args[$i]}" && inside "${args[$i]}" || deny ;;
+            send:-t)
+                # the token names the dataset itself; ZFS refuses a dataset outside of <root> (zfs allow)
+                ((i++)); is "$token" "${args[$i]}" || deny ;;
+            *:-*) deny ;;
+            *) operands+=("$arg") ;;
+        esac
+        ((i++))
+    done
+    case $sub in
+        list)
+            # without operand zfs lists all datasets of the host
+            [ ${#operands[@]} -ge 1 ] || deny
+            for arg in "${operands[@]}"; do inside "$arg" || deny; done ;;
+        get)
+            [ ${#operands[@]} -ge 2 ] && is "$props" "${operands[0]}" || deny
+            for arg in "${operands[@]:1}"; do inside "$arg" || deny; done ;;
+        send)
+            if [[ " ${args[*]} " == *" -t "* ]]; then
+                [ ${#operands[@]} -eq 0 ] || deny
+            else
+                [ ${#operands[@]} -eq 1 ] && is "$ds@$part" "${operands[0]}" && inside "${operands[0]}" || deny
+            fi ;;
+        hold|release)
+            [ ${#operands[@]} -ge 2 ] && is "$tag" "${operands[0]}" || deny
+            for arg in "${operands[@]:1}"; do is "$ds@$part" "$arg" && inside "$arg" || deny; done ;;
+    esac
+}
+
+[[ $cmd == *$'\n'* ]] && deny
+
+case $cmd in
+    exit|true)
+        # connection test
+        exit 0 ;;
+    root)
+        # the replicas this key may read
+        echo "$root"; exit 0 ;;
+esac
+
+plain='^[A-Za-z0-9_.:/@#, -]+$'
+[[ $cmd =~ $plain ]] || deny
+read -ra words <<< "$cmd"
+[[ ${words[0]} == "zfs" ]] && [ ${#words[@]} -ge 2 ] || deny
+zfs_command "${words[@]:1}"
+exec zfs "${words[@]:1}"

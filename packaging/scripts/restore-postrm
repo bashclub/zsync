@@ -1,0 +1,8 @@
+#!/bin/bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+# restore users stay (remove them before: bashclub-zsync-restore access remove <user>), keys and jobs only with purge
+if [ "$1" = purge ]; then
+  rm -rf /var/lib/bashclub-zsync-restore
+fi
+exit 0
