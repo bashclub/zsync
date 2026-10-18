@@ -367,11 +367,15 @@ fi
 # its own in the spool (mktemp) is renamed, the agent never reads a partial file and nothing follows a link
 spooldir=/var/lib/check_mk_agent/spool
 source_reachable=0
+# the spool on the source: checkzfs_spool=1, not checkzfs_local, and the source answered in this run
+function spool_on_source() {
+    [ $checkzfs_spool -ne 0 ] && [ $checkzfs_local -eq 0 ] && [ $source_reachable -eq 1 ]
+}
 # write_spool <spool name> <file with the content>; the file is removed
 function write_spool() {
     local spoolname=$1 file=$2 spooltmp
     chmod 644 "$file"
-    if [ $checkzfs_spool -eq 0 ] || [ $checkzfs_local -gt 0 ] || [ $source_reachable -eq 0 ]; then
+    if ! spool_on_source; then
         mkdir -p $spooldir 2>/dev/null
         if [ -w $spooldir ]; then
             spooltmp=$(mktemp $spooldir/.$spoolname.XXXXXX) && cat "$file" > $spooltmp && chmod 644 $spooltmp \
@@ -391,19 +395,52 @@ function write_spool() {
 #### state of this configuration as checkmk service "zsync <config>" (the evaluation of the check bashclub_zsync) in
 # the spool: at the end of each run, during a run (watchdog) and with -s; with the spool on the source the state stays
 # visible while the backup server is switched off (Miyagi workflow), until the spool file is older than its maxage
+# On the source several backup servers can write into the same spool (configurations of the same name, e.g. zsync): there
+# service and spool file contain the name of this host, "zsync <backup host> <config>" and
+# <maxage>_bashclub-zsync-<backup host>-<config>; in the local spool they stay "zsync <config>" (no new discovery)
 status_check=/usr/share/bashclub-zsync/checkmk/bashclub_zsync
-status_spool=${checkzfs_spool_maxage}_bashclub-zsync-$(basename "$conf" .conf | tr -c 'A-Za-z0-9_.\n-' '_')
+status_name=$(basename "$conf" .conf | tr -c 'A-Za-z0-9_.\n-' '_')
+backup_host=$(hostname -s | tr -c 'A-Za-z0-9_.\n-' '_')
+status_spool=${checkzfs_spool_maxage}_bashclub-zsync-$status_name
+status_spool_source=${checkzfs_spool_maxage}_bashclub-zsync-$backup_host-$status_name
 function status_lines() {
     [[ -x $status_check ]] && [[ ! -e /etc/bashclub/zsync-checkmk.disabled ]] || return 0
-    "$status_check" --config "$conf_path" 2>/dev/null
+    if spool_on_source; then
+        "$status_check" --config "$conf_path" 2>/dev/null | sed -E "s/^([0-3P]) \"zsync /\1 \"zsync $backup_host /"
+    else
+        "$status_check" --config "$conf_path" 2>/dev/null
+    fi
 }
 function write_status_spool() {
-    local lines file
+    local lines file name=$status_spool
     lines=$(status_lines)
     [[ -n $lines ]] || return 0
-    file=$(mktemp /tmp/.$status_spool.XXXXXX) || return 0
+    spool_on_source && name=$status_spool_source
+    file=$(mktemp /tmp/.$name.XXXXXX) || return 0
     printf '<<<local>>>\n%s\n' "$lines" > "$file"
-    write_spool "$status_spool" "$file"
+    write_spool "$name" "$file"
+    # testing versions wrote the old name on the source: removed once (with an older bashclub-zsync-remote it stays
+    # until its maxage, the agent ignores it then)
+    if spool_on_source && [[ -n $status_file ]] && [[ ! -e $status_lib.spool-source ]]; then
+        remote "rm -f $spooldir/$status_spool" > /dev/null 2>&1
+        touch "$status_lib.spool-source" 2>/dev/null
+    fi
+}
+# checkzfs output into the checkmk spool (local or on the source), at the end of a run and with -s
+# the output goes to a temporary file of this run and then through write_spool, so the agent never reads a partial file
+# run_checkzfs [file]: with a file name the output is also copied there (status mode -s)
+function run_checkzfs() {
+    local spoolfile c_key= c_value=
+    spoolfile=$(mktemp /tmp/.${checkzfs_spool_maxage}_${checkzfs_prefix}.XXXXXX)
+    echo "<<<local>>>" > $spoolfile
+    if [[ $checkzfs_local -eq 0 ]]; then
+        c_key=--source
+        c_value=$source:$sshport
+    fi
+    debug "Command:\n$checkzfs $c_key $c_value --output checkmk --threshold $checkzfs_max_age --maxsnapshots $checkzfs_max_snapshot_count --prefix $checkzfs_prefix --replicafilter "^${target}" --filter \"$checkzfs_filter\" >> $spoolfile"
+    $checkzfs $c_key $c_value --output checkmk --threshold $checkzfs_max_age --maxsnapshots $checkzfs_max_snapshot_count --prefix $checkzfs_prefix --replicafilter "^${target}" --filter "$checkzfs_filter" >> $spoolfile
+    if [[ -n $1 ]]; then cat $spoolfile > "$1"; fi
+    write_spool "${checkzfs_spool_maxage}_${checkzfs_prefix}" $spoolfile
 }
 # during a run: every ZSYNC_WATCHDOG_INTERVAL seconds (default 5 min), on the source only if the state changed
 watchdog_pid=
@@ -434,7 +471,6 @@ function on_exit() {
     fi
 }
 trap on_exit EXIT
-if [[ -n $status_file ]]; then start_watchdog; fi
 
 # checked after loading the config, so checkzfs_disabled from the config is respected
 if [[ -n $checkzfs ]]; then
@@ -533,6 +569,8 @@ if [ $remote_rc -ne 0 ]; then
     exit 1
 fi
 source_reachable=1
+# watchdog from here on: it is a subshell and knows whether the spool goes to the source only from this point
+if [[ -n $status_file ]] && [ $status_mode -eq 0 ]; then start_watchdog; fi
 IFS=$'\n'
 for zvol in $tagged; do
     # property source: local, received, inherited from <dataset> or default
@@ -1171,22 +1209,8 @@ if [[ -n $status_file ]]; then
     done | sort > "$status_lib.datasets.tmp" && mv -f "$status_lib.datasets.tmp" "$status_lib.datasets"
 fi
 
-#### monitoring: checkzfs output into the checkmk spool (local or on the source)
-# the output goes to a temporary file of this run and then through write_spool, so the agent never reads a partial file
-# run_checkzfs [file]: with a file name the output is also copied there (status mode -s)
-function run_checkzfs() {
-    local spoolfile c_key= c_value=
-    spoolfile=$(mktemp /tmp/.${checkzfs_spool_maxage}_${checkzfs_prefix}.XXXXXX)
-    echo "<<<local>>>" > $spoolfile
-    if [[ $checkzfs_local -eq 0 ]]; then
-        c_key=--source
-        c_value=$source:$sshport
-    fi
-    debug "Command:\n$checkzfs $c_key $c_value --output checkmk --threshold $checkzfs_max_age --maxsnapshots $checkzfs_max_snapshot_count --prefix $checkzfs_prefix --replicafilter "^${target}" --filter \"$checkzfs_filter\" >> $spoolfile"
-    $checkzfs $c_key $c_value --output checkmk --threshold $checkzfs_max_age --maxsnapshots $checkzfs_max_snapshot_count --prefix $checkzfs_prefix --replicafilter "^${target}" --filter "$checkzfs_filter" >> $spoolfile
-    if [[ -n $1 ]]; then cat $spoolfile > "$1"; fi
-    write_spool "${checkzfs_spool_maxage}_${checkzfs_prefix}" $spoolfile
-}
+#### monitoring: checkzfs output into the checkmk spool (local or on the source), run_checkzfs is defined with
+# the spool functions
 if [ $checkzfs_disabled -eq 0 ]; then
     log "[INFO] Running checkzfs..."
     status checkzfs

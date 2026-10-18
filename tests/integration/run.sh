@@ -807,6 +807,34 @@ case_checkmk() {
   sleep 4; mid=$(cat $spool 2>/dev/null); wait
   check "Watchdog: Spool während des Laufs ($mid)" grep -q 'running for' <<< "$mid"
   check "nach dem Lauf: endgültiger Stand" not grep -q 'running for' $spool
+  sed -i '/^bandwidth_limit=/d' "$conf"
+  # -s mit checkzfs: checkzfs läuft, sein Spool wird neu geschrieben, seine Services zählen im Exit-Code (#106)
+  local czspool=/var/lib/check_mk_agent/spool/87000_zsync host; host=$(hostname -s)
+  set_conf "$conf" checkzfs_disabled 0
+  rm -f $czspool
+  out=$(bashclub-zsync -c "$conf" -s 2>&1); rc=$?
+  echo "$out" >> "$log"
+  check "-s mit checkzfs: keine Meldung command not found ($out)" not grep -q "command not found" <<< "$out"
+  check "-s mit checkzfs: checkzfs-Spool geschrieben" test -s $czspool
+  check "-s mit checkzfs: checkzfs-Services in der Ausgabe" grep -q "$ZCI_POOL_SRC/data" <<< "$out"
+  # Spool auf der Quelle (hier derselbe Host): Service und Datei mit dem Namen des Backup-Hosts, die alte Datei einer
+  # testing-Version wird einmal entfernt
+  local onsource=/var/lib/check_mk_agent/spool/87000_bashclub-zsync-$host-checkmk
+  set_conf "$conf" checkzfs_spool 1
+  echo '0 "zsync checkmk" - alte Datei' > $spool; rm -f $onsource
+  zsync
+  check "Spool auf der Quelle: Service mit Backup-Host" grep -qE "^0 \"zsync $host checkmk\"" $onsource
+  check "Spool auf der Quelle: alte Datei entfernt" not test -e $spool
+  out=$(bashclub-zsync -c "$conf" -s 2>&1)
+  check "-s: Service mit Backup-Host ($out)" grep -qE "^OK +zsync $host checkmk " <<< "$out"
+  # Watchdog schreibt mit dem Spool auf der Quelle dorthin (startet erst, wenn die Quelle geantwortet hat)
+  write "$ZCI_POOL_SRC/data" 6 big2; snap "$ZCI_POOL_SRC/data" 03
+  echo "bandwidth_limit=1m" >> "$conf"; set_conf "$conf" checkzfs_disabled 1; rm -f $onsource $spool
+  ZSYNC_WATCHDOG_INTERVAL=1 bashclub-zsync -c "$conf" >> "$log" 2>&1 &
+  sleep 4; mid=$(cat $onsource 2>/dev/null); wait
+  check "Watchdog auf der Quelle: Spool während des Laufs ($mid)" grep -q "zsync $host checkmk.*running for" <<< "$mid"
+  check "Watchdog auf der Quelle: kein lokaler Spool unter altem Namen" not test -e $spool
+  rm -f $onsource $czspool
 }
 
 # Restore-Zugang: Pull-Benutzer liest nur die Replikate seiner Config, Push-Key mit Ablaufdatum; die ausgegebenen

@@ -90,9 +90,16 @@ deny 'which zfs-auto-snapshot > /dev/null || exit 0 ; zfs-auto-snapshot --quiet 
 deny 'cat > /etc/cron.d/evil'
 deny 'cat > /var/lib/check_mk_agent/spool/../../../../etc/cron.d/evil'
 deny 'mv /var/lib/check_mk_agent/spool/a /etc/passwd'
+deny 'rm -f /etc/passwd'
+deny 'rm -f /var/lib/check_mk_agent/spool/../../../etc/passwd'
+deny 'rm -rf /var/lib/check_mk_agent/spool/x'
+deny 'rm -f /var/lib/check_mk_agent/spool/a /var/lib/check_mk_agent/spool/b'
 deny 'mkdir -p /etc/evil'
 deny 'scp -t /tmp'
 deny 'grep -E "^ID=" /etc/shadow'
+
+# alte Spool-Datei einer testing-Version entfernen (nur im Spool, eine Datei)
+allow 'rm -f /var/lib/check_mk_agent/spool/87000_bashclub-zsync-zsync-test-does-not-exist' ''
 
 # mit --label und --job-tag: nur Snapshots, Holds und Bookmarks dieses Jobs
 job=(--label zsync-backup1 --job-tag zsync_backup1_backup_pve1)
