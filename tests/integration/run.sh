@@ -874,7 +874,161 @@ case_restore_access() {
   rm -f $key $key.pub
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access)
+# Restore eines Datasets mit kompletter Kette: unter neuem Namen (ohne Tag und Mountpoint), an der alten Stelle
+# (mit den Originalwerten, die Replikation läuft danach inkrementell weiter), vorhandenes Ziel nur mit --force
+case_restore_dataset() {
+  local R=$ZCI_POOL_DST/restore/$ZCI_POOL_SRC
+  zfs create -o atime=off "$ZCI_POOL_SRC/data"; zfs create -o mountpoint=/zci/child-mp "$ZCI_POOL_SRC/data/child"
+  zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  write "$ZCI_POOL_SRC/data" 2; write "$ZCI_POOL_SRC/data/child" 1
+  for n in 01 02 03; do snap "$ZCI_POOL_SRC/data" $n; snap "$ZCI_POOL_SRC/data/child" $n; write "$ZCI_POOL_SRC/data" 1 f$n; done
+  config restore; zsync
+  equal "Replikation: Exit-Code" 0 "$rc"
+  # Planung ohne Ausführung
+  local out; out=$(ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-restore dataset "$R/data" --recursive --as "$ZCI_POOL_SRC/copy" --dry-run 2>&1)
+  echo "$out" >> "$log"
+  check "dry-run: Befehle für das Kind" grep -q "zfs send -L -e -c -p -I $R/data/child@zfs-auto-snap_daily-01 $R/data/child@zfs-auto-snap_daily-03" <<< "$out"
+  check "dry-run: kein Job" not grep -q "written" <<< "$out"
+  # unter neuem Namen
+  restore dataset "$R/data" --recursive --as "$ZCI_POOL_SRC/copy"
+  equal "neuer Name: Job fertig" done "$phase"
+  for d in data data/child; do
+    equal "neuer Name $d: gleiche Kette (GUID)" "$(zfs list -H -o guid -s createtxg -t snapshot -d 1 "$R/$d" | paste -sd' ')" \
+      "$(zfs list -H -o guid -s createtxg -t snapshot -d 1 "$ZCI_POOL_SRC/copy${d#data}" | paste -sd' ')"
+  done
+  equal "neuer Name: Property der Quelle (atime)" off "$(prop "$ZCI_POOL_SRC/copy" atime)"
+  equal "neuer Name: kein Tag (keine zweite Sicherung)" "-" "$(prop "$ZCI_POOL_SRC/copy" bashclub:zsync)"
+  equal "neuer Name: Mountpoint unter dem neuen Namen" "/zci/src/copy/child" "$(prop "$ZCI_POOL_SRC/copy/child" mountpoint)"
+  equal "neuer Name: eingehängt" yes "$(prop "$ZCI_POOL_SRC/copy/child" mounted)"
+  check "neuer Name: Datei da" test -f /zci/src/copy/f02
+  check "Bericht OK" grep -q "^OK	$ZCI_POOL_SRC/copy/child	" "/var/lib/bashclub-zsync-restore/jobs/$job.report"
+  check "keine Holds mehr am Replikat" test -z "$(zfs holds -H "$R/data@zfs-auto-snap_daily-01")"
+  # vorhandenes Ziel: ohne --force abgewiesen, mit --force zur Seite gelegt
+  restore dataset "$R/data" --as "$ZCI_POOL_SRC/copy"
+  check "vorhanden ohne --force: abgewiesen" test -z "$job"
+  check "vorhanden ohne --force: Meldung" grep -q "exists (--force renames it" <<< "$(last_restore_output)"
+  restore dataset "$R/data" --as "$ZCI_POOL_SRC/copy" --force
+  equal "--force: Job fertig" done "$phase"
+  check "--force: altes Dataset zur Seite gelegt" test -n "$(zfs list -H -o name | grep "^$ZCI_POOL_SRC/copy.before-restore-")"
+  # Verlust auf der Quelle, Restore an der alten Stelle
+  zfs destroy -r "$ZCI_POOL_SRC/data"
+  restore dataset "$R/data" --recursive
+  equal "alte Stelle: Job fertig" done "$phase"
+  equal "alte Stelle: Tag wieder lokal" "all	local" "$(zfs get -H -o value,source bashclub:zsync "$ZCI_POOL_SRC/data")"
+  equal "alte Stelle: Mountpoint des Kindes wieder lokal" "/zci/child-mp	local" "$(zfs get -H -o value,source mountpoint "$ZCI_POOL_SRC/data/child")"
+  equal "alte Stelle: atime" off "$(prop "$ZCI_POOL_SRC/data" atime)"
+  check "alte Stelle: Datei des Kindes" test -f /zci/child-mp/file
+  snap "$ZCI_POOL_SRC/data" 04; snap "$ZCI_POOL_SRC/data/child" 04
+  zsync
+  equal "Replikation danach: Exit-Code" 0 "$rc"
+  equal "Replikation danach: inkrementell weiter" "zfs-auto-snap_daily-01 zfs-auto-snap_daily-02 zfs-auto-snap_daily-03 zfs-auto-snap_daily-04" "$(snaps "$R/data")"
+  check "Replikation danach: kein Zweig" not grep -q zsync-branch <<< "$(zfs list -H -o name -r "$ZCI_POOL_DST")"
+}
+
+# Nach einem Rollback auf der Quelle nur die fehlenden Snapshots zurück; Snapshots nach dem gemeinsamen nur mit
+# --rollback; die Replikation läuft danach ohne Zweig weiter
+case_restore_reattach() {
+  local R=$ZCI_POOL_DST/restore/$ZCI_POOL_SRC
+  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  for n in 01 02 03; do write "$ZCI_POOL_SRC/data" 1 f$n; snap "$ZCI_POOL_SRC/data" $n; done
+  config restore; zsync
+  zfs rollback -r "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-01"
+  zfs snapshot "$ZCI_POOL_SRC/data@manual"
+  restore reattach "$ZCI_POOL_SRC/data" --config restore
+  check "Snapshot nur auf der Quelle: ohne --rollback abgewiesen" test -z "$job"
+  check "Meldung nennt --rollback" grep -q "rollback destroys them" <<< "$(last_restore_output)"
+  restore reattach "$ZCI_POOL_SRC/data" --config restore --rollback
+  equal "reattach --rollback: Job fertig" done "$phase"
+  equal "Kette wieder vollständig (GUID)" "$(zfs list -H -o guid -s createtxg -t snapshot "$R/data" | paste -sd' ')" \
+    "$(zfs list -H -o guid -s createtxg -t snapshot "$ZCI_POOL_SRC/data" | paste -sd' ')"
+  check "Datei des fehlenden Snapshots zurück" test -f /zci/src/data/f03
+  equal "Properties der Quelle unverändert (Tag)" "all	local" "$(zfs get -H -o value,source bashclub:zsync "$ZCI_POOL_SRC/data")"
+  # nur ein Snapshot fehlt, keine Änderung: ohne --rollback
+  zfs rollback -r "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-02"
+  restore reattach "$ZCI_POOL_SRC/data" --config restore
+  equal "reattach: Job fertig" done "$phase"
+  equal "reattach: Snapshots" "zfs-auto-snap_daily-01 zfs-auto-snap_daily-02 zfs-auto-snap_daily-03" "$(snaps "$ZCI_POOL_SRC/data")"
+  write "$ZCI_POOL_SRC/data" 1 f04; snap "$ZCI_POOL_SRC/data" 04
+  zsync
+  equal "Replikation danach: Exit-Code" 0 "$rc"
+  check "Replikation danach: kein Zweig" not grep -q zsync-branch <<< "$(zfs list -H -o name -r "$ZCI_POOL_DST")"
+  equal "Replikation danach: Snapshots" "zfs-auto-snap_daily-01 zfs-auto-snap_daily-02 zfs-auto-snap_daily-03 zfs-auto-snap_daily-04" "$(snaps "$R/data")"
+}
+
+# Pull über den Restore-Benutzer (lesend) und Push mit dem Einmal-Key, jeweils über ssh auf localhost;
+# Volume und raw verschlüsseltes Dataset (ohne Schlüssel übertragen, danach mit Passphrase einhängbar)
+case_restore_pull_push() {
+  local R=$ZCI_POOL_DST/restore/$ZCI_POOL_SRC key=/root/zci-restore-pull-key ak=/root/.ssh/authorized_keys out
+  zfs create -V 32M "$ZCI_POOL_SRC/vol"
+  echo "zsync-ci-passphrase" | zfs create -o encryption=on -o keyformat=passphrase "$ZCI_POOL_SRC/enc"
+  zfs set bashclub:zsync=all "$ZCI_POOL_SRC/vol"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/enc"
+  dd if=/dev/urandom of=/dev/zvol/$ZCI_POOL_SRC/vol bs=1M count=8 status=none conv=fsync; write "$ZCI_POOL_SRC/enc" 2
+  for n in 01 02; do snap "$ZCI_POOL_SRC/vol" $n; snap "$ZCI_POOL_SRC/enc" $n; done
+  config restore; zsync
+  # Pull
+  rm -f $key $key.pub
+  ZSYNC_RESTORE_PULL_KEY=$key bashclub-zsync-restore access key > /dev/null
+  ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-restore access pull --config restore 127.0.0.1 "$(cut -d' ' -f1-3 $key.pub)" >> "$log"
+  out=$(ZSYNC_RESTORE_PULL_KEY=$key bashclub-zsync-restore list --from zsync-restore-restore@127.0.0.1 2>&1)
+  echo "$out" >> "$log"
+  check "Pull list: Volume, Zustand auf dem System ($out)" grep -qE "^  $ZCI_POOL_SRC/vol +volume +2 +zfs-auto-snap_daily-02 +- +up to date" <<< "$out"
+  check "Pull list: raw verschlüsselt" grep -qE "^  $ZCI_POOL_SRC/enc +filesystem +2 .* raw " <<< "$out"
+  ZSYNC_RESTORE_PULL_KEY=$key restore dataset "$ZCI_POOL_SRC/vol" --from zsync-restore-restore@127.0.0.1 --as "$ZCI_POOL_SRC/vol-pulled"
+  equal "Pull Volume: Job fertig" done "$phase"
+  equal "Pull Volume: gleiche Kette" "$(zfs list -H -o guid -s createtxg -t snapshot "$R/vol" | paste -sd' ')" "$(zfs list -H -o guid -s createtxg -t snapshot "$ZCI_POOL_SRC/vol-pulled" | paste -sd' ')"
+  check "Pull Volume: Daten gleich" cmp -s /dev/zvol/$ZCI_POOL_SRC/vol /dev/zvol/$ZCI_POOL_SRC/vol-pulled
+  ZSYNC_RESTORE_PULL_KEY=$key restore dataset "$ZCI_POOL_SRC/enc" --from zsync-restore-restore@127.0.0.1 --as "$ZCI_POOL_SRC/enc-pulled"
+  equal "Pull raw: Job fertig" done "$phase"
+  equal "Pull raw: ohne Schlüssel angekommen" unavailable "$(prop "$ZCI_POOL_SRC/enc-pulled" keystatus)"
+  check "Pull raw: Bericht nennt load-key" grep -q "zfs load-key $ZCI_POOL_SRC/enc-pulled" "/var/lib/bashclub-zsync-restore/jobs/$job.report"
+  echo "zsync-ci-passphrase" | zfs load-key "$ZCI_POOL_SRC/enc-pulled" && zfs mount "$ZCI_POOL_SRC/enc-pulled"
+  check "Pull raw: mit Passphrase lesbar" cmp -s /zci/src/enc/file /zci/src/enc-pulled/file
+  bashclub-zsync-restore access remove zsync-restore-restore > /dev/null; rm -f $key $key.pub
+  # Push
+  cp -a $ak $ak.zci 2>/dev/null || touch $ak.zci
+  out=$(bashclub-zsync-restore access push 127.0.0.1)
+  bash -c "$(grep "^    install" <<< "$out" | sed 's/^ *//')"
+  restore dataset "$R/vol" --to 127.0.0.1 --as "$ZCI_POOL_SRC/vol-pushed"
+  equal "Push Volume: Job fertig" done "$phase"
+  check "Push Volume: Daten gleich" cmp -s /dev/zvol/$ZCI_POOL_SRC/vol /dev/zvol/$ZCI_POOL_SRC/vol-pushed
+  check "Push: Statuskopie auf dem System" grep -q "^phase=done" /run/bashclub-zsync-restore.state
+  bash -c "$(grep "^    sed" <<< "$out" | sed 's/^ *//')"
+  cat $ak.zci > $ak; rm -f $ak.zci /run/bashclub-zsync-restore.state
+  check "Push-Key nach dem Restore entfernt" bashclub-zsync-restore access remove "$(sed -n 's/^push key \(push-[^ ]*\) .*/\1/p' <<< "$out")"
+}
+
+# Abbruch mitten im Transfer (stop), Holds während des Restores, Fortsetzen ab Abbruchstelle (Resume-Token)
+case_restore_resume() {
+  local R=$ZCI_POOL_DST/restore/$ZCI_POOL_SRC
+  if ! command -v pv > /dev/null; then skip "pv fehlt"; return; fi
+  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  write "$ZCI_POOL_SRC/data" 24; snap "$ZCI_POOL_SRC/data" 01
+  config restore; zsync
+  local out; out=$(ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-restore dataset "$R/data" --as "$ZCI_POOL_SRC/slow" --bwlimit 2m --start < /dev/null 2>&1)
+  echo "$out" >> "$log"
+  job=$(sed -n 's/^job \([0-9a-f-]*\) written.*/\1/p' <<< "$out")
+  sleep 5
+  check "während des Restores: Hold am Replikat" grep -q "zsync-restore-$job" <<< "$(zfs holds -H "$R/data@zfs-auto-snap_daily-01")"
+  out=$(ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-restore dataset "$R/data" --as "$ZCI_POOL_SRC/slow" --force --dry-run 2>&1)
+  check "während des Restores: kein zweiter Job auf dasselbe Ziel" grep -q "ERROR: job $job is restoring $ZCI_POOL_SRC/slow" <<< "$out"
+  out=$(bashclub-zsync-restore status "$job")
+  echo "$out" >> "$log"
+  check "status: Fortschritt ($out)" grep -qE '\] +[0-9]+%.*of' <<< "$out"
+  bashclub-zsync-restore stop "$job" >> "$log" 2>&1
+  sleep 2
+  equal "nach stop: Phase" stopped "$(bashclub-zsync-restore status "$job" | sed -n '1s/^job [^:]*: //p')"
+  check "nach stop: Resume-Token" test "$(prop "$ZCI_POOL_SRC/slow" receive_resume_token)" != "-"
+  check "nach stop: Hold freigegeben" test -z "$(zfs holds -H "$R/data@zfs-auto-snap_daily-01")"
+  sed -i '/^bwlimit=/d' "/var/lib/bashclub-zsync-restore/jobs/$job.job"
+  bashclub-zsync-restore resume "$job" < /dev/null >> "$log" 2>&1
+  wait_job "$job"
+  equal "resume: Job fertig" done "$phase"
+  check "resume: ab Abbruchstelle fortgesetzt" grep -q "resume: $ZCI_POOL_SRC/slow" "/var/lib/bashclub-zsync-restore/jobs/$job.log"
+  equal "resume: gleiche Kette" "$(guid "$R/data@zfs-auto-snap_daily-01")" "$(guid "$ZCI_POOL_SRC/slow@zfs-auto-snap_daily-01")"
+  check "resume: Daten gleich" cmp -s /zci/src/data/file /zci/src/slow/file
+}
+
+all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten und Pools): ein zweiter wartet
