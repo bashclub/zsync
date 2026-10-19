@@ -71,6 +71,38 @@ case_rotation() {
   equal "min_keep: die neuesten bleiben" "zfs-auto-snap_daily-06 zfs-auto-snap_daily-07 zfs-auto-snap_daily-08" "$(snaps "$ZCI_POOL_DST/rotation/$ZCI_POOL_SRC/data")"
 }
 
+# Basis des Deltas außerhalb des Filters: Wechsel von zas/legacy auf internal/strict und ein aus snapshot_filter
+# gestrichenes Label; der neueste Snapshot des Replikats bleibt die Basis, die neuen Snapshots werden übertragen
+case_engine_switch() {
+  local d="$ZCI_POOL_DST/engine_switch/$ZCI_POOL_SRC/data"
+  zfs create -o com.sun:auto-snapshot=true "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  config engine_switch 'snapshot_filter=""
+zfs_auto_snapshot_keep=3
+zfs_auto_snapshot_engine=zas
+zfs_auto_snapshot_label_match=legacy'
+  zsync
+  equal "zas: Exit-Code" 0 "$rc"
+  check "zas: Snapshot übertragen" grep -q 'zfs-auto-snap_backup-' <<< "$(snaps "$d")"
+  set_conf "$conf" zfs_auto_snapshot_engine internal; set_conf "$conf" zfs_auto_snapshot_label_match strict
+  sleep 61   # eigener Snapshot-Name pro Minute (remote-snapshot-manager)
+  zsync
+  equal "nach dem Wechsel: Exit-Code" 0 "$rc"
+  equal "nach dem Wechsel: neuer Snapshot übertragen" "$(snaps "$ZCI_POOL_SRC/data" | awk '{ print $NF }')" "$(snaps "$d" | awk '{ print $NF }')"
+  check "nach dem Wechsel: Snapshot im Schema internal" grep -qE '^backup-[0-9]{4}-' <<< "$(snaps "$d" | awk '{ print $NF }')"
+  # Label aus snapshot_filter gestrichen, während der neueste Snapshot des Replikats dieses Label trägt
+  set_conf "$conf" zfs_auto_snapshot_keep 0
+  sed -i 's#^snapshot_filter=.*#snapshot_filter="hourly|daily"#' "$conf"
+  snap "$ZCI_POOL_SRC/data" 01
+  sleep 1.05; zfs snapshot "$ZCI_POOL_SRC/data@zfs-auto-snap_hourly-01"
+  zsync
+  equal "hourly als neuester: Exit-Code" 0 "$rc"
+  sed -i 's#^snapshot_filter=.*#snapshot_filter="daily"#' "$conf"
+  snap "$ZCI_POOL_SRC/data" 02
+  zsync
+  equal "Label gestrichen: Exit-Code" 0 "$rc"
+  equal "Label gestrichen: neuer daily übertragen" "zfs-auto-snap_daily-02" "$(snaps "$d" | awk '{ print $NF }')"
+}
+
 # nichts auf der Quelle ausgewählt: Warnung im Log, kein Bash-Fehler, Exit 0, Monitoring WARN
 case_nothing_selected() {
   zfs create "$ZCI_POOL_SRC/data"
@@ -349,6 +381,20 @@ transfer_resume=1"
   equal "ohne root: neue Kette weiterrepliziert" "$(snaps "$ZCI_POOL_SRC/subvol-100-disk-0" | awk '{ print $NF }')" "$(snaps "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/subvol-100-disk-0" | awk '{ print $NF }')"
   check "Status im eigenen Ordner des Benutzers" test -f "$LIB_DIR/$user/$id.last"
   check "Checkmk: Service aus dem Ordner des Benutzers" grep -q '"zsync unprivileged"' <<< "$("$CHECK")"
+  # -s als root für eine Config mit run_as: läuft als dieser Benutzer (sein Schlüssel für checkzfs auf der Quelle),
+  # die Spool-Datei gehört ihm, sein nächster Lauf kann sie ersetzen
+  local spool=/var/lib/check_mk_agent/spool/87000_zsync out
+  set_conf "$conf" run_as $user; set_conf "$conf" checkzfs_disabled 0
+  rm -f "$spool"
+  out=$(bashclub-zsync -c "$conf" -s 2>&1); echo "$out" >> "$log"
+  check "-s als root: keine Anmeldung als root an der Quelle" not grep -qi 'permission denied' <<< "$out"
+  check "-s als root: checkzfs-Service in der Ausgabe" grep -q "$ZCI_POOL_SRC/subvol-100-disk-0" <<< "$out"
+  equal "-s als root: Spool-Datei gehört $user" "$user" "$(stat -c %U "$spool" 2>/dev/null)"
+  echo "===== $(date +%T) als $user nach -s von root" >> "$log"
+  su - $user -c "bashclub-zsync -c $conf" >> "$log" 2>&1; rc=$?
+  equal "Lauf als $user nach -s von root: Exit-Code" 0 "$rc"
+  check "Lauf als $user ersetzt die Spool-Datei" not grep -q 'Operation not permitted' <(last_run_log)
+  set_conf "$conf" checkzfs_disabled 1; sed -i '/^run_as=/d' "$conf"
   # Sperre auf der Config: auch über Benutzer hinweg läuft nur ein Lauf
   su $user -c "flock $conf sleep 8" & sleep 1
   zsync; local lock_rc=$rc; wait
@@ -842,8 +888,9 @@ case_checkmk() {
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; snap "$ZCI_POOL_SRC/data" 01
   # Dateien der testing-Versionen mit eigenem Namen für den Status
   echo '0 "zsync checkmk" - alt' > $old1; echo '0 "zsync x checkmk" - alt' > $old2
-  config checkmk; rm -f $spool; zsync
+  config checkmk; rm -f $spool; ZSYNC_WATCHDOG_INTERVAL=397 zsync
   check "alte Status-Dateien der testing-Versionen entfernt" not test -e $old1 -o -e $old2
+  check "Watchdog: kein sleep nach dem Lauf übrig" not pgrep -fx 'sleep 397'
   out=$(check_output)
   check "Service OK in der Lernphase ($out)" grep -qE '^0 "zsync checkmk" .*learning 0/5' <<< "$out"
   check "Statusdatei des Laufs entfernt" test -z "$(status_path state)"
@@ -1303,7 +1350,7 @@ case_result_busy() {
   rm -f $lockconf
 }
 
-all_cases=(replication engine_internal rotation nothing_selected refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_server hooks result_busy)
+all_cases=(replication engine_internal engine_switch rotation nothing_selected refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_server hooks result_busy)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten, Pools und die installierten Pakete): ein zweiter wartet;

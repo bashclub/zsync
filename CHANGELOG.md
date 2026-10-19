@@ -79,6 +79,9 @@
 - a log file in a directory that no logrotate config mentions (e.g. on TrueNAS SCALE) is rotated by bashclub-zsync itself at 10 MiB, 4 compressed old logs are kept
 
 ### Fixed
+- If the newest snapshot of a replica did not match the snapshot filter, nothing was sent, without a message: after switching the engine from `zas` to `internal` with `strict`, or (already in 1.0) after removing a label from `snapshot_filter` while the newest snapshot of a replica had it. The snapshots after this base are now taken first and then filtered (#121).
+- The watchdog stops its `sleep` at the end of a run. It kept running for up to 5 minutes with the inherited file descriptors open: the output pipe of cron, or the lock of a calling `flock` (#119).
+- `bashclub-zsync -s` as root for a configuration with `run_as` runs as this user: as root the source refused the key of root (checkzfs failed), and the spool file written by root could not be replaced by the next run of the user (sticky spool folder), so the monitoring stopped getting new values (#117).
 - The target follows the source (`label` or `label=source`): when `min_keep` stops the deletion, the newest snapshots stay. Previously the deletion started with the newest snapshots older than the oldest source snapshot, so the oldest stayed and a gap remained (GitHub PR #3 by lgremme, #114).
 - A run without any dataset selected on the source logs a warning instead of the bash error `substring expression < 0`; the Checkmk service of the configuration warns (`last run selected no dataset on the source`) (#114).
 - `bashclub-zsync -s` did not run checkzfs (`run_checkzfs: command not found`), so its spool was not renewed and its services were missing from the output and the exit code (#106).
