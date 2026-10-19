@@ -1,7 +1,8 @@
 ---
 title: Offsite über WAN oder VPN
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/offsite-uber-wan-oder-vpn-Lnusi8cT24
+outline_id: e0b79f1e-d687-4e0f-ab2f-e80c82a8ab27
 ---
 ## Ausgangslage
 Der Backupserver steht an einem anderen Standort, z. B. im Rechenzentrum oder bei einem zweiten Kunden, und erreicht

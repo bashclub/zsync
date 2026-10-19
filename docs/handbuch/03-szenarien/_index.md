@@ -1,7 +1,8 @@
 ---
 title: Szenarien
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/szenarien-hvoCdFhqtC
+outline_id: 174c1e0c-cbc9-45bd-b7a1-6f4220dd54ca
 ---
 Vollständige Anleitungen für gängige Aufbauten: Ausgangslage, Skizze, Schritte, Prüfung, Monitoring und typische Fehler.
 Jedes Szenario setzt die [Installation](../02-installation/01-installation.md) voraus.

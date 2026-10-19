@@ -1,7 +1,8 @@
 ---
 title: Proxmox-Cluster und HA
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/proxmox-cluster-und-ha-t92ge8lGKD
+outline_id: ccd8900a-62bf-4396-bb6e-a501cb249b9b
 ---
 ## Ausgangslage
 Ein Proxmox-Cluster mit lokalem ZFS auf jedem Knoten (`pve1`, `pve2`, `pve3`). Die Disks einer VM liegen auf dem Knoten,

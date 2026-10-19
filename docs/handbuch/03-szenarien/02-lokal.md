@@ -1,7 +1,8 @@
 ---
 title: "Lokale Replikation: Pool zu Pool"
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/lokale-replikation-pool-zu-pool-HJgL3Q9SLd
+outline_id: 8f475607-8e2c-49a6-a817-8031c2a163d9
 ---
 Ab 2.0.
 

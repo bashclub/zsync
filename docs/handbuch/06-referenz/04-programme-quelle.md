@@ -1,7 +1,8 @@
 ---
 title: Programme auf der Quelle
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/programme-auf-der-quelle-fxXjwBorCO
+outline_id: c53d3143-93cd-4177-beef-2212a50b31e5
 ---
 Ab 2.0, Paket `bashclub-zsync-source`. Ohne das Paket meldet sich der Backupserver als root an der Quelle an, wie in
 1.0. Warum die Programme so gebaut sind, steht im [Sicherheitsmodell](../01-konzept/06-sicherheitsmodell.md).

@@ -1,7 +1,8 @@
 ---
 title: Dateien und Pfade
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/dateien-und-pfade-4gGcPbjeil
+outline_id: 7df552c3-633f-489d-a7e3-2ba2708316e7
 ---
 ## Backupserver: Konfiguration
 | Pfad | Inhalt |

@@ -1,7 +1,8 @@
 ---
 title: "Standardfall: Proxmox-Server → Backupserver im LAN"
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/standardfall-proxmox-server-backupserver-im-lan-DW3L4WTeQM
+outline_id: e33bab36-c948-47e9-aeda-3e8b4f460adb
 ---
 ## Ausgangslage
 - **Quelle:** ein Proxmox-Server, hier `pve1`, mit den Disks der VMs und Container unter `rpool/data`.
@@ -122,7 +123,8 @@ legt das Setup den Spool mit der Gruppe `bashclub-zsync` an, wenn der Checkmk-Ag
 erst später installiert, danach:
 ```bash
 install -d -m 3775 -g bashclub-zsync /var/lib/check_mk_agent/spool
-``` In Checkmk für den Backupserver die Service-Erkennung
+```
+In Checkmk für den Backupserver die Service-Erkennung
 ausführen und übernehmen:
 - `zsync-pve1 pve1`: der Zustand der Replikation
 - `zsync-pve1:zsync-<backupserver>-pve1@pve1:22#rpool/data/…`: je Dataset Alter und Anzahl der Snapshots (checkzfs)

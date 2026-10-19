@@ -1,7 +1,8 @@
 ---
 title: Werkzeuge auf dem Backupserver
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/werkzeuge-auf-dem-backupserver-LFmM5DHoVU
+outline_id: 66243eb9-7381-492f-8978-b5e13a1a943a
 ---
 Alle Werkzeuge laufen als root. Ein Aufruf mit falschen Optionen zeigt die Hilfe und endet mit Exit-Code 2, ein
 Fehler mit Exit-Code 1.

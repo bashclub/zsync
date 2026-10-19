@@ -1,7 +1,8 @@
 ---
 title: bashclub-zsync-restore
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/bashclub-zsync-restore-BRl8mQarwX
+outline_id: 09ac581e-94b0-453c-9be1-388d9a24326e
 ---
 Ab 2.0, Paket `bashclub-zsync-restore`. Stellt Replikate wieder her. Anleitungen dazu stehen im Bereich Restore und
 Notfall; hier nur die Befehle.

@@ -1,7 +1,8 @@
 ---
 title: "Kaskade: Backupserver → Offsite-Backupserver"
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/kaskade-backupserver-offsite-backupserver-5gc87kTv6L
+outline_id: ff21009d-49b3-4161-8228-f988826a580e
 ---
 ## Ausgangslage
 `backup1` sichert `pve1` im LAN wie im [Standardfall](01-standardfall.md). Ein zweiter Backupserver `backup2` an einem
