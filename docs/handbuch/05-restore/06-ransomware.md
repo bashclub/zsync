@@ -1,7 +1,8 @@
 ---
 title: Ransomware und Angriffe
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/ransomware-und-angriffe-BuRlMZebqd
+outline_id: f72ceeed-3ff1-445c-b404-7d67982e1a1b
 ---
 Was zu tun ist, wenn eine Quelle verschlüsselt oder übernommen wurde. Warum das Backup den Angriff übersteht, erklärt
 das [Sicherheitsmodell](../01-konzept/06-sicherheitsmodell.md).

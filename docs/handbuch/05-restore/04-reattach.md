@@ -1,7 +1,8 @@
 ---
 title: Nach einem Rollback wieder anfügen
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/nach-einem-rollback-wieder-anfugen-IEksYfJn1d
+outline_id: 3b00c1ce-ddea-4d03-a3f5-460a7e7da3eb
 ---
 Ab 2.0. Hat die Quelle ein Dataset auf einen älteren Snapshot zurückgesetzt oder ihre neuesten Snapshots verloren, hat
 der Backupserver noch die neueren. `reattach` schickt nur diese fehlenden Snapshots zurück auf die Quelle, ab dem

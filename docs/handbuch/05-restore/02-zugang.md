@@ -1,7 +1,8 @@
 ---
 title: Zugang für eine Wiederherstellung
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/zugang-fur-eine-wiederherstellung-88Qf4tNF4o
+outline_id: 71f3011d-7cfe-46a2-b1e7-5640bb65f34a
 ---
 Ab 2.0. Ein Restore braucht eine Verbindung zwischen Backupserver und dem System, das wiederhergestellt wird. Welche
 Richtung, entscheidet das Netz:
