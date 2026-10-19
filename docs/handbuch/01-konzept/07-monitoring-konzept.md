@@ -12,7 +12,8 @@ ob die Backups aktuell sind.
 Replikats und meldet einen Service je Dataset: Alter des neuesten Snapshots (`checkzfs_max_age`) und Anzahl der
 Snapshots (`checkzfs_max_snapshot_count`).
 
-**Der Service der Config** (ab 2.0), z. B. `zsync pve1` für `/etc/bashclub/pve1.conf`, meldet den Zustand der
+**Der Service der Config** (ab 2.0), z. B. `zsync-pve1 pve1` für `/etc/bashclub/pve1.conf` mit
+`checkzfs_prefix=zsync-pve1`, meldet den Zustand der
 Replikation selbst:
 - ob der letzte Lauf erfolgreich war und wie lange er her ist
 - ob ein laufender Lauf hängt (keine Übertragung, Prozess blockiert) oder abgebrochen ist
@@ -22,6 +23,13 @@ Replikation selbst:
 - ob überhaupt Datasets ausgewählt sind
 
 Zu jedem Zustand nennt der Service die Ursache und, wo nötig, die Entscheidung in `bashclub-zsync-maintenance`.
+
+:::warning
+**checkzfs und Bookmarks:** checkzfs (bis Version 4.14) bricht ab, sobald auf der Quelle oder dem Backupserver ein
+Bookmark existiert (`'NoneType' object has no attribute 'add_snapshot'`). Dann fehlen alle checkzfs-Services; der
+Service der Config meldet weiter. Solange checkzfs das Monitoring macht, `source_bookmark=0` setzen. Neue Configs aus
+dem Setup haben `source_bookmark=1`. Eine eigene Prüfung in zsync, die checkzfs ersetzt, ist geplant.
+:::
 
 ## Der Spool: Meldung zum Ende des Laufs
 zsync schreibt beides in eine Datei im Spool des Checkmk-Agenten: `/var/lib/check_mk_agent/spool/87000_zsync` (aus
@@ -45,8 +53,10 @@ Der Spool auf der Quelle passt für einen Backupserver, der nur zur Replikation 
 bleiben sichtbar, während er aus ist. Kommt kein Lauf mehr, wird die Datei älter als ihre Zahl im Namen, und Checkmk
 meldet das.
 
-Sichern mehrere Backupserver dieselbe Quelle mit Spool auf der Quelle, braucht jeder ein eigenes `checkzfs_prefix`,
-sonst überschreiben sie gegenseitig ihre Datei. Dasselbe gilt für mehrere Configs mit Spool auf demselben Host.
+**Jede Replikation braucht ein eigenes `checkzfs_prefix`.** Das Präfix bestimmt den Namen der Spool-Datei und der
+Services. Zwei Configs mit demselben Präfix, die in denselben Spool schreiben (mehrere Configs auf einem Backupserver,
+oder mehrere Backupserver mit Spool auf derselben Quelle), überschreiben sich gegenseitig die Datei, und ihre Services
+kollidieren in Checkmk. Das Setup setzt das Präfix nicht; der Admin wählt es, z. B. `zsync-<config>`.
 
 ## Wie alt darf der letzte Lauf sein
 Ab 2.0 lernt der Service der Config das Intervall selbst: Er nimmt den Median der Abstände der letzten 10 Starts. Bis

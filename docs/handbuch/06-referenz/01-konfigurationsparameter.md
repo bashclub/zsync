@@ -150,6 +150,13 @@ Ab 2.0. `1`: Bookmark auf den neuesten übertragenen Snapshot auf der Quelle,
 `<dataset>#zsync_<backupserver>_<target mit _>`. Hat die Quelle den Snapshot gelöscht, geht die Replikation vom
 Bookmark aus weiter.
 
+:::warning
+**checkzfs und Bookmarks:** checkzfs (bis Version 4.14) bricht ab, sobald auf der Quelle oder dem Backupserver ein
+Bookmark existiert (`'NoneType' object has no attribute 'add_snapshot'`). Dann fehlen alle checkzfs-Services; der
+Service der Config meldet weiter. Solange checkzfs das Monitoring macht, `source_bookmark=0` setzen. Neue Configs aus
+dem Setup haben `source_bookmark=1`. Eine eigene Prüfung in zsync, die checkzfs ersetzt, ist geplant.
+:::
+
 ### `source_hold`
 Ab 2.0. `1`: Hold auf die Basis und alle noch zu sendenden Snapshots eines Datasets, solange es übertragen wird. Tag
 wie der Bookmark. Holds eines abgebrochenen Laufs löst der nächste Lauf.
@@ -175,8 +182,9 @@ Größer als `0` schaltet checkzfs ab. Der Service der Config bleibt (abschalten
 
 ### `checkzfs_prefix`
 Präfix der checkzfs-Services. Ab 2.0 auch der Name der Spool-Datei (`<checkzfs_spool_maxage>_<checkzfs_prefix>`) und
-des Services der Config (`<checkzfs_prefix> <config>`). Schreiben mehrere Backupserver oder Configs in denselben Spool,
-braucht jeder ein eigenes Präfix.
+des Services der Config (`<checkzfs_prefix> <config>`). **Jede Replikation braucht ein eigenes Präfix**, z. B.
+`zsync-<config>`: Mit demselben Präfix überschreiben sich Configs, die in denselben Spool schreiben, gegenseitig die
+Datei, und ihre Services kollidieren in Checkmk. Das Setup setzt es nicht.
 
 ### `checkzfs_max_age`
 Alter des neuesten Snapshots je Dataset in Minuten, `warn,crit`.

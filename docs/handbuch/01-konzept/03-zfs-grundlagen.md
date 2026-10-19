@@ -59,6 +59,13 @@ zsync legt auf der Quelle einen Bookmark auf den neuesten übertragenen Snapshot
 stören). War der Backupserver länger aus als die Quelle ihre Snapshots behält, geht es vom Bookmark aus weiter, statt
 dass die Kette reißt.
 
+:::warning
+**checkzfs und Bookmarks:** checkzfs (bis Version 4.14) bricht ab, sobald auf der Quelle oder dem Backupserver ein
+Bookmark existiert (`'NoneType' object has no attribute 'add_snapshot'`). Dann fehlen alle checkzfs-Services; der
+Service der Config meldet weiter. Solange checkzfs das Monitoring macht, `source_bookmark=0` setzen. Neue Configs aus
+dem Setup haben `source_bookmark=1`. Eine eigene Prüfung in zsync, die checkzfs ersetzt, ist geplant.
+:::
+
 ## Hold
 Ab 2.0, Parameter `source_hold`.
 
