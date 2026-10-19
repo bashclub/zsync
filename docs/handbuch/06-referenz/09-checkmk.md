@@ -8,8 +8,8 @@ Wie die Meldung an Checkmk funktioniert, erklärt das [Monitoring-Konzept](../01
 ## Services
 | Service | Herkunft | seit |
 |---|---|---|
-| `<checkzfs_prefix>:<quelle>#<dataset>` | checkzfs: Alter und Anzahl der Snapshots je Dataset | 1.0 |
-| `<checkzfs_prefix> <config>`, z. B. `zsync pve1` | Zustand der Replikation einer Config | 2.0 |
+| `<checkzfs_prefix>:<source>:<sshport>#<dataset>`, z. B. `zsync:root@pve1:22#rpool/data/vm-100-disk-0` | checkzfs: Alter und Anzahl der Snapshots je Dataset | 1.0 |
+| `<checkzfs_prefix> <config>`, z. B. `zsync-pve1 pve1` | Zustand der Replikation einer Config | 2.0 |
 
 Beide kommen aus derselben Spool-Datei `/var/lib/check_mk_agent/spool/<checkzfs_spool_maxage>_<checkzfs_prefix>`.
 Nach dem ersten Lauf einer neuen Config die Service-Erkennung des Hosts in Checkmk ausführen.

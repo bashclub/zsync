@@ -175,8 +175,9 @@ Größer als `0` schaltet checkzfs ab. Der Service der Config bleibt (abschalten
 
 ### `checkzfs_prefix`
 Präfix der checkzfs-Services. Ab 2.0 auch der Name der Spool-Datei (`<checkzfs_spool_maxage>_<checkzfs_prefix>`) und
-des Services der Config (`<checkzfs_prefix> <config>`). Schreiben mehrere Backupserver oder Configs in denselben Spool,
-braucht jeder ein eigenes Präfix.
+des Services der Config (`<checkzfs_prefix> <config>`). **Jede Replikation braucht ein eigenes Präfix**, z. B.
+`zsync-<config>`: Mit demselben Präfix überschreiben sich Configs, die in denselben Spool schreiben, gegenseitig die
+Datei, und ihre Services kollidieren in Checkmk. Das Setup setzt es nicht.
 
 ### `checkzfs_max_age`
 Alter des neuesten Snapshots je Dataset in Minuten, `warn,crit`.
