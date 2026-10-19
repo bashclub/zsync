@@ -349,6 +349,20 @@ transfer_resume=1"
   equal "ohne root: neue Kette weiterrepliziert" "$(snaps "$ZCI_POOL_SRC/subvol-100-disk-0" | awk '{ print $NF }')" "$(snaps "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/subvol-100-disk-0" | awk '{ print $NF }')"
   check "Status im eigenen Ordner des Benutzers" test -f "$LIB_DIR/$user/$id.last"
   check "Checkmk: Service aus dem Ordner des Benutzers" grep -q '"zsync unprivileged"' <<< "$("$CHECK")"
+  # -s als root für eine Config mit run_as: läuft als dieser Benutzer (sein Schlüssel für checkzfs auf der Quelle),
+  # die Spool-Datei gehört ihm, sein nächster Lauf kann sie ersetzen
+  local spool=/var/lib/check_mk_agent/spool/87000_zsync out
+  set_conf "$conf" run_as $user; set_conf "$conf" checkzfs_disabled 0
+  rm -f "$spool"
+  out=$(bashclub-zsync -c "$conf" -s 2>&1); echo "$out" >> "$log"
+  check "-s als root: keine Anmeldung als root an der Quelle" not grep -qi 'permission denied' <<< "$out"
+  check "-s als root: checkzfs-Service in der Ausgabe" grep -q "$ZCI_POOL_SRC/subvol-100-disk-0" <<< "$out"
+  equal "-s als root: Spool-Datei gehört $user" "$user" "$(stat -c %U "$spool" 2>/dev/null)"
+  echo "===== $(date +%T) als $user nach -s von root" >> "$log"
+  su - $user -c "bashclub-zsync -c $conf" >> "$log" 2>&1; rc=$?
+  equal "Lauf als $user nach -s von root: Exit-Code" 0 "$rc"
+  check "Lauf als $user ersetzt die Spool-Datei" not grep -q 'Operation not permitted' <(last_run_log)
+  set_conf "$conf" checkzfs_disabled 1; sed -i '/^run_as=/d' "$conf"
   # Sperre auf der Config: auch über Benutzer hinweg läuft nur ein Lauf
   su $user -c "flock $conf sleep 8" & sleep 1
   zsync; local lock_rc=$rc; wait
