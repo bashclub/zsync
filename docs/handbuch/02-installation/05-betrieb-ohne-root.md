@@ -75,18 +75,22 @@ bashclub-zsync-timer migrate "$name"
 bashclub-zsync-timer enable "$name" --user "$user"
 ```
 
-6. Spool für Checkmk, damit der Benutzer die Ausgabe von checkzfs schreiben darf. Auf dem Backupserver
-   (`checkzfs_spool=0`):
+6. Spool für Checkmk: Der Benutzer muss in den Ordner schreiben dürfen, und die Spool-Datei der bisherigen Läufe
+   (sie gehört root) muss ihm gehören. Sonst kann er sie nicht ersetzen, und Checkmk bekommt keine neuen Werte. Auf
+   dem Backupserver (`checkzfs_spool=0`):
 ```bash
 install -d -m 3775 -g bashclub-zsync /var/lib/check_mk_agent/spool
+spool=/var/lib/check_mk_agent/spool/${checkzfs_spool_maxage:-87000}_${checkzfs_prefix:-zsync}
+if [ -f "$spool" ]; then chown "$user" "$spool"; fi
 ```
-   Mit `checkzfs_spool=1` derselbe Befehl auf der Quelle:
+   Mit `checkzfs_spool=1` dasselbe auf der Quelle, dort gehört die Datei dem Benutzer auf der Quelle:
 ```bash
-ssh -p "$sshport" "root@$source_host" install -d -m 3775 -g bashclub-zsync /var/lib/check_mk_agent/spool
+ssh -p "$sshport" "root@$source_host" "install -d -m 3775 -g bashclub-zsync /var/lib/check_mk_agent/spool; f=/var/lib/check_mk_agent/spool/${checkzfs_spool_maxage:-87000}_${checkzfs_prefix:-zsync}; if [ -f \$f ]; then chown zsync-$source_job \$f; fi"
 ```
 
 ## Prüfen
-Einen Lauf starten und das Journal ansehen:
+Einen Lauf starten und das Journal ansehen. `bashclub-zsync -s` läuft als root für diese Config automatisch als ihr
+Benutzer:
 ```bash
 systemctl start "bashclub-zsync@$name.service"
 journalctl -u "bashclub-zsync@$name" -n 30 --no-pager

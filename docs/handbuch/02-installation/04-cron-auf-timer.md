@@ -41,8 +41,8 @@ sie sind. Nur eine Config umstellen: `bashclub-zsync-timer migrate zsync`.
 In der Config stehen jetzt z. B.:
 ```
 trigger=systemd
-schedule="0 23 * * *"
-log_file="/var/log/bashclub-zsync/zsync.log"
+schedule='00 23 * * *'
+log_file=/var/log/bashclub-zsync/zsync.log
 ```
 Die Cron-Zeile beginnt mit `# bashclub-zsync-timer: migrated to bashclub-zsync@zsync.timer:`.
 
