@@ -9,6 +9,8 @@ und Schwellwerte stehen in der Referenz [Checkmk-Services](../06-referenz/09-che
 ## Voraussetzungen
 - Auf dem Host, der die Spool-Datei bekommt, läuft der Checkmk-Agent und ist in Checkmk eingetragen.
 - Jede Replikation hat ein eigenes `checkzfs_prefix` (siehe [Mehrere Quellen](../03-szenarien/05-mehrere-quellen.md#monitoring)).
+- `source_bookmark=0`: checkzfs bricht ab, sobald es Bookmarks gibt (siehe
+  [Standardfall](../03-szenarien/01-standardfall.md), Schritt 5).
 - Läuft die Config ohne root, darf ihr Benutzer in den Spool schreiben (auf dem Host, der die Datei bekommt):
 ```bash
 install -d -m 3775 -g bashclub-zsync /var/lib/check_mk_agent/spool

@@ -50,7 +50,7 @@ Replikation), oder das Dataset wurde auf der Quelle neu angelegt. Entscheiden mi
 **Kette in Gefahr (WARN)**
 Die letzte Übertragung scheiterte, und ihre Basis ist der älteste Snapshot des Labels auf der Quelle. Scheitert auch
 der nächste Lauf und rotiert die Quelle dazwischen, reißt die Kette. Jetzt die Ursache der gescheiterten Übertragung
-beheben. Mit `source_bookmark=1` reißt die Kette auch dann nicht.
+beheben.
 
 **Neuester Snapshot des Replikats fehlt auf der Quelle (WARN)**
 Auf der Quelle wurde zurückgerollt oder der neueste Snapshot gelöscht, und zsync konnte keine neue Kette anlegen
@@ -75,6 +75,10 @@ Hinweise ohne Warnung: behaltene Replikate und Ketten, neue Kette im letzten Lau
 Replikate ohne Quelle in der Wartezeit.
 
 ## checkzfs-Services je Dataset
+**Alle checkzfs-Services fehlen**, im Log steht `'NoneType' object has no attribute 'add_snapshot'`: checkzfs bricht
+ab, weil auf der Quelle oder dem Backupserver ein Bookmark existiert. Abhilfe: `source_bookmark=0` und die Bookmarks
+löschen, siehe [Neue Funktionen einschalten](../02-installation/07-neue-funktionen-einschalten.md).
+
 - **Alter des neuesten Snapshots zu hoch:** Für dieses Dataset kam länger nichts an. Zusammen mit einem Problem im
   Service der Config ansehen.
 - **Zu viele Snapshots:** Die Aufbewahrung behält mehr, als `checkzfs_max_snapshot_count` erlaubt, oder die Rotation
