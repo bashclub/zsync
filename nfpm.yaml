@@ -11,7 +11,6 @@ homepage: https://code.bashclub.org/bashclub/zsync
 license: GPL-3.0-or-later
 
 depends:
-  - bashclub-checkzfs
   - openssh-server
   - udisks2
   - zfsutils-linux
@@ -19,7 +18,9 @@ depends:
 # bashclub-zsync-restore: Restore-Toolbox (Pull-Benutzer, Push, Wiederherstellung)
 # zfs-auto-snapshot: Snapshot-Engine zas, auf dem Backupserver nur im lokalen Modus nötig (sonst auf der Quelle);
 # cryptsetup, mailx: nur für zsync-autorun (Wechseldatenträger mit LUKS, Mailbenachrichtigung)
+# bashclub-checkzfs: monitor_engine=checkzfs; ab 2.0 prüft zsync die Snapshots auch selbst (monitor_engine=internal)
 recommends:
+  - bashclub-checkzfs
   - bashclub-zsync-restore
   - zfs-auto-snapshot
   - cryptsetup

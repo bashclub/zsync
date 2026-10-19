@@ -35,12 +35,10 @@ Quelle.
 **Jede Replikation braucht ein eigenes `checkzfs_prefix`.** Alle Configs eines Backupservers schreiben in denselben
 Spool. Mit demselben Präfix hätten sie dieselbe Spool-Datei, jeder Lauf würde die Services der anderen Configs
 überschreiben, und in Checkmk kollidierten die Services. Das Setup setzt das Präfix nicht; nach dem Setup jeder Config,
-vor ihrem ersten Lauf, mit dem Namen der Config in der ersten Zeile (mit `source_bookmark=0`, siehe
-[Standardfall](01-standardfall.md), Schritt 5):
+vor ihrem ersten Lauf, mit dem Namen der Config in der ersten Zeile (siehe [Standardfall](01-standardfall.md), Schritt 5):
 ```bash
 name=kunde1-pve
 sed -i "s/^checkzfs_prefix=.*/checkzfs_prefix=zsync-$name/" "/etc/bashclub/$name.conf"
-sed -i "s/^source_bookmark=.*/source_bookmark=0/" "/etc/bashclub/$name.conf"
 ```
 
 Prüfen, ob alle Configs ein eigenes Präfix haben (keine Ausgabe = in Ordnung):

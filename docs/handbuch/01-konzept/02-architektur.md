@@ -59,8 +59,9 @@ Ein Lauf ist ein Aufruf von `bashclub-zsync -c <config>`, von Hand, per Cron ode
    - Ein Fehler bei einem Dataset bricht den Lauf nicht ab. Die anderen Datasets laufen weiter.
 6. **Abgleich:** Ab 2.0 meldet zsync Replikate, deren Dataset es auf der Quelle nicht mehr gibt oder das nicht mehr
    ausgewählt ist. Es löscht sie nie.
-7. **Monitoring:** checkzfs prüft das Alter der Snapshots. Ab 2.0 schreibt zsync zusätzlich den Zustand des Laufs und
-   jedes Datasets für Checkmk (siehe [Monitoring-Konzept](07-monitoring-konzept.md)).
+7. **Monitoring:** Die Snapshots je Dataset prüft checkzfs oder ab 2.0 zsync selbst (`monitor_engine`). Ab 2.0 schreibt
+   zsync zusätzlich den Zustand des Laufs und jedes Datasets für Checkmk (siehe
+   [Monitoring-Konzept](07-monitoring-konzept.md)).
 8. **Hooks nach dem Lauf** (ab 2.0, optional).
 
 Der Exit-Code ist 0, wenn alle Datasets repliziert wurden, sonst 1. Warnungen, etwa eine blockierte Rotation, ändern

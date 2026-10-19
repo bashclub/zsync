@@ -38,6 +38,7 @@ oder `|` stehen in Anführungszeichen. Die Vorlage mit allen Parametern und Komm
 | `source_bookmark` | `0` | `1` | `1` | 2.0 |
 | `source_hold` | `0` | `1` | `1` | 2.0 |
 | `transfer_resume` | `0` | `1` | `1` | 2.0 |
+| `monitor_engine` | leer (`checkzfs`, wenn installiert, sonst `internal`) | `internal` | `internal` | 2.0 |
 | `checkzfs_disabled` | `0` | `0` | `0` | 1.0 |
 | `checkzfs_local` | `0` | `0` | `0` | 1.0 |
 | `checkzfs_prefix` | `zsync` | `zsync` | `zsync` | 1.0 |
@@ -152,10 +153,11 @@ Ab 2.0. `1`: Bookmark auf den neuesten übertragenen Snapshot auf der Quelle,
 Bookmark aus weiter.
 
 :::warning
-**checkzfs und Bookmarks:** checkzfs (bis Version 4.14) bricht ab, sobald auf der Quelle oder dem Backupserver ein
-Bookmark existiert (`'NoneType' object has no attribute 'add_snapshot'`). Dann fehlen alle checkzfs-Services; der
-Service der Config meldet weiter. Solange checkzfs das Monitoring macht, `source_bookmark=0` setzen. Neue Configs aus
-dem Setup haben `source_bookmark=1`. Eine eigene Prüfung in zsync, die checkzfs ersetzt, ist geplant.
+**checkzfs und Bookmarks:** Mit `monitor_engine=checkzfs` bricht checkzfs (bis Version 4.14) ab, sobald auf der Quelle
+oder dem Backupserver ein Bookmark existiert (`'NoneType' object has no attribute 'add_snapshot'`). Dann fehlen alle
+Services je Dataset; der Service der Config meldet weiter. Ab 2.0 prüft zsync die Snapshots auch selbst
+(`monitor_engine=internal`, Default neuer Configs), dort gibt es das Problem nicht. Bestehende Configs mit checkzfs:
+`monitor_engine=internal` setzen, oder `source_bookmark=0` lassen.
 :::
 
 ### `source_hold`
@@ -173,22 +175,34 @@ Ab 2.0. Höchstalter des letzten erfolgreichen Laufs für den Checkmk-Service de
 Sekunden. WARN darüber, CRIT beim Dreifachen. Leer: aus den letzten Läufen gelernt (oder aus dem Timer). `0`: keine
 Altersprüfung. Ein ungültiger Wert wird mit Hinweis im Service ignoriert.
 
+### `monitor_engine`
+Ab 2.0. Wer die Services je Dataset (`<checkzfs_prefix>:<source>:<port>#<dataset>`) erzeugt:
+- `internal`: zsync selbst, aus einer Liste der Snapshots von Quelle und Backupserver am Ende des Laufs. Eine Zeile je
+  Dataset mit dem schlechteren Zustand von Quelle und Replikat; Bookmarks stören nicht.
+- `checkzfs`: das Programm checkzfs (Paket `bashclub-checkzfs`), wie bis 1.0.19. Ist es nicht installiert, nimmt zsync
+  `internal` und warnt.
+- leer: `checkzfs`, wenn installiert, sonst `internal`.
+
+Beide nutzen dieselben Namen und Schwellwerte (`checkzfs_*`), ein Wechsel braucht keine neue Service-Erkennung. Siehe
+[Neue Funktionen einschalten](../02-installation/07-neue-funktionen-einschalten.md).
+
 ### `checkzfs_disabled`
-Größer als `0` schaltet checkzfs ab. Der Service der Config bleibt (abschalten:
+Größer als `0` schaltet die Services je Dataset ab, mit beiden Engines. Der Service der Config bleibt (abschalten:
 `touch /etc/bashclub/zsync-checkmk.disabled`).
 
 ### `checkzfs_local`
-`1`: checkzfs fragt die Quelle nicht (`--source` entfällt), und die Spool-Datei bleibt auf dem Backupserver, auch mit
-`checkzfs_spool=1`. Mit `source=local` automatisch gesetzt.
+`1`: Die Services je Dataset heißen ohne Quelle (`<checkzfs_prefix>:<dataset>`), checkzfs fragt die Quelle nicht
+(`--source` entfällt), und die Spool-Datei bleibt auf dem Backupserver, auch mit `checkzfs_spool=1`. Mit
+`source=local` automatisch gesetzt.
 
 ### `checkzfs_prefix`
-Präfix der checkzfs-Services. Ab 2.0 auch der Name der Spool-Datei (`<checkzfs_spool_maxage>_<checkzfs_prefix>`) und
+Präfix der Services je Dataset. Ab 2.0 auch der Name der Spool-Datei (`<checkzfs_spool_maxage>_<checkzfs_prefix>`) und
 des Services der Config (`<checkzfs_prefix> <config>`). **Jede Replikation braucht ein eigenes Präfix**, z. B.
 `zsync-<config>`: Mit demselben Präfix überschreiben sich Configs, die in denselben Spool schreiben, gegenseitig die
 Datei, und ihre Services kollidieren in Checkmk. Das Setup setzt es nicht.
 
 ### `checkzfs_max_age`
-Alter des neuesten Snapshots je Dataset in Minuten, `warn,crit`.
+Alter des neuesten gemeinsamen Snapshots je Dataset in Minuten, `warn,crit`.
 
 ### `checkzfs_max_snapshot_count`
 Anzahl der Snapshots je Dataset, `warn,crit`.

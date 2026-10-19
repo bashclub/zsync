@@ -77,28 +77,17 @@ Ohne Fragen, z. B. für mehrere Server: `bashclub-zsync-setup --yes --source pve
 Alle Optionen: [Werkzeuge auf dem Backupserver](../06-referenz/03-werkzeuge-backupserver.md).
 
 ## 5. Monitoring vorbereiten
-Zwei Werte vor dem ersten Lauf:
-- **Eigenes `checkzfs_prefix`:** Jede Replikation braucht ein eigenes. Es bestimmt den Namen der Spool-Datei und der
-  Services in Checkmk. Zwei Replikationen mit demselben Präfix überschreiben sich gegenseitig die Spool-Datei, und in
-  Checkmk kollidieren ihre Services. Das Setup setzt es nicht.
-- **`source_bookmark=0`:** checkzfs bricht ab, sobald es auf der Quelle Bookmarks gibt (siehe Warnung unten).
-
-Mit dem Namen der Config in der ersten Zeile:
+Jede Replikation braucht ein eigenes `checkzfs_prefix`. Es bestimmt den Namen der Spool-Datei und der Services in
+Checkmk. Zwei Replikationen mit demselben Präfix überschreiben sich gegenseitig die Spool-Datei, und in Checkmk
+kollidieren ihre Services. Das Setup setzt es nicht. Mit dem Namen der Config in der ersten Zeile:
 ```bash
 name=pve1
 conf=/etc/bashclub/$name.conf
 sed -i "s/^checkzfs_prefix=.*/checkzfs_prefix=zsync-$name/" "$conf"
-sed -i "s/^source_bookmark=.*/source_bookmark=0/" "$conf"
-grep -E '^(checkzfs_prefix|source_bookmark)=' "$conf"
+grep -E '^(checkzfs_prefix|monitor_engine)=' "$conf"
 ```
-
-:::warning
-**checkzfs und Bookmarks:** checkzfs (bis Version 4.14) bricht ab, sobald auf der Quelle oder dem Backupserver ein
-Bookmark existiert. Dann fehlen alle checkzfs-Services; der Service der Config meldet weiter. Ohne Bookmarks reißt die
-Kette, wenn der Backupserver länger nicht repliziert, als die Quelle ihre Snapshots behält; Hold und Resume bleiben
-eingeschaltet. Eine eigene Prüfung in zsync, die checkzfs ersetzt, ist geplant; dann lassen sich die Bookmarks wieder
-einschalten.
-:::
+Die Snapshots je Dataset prüft zsync bei neuen Configs selbst (`monitor_engine=internal`, ab 2.0); checkzfs ist dafür
+nicht nötig.
 
 ## 6. Erster Lauf und Prüfung
 Den ersten Lauf starten und verfolgen (Strg-C beendet nur die Anzeige). Die Erstreplikation überträgt alles und dauert

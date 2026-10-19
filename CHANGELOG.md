@@ -7,6 +7,12 @@
 - license: GPL-3.0-or-later instead of MIT from 2.0.0 on (both packages, SPDX headers in all files, DEP-5 copyright file `/usr/share/doc/<package>/copyright` with the MIT notice of the versions up to 1.0.19); contributions with Developer Certificate of Origin (`Signed-off-by`, CONTRIBUTING.md) (#72)
 
 ### Added
+- Built-in check of the snapshots per dataset, setting `monitor_engine=checkzfs|internal` (#63).
+  - **Same services:** `internal` writes the services `<checkzfs_prefix>:<source>:<port>#<dataset>` with the thresholds `checkzfs_max_age` and `checkzfs_max_snapshot_count` and the perfdata of checkzfs, so switching needs no new service discovery. One line per dataset with the worse state of source and replica (checkzfs wrote two lines under the same name).
+  - **States:** age of the newest common snapshot, number of snapshots on source and replica, no replica, newest snapshot of the replica gone on the source (rollback), no common snapshot, `com.sun:auto-snapshot` not `false` on the replica.
+  - **Cheap and robust:** one list of the source (one ssh call, allowed for job users by `bashclub-zsync-remote`) and one of the target at the end of the run and with `-s`; only the replicated datasets; bookmarks do not disturb it (checkzfs 4.14 stops at bookmarks: `'NoneType' object has no attribute 'add_snapshot'`).
+  - **Defaults:** configurations without the setting keep checkzfs if it is installed, otherwise `internal` (before: no services per dataset and a warning). New configurations get `internal`. `monitor_engine=checkzfs` without checkzfs falls back to `internal` with a warning.
+  - **Package:** `bashclub-checkzfs` is recommended instead of required, so `bashclub-zsync` can also be installed where there is no checkzfs package (Ubuntu); apt keeps it on existing installations.
 - `bashclub-zsync-maintenance` (#111):
   - **Overview first:** datasets below a case count with it; the number of cases per type is shown.
   - **Then:** all later, decide per case type (preview of the whole group with commands, what `destroy` deletes and the space used, then a confirmation) or one by one. `--decide-type <type> <option>` does the same for scripts.

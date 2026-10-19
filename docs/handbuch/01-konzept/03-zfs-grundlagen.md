@@ -60,10 +60,11 @@ stören). War der Backupserver länger aus als die Quelle ihre Snapshots behält
 dass die Kette reißt.
 
 :::warning
-**checkzfs und Bookmarks:** checkzfs (bis Version 4.14) bricht ab, sobald auf der Quelle oder dem Backupserver ein
-Bookmark existiert (`'NoneType' object has no attribute 'add_snapshot'`). Dann fehlen alle checkzfs-Services; der
-Service der Config meldet weiter. Solange checkzfs das Monitoring macht, `source_bookmark=0` setzen. Neue Configs aus
-dem Setup haben `source_bookmark=1`. Eine eigene Prüfung in zsync, die checkzfs ersetzt, ist geplant.
+**checkzfs und Bookmarks:** Mit `monitor_engine=checkzfs` bricht checkzfs (bis Version 4.14) ab, sobald auf der Quelle
+oder dem Backupserver ein Bookmark existiert (`'NoneType' object has no attribute 'add_snapshot'`). Dann fehlen alle
+Services je Dataset; der Service der Config meldet weiter. Ab 2.0 prüft zsync die Snapshots auch selbst
+(`monitor_engine=internal`, Default neuer Configs), dort gibt es das Problem nicht. Bestehende Configs mit checkzfs:
+`monitor_engine=internal` setzen, oder `source_bookmark=0` lassen.
 :::
 
 ## Hold

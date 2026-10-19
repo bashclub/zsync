@@ -8,9 +8,16 @@ Ein Backup, dessen Ausfall niemand bemerkt, ist keins. zsync meldet deshalb an C
 ob die Backups aktuell sind.
 
 ## Zwei Arten von Services
-**checkzfs** (Paket `bashclub-checkzfs`) vergleicht nach jedem Lauf je Dataset die Snapshots der Quelle mit denen des
-Replikats und meldet einen Service je Dataset: Alter des neuesten Snapshots (`checkzfs_max_age`) und Anzahl der
-Snapshots (`checkzfs_max_snapshot_count`).
+**Die Services je Dataset** vergleichen nach jedem Lauf die Snapshots der Quelle mit denen des Replikats: Alter des
+neuesten gemeinsamen Snapshots (`checkzfs_max_age`), Anzahl der Snapshots (`checkzfs_max_snapshot_count`), ob das
+Replikat fehlt oder sein neuester Snapshot auf der Quelle nicht mehr existiert. Sie heißen
+`<checkzfs_prefix>:<source>:<port>#<dataset>`. Wer sie erzeugt, bestimmt `monitor_engine`:
+- `internal` (ab 2.0, Default neuer Configs): zsync selbst, aus einer Liste der Snapshots von Quelle und Backupserver am
+  Ende des Laufs; eine Zeile je Dataset
+- `checkzfs`: das Programm checkzfs (Paket `bashclub-checkzfs`), wie bis 1.0.19; je Dataset eine Zeile für die Quelle
+  und eine für das Replikat unter demselben Namen
+
+Configs ohne den Eintrag nehmen checkzfs, wenn es installiert ist, sonst die eingebaute Prüfung.
 
 **Der Service der Config** (ab 2.0), z. B. `zsync-pve1 pve1` für `/etc/bashclub/pve1.conf` mit
 `checkzfs_prefix=zsync-pve1`, meldet den Zustand der
@@ -25,10 +32,11 @@ Replikation selbst:
 Zu jedem Zustand nennt der Service die Ursache und, wo nötig, die Entscheidung in `bashclub-zsync-maintenance`.
 
 :::warning
-**checkzfs und Bookmarks:** checkzfs (bis Version 4.14) bricht ab, sobald auf der Quelle oder dem Backupserver ein
-Bookmark existiert (`'NoneType' object has no attribute 'add_snapshot'`). Dann fehlen alle checkzfs-Services; der
-Service der Config meldet weiter. Solange checkzfs das Monitoring macht, `source_bookmark=0` setzen. Neue Configs aus
-dem Setup haben `source_bookmark=1`. Eine eigene Prüfung in zsync, die checkzfs ersetzt, ist geplant.
+**checkzfs und Bookmarks:** Mit `monitor_engine=checkzfs` bricht checkzfs (bis Version 4.14) ab, sobald auf der Quelle
+oder dem Backupserver ein Bookmark existiert (`'NoneType' object has no attribute 'add_snapshot'`). Dann fehlen alle
+Services je Dataset; der Service der Config meldet weiter. Ab 2.0 prüft zsync die Snapshots auch selbst
+(`monitor_engine=internal`, Default neuer Configs), dort gibt es das Problem nicht. Bestehende Configs mit checkzfs:
+`monitor_engine=internal` setzen, oder `source_bookmark=0` lassen.
 :::
 
 ## Der Spool: Meldung zum Ende des Laufs
@@ -74,4 +82,5 @@ in Checkmk; an den bestehenden Services ändert sich nichts.
 :::
 
 Abschalten lässt sich der Service der Config auf dem Backupserver mit
-`touch /etc/bashclub/zsync-checkmk.disabled`; checkzfs bleibt davon unberührt (`checkzfs_disabled`).
+`touch /etc/bashclub/zsync-checkmk.disabled`; die Services je Dataset bleiben davon unberührt, sie schaltet
+`checkzfs_disabled=1` in der Config ab.
