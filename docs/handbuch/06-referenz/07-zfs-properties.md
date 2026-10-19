@@ -1,7 +1,8 @@
 ---
 title: ZFS-Properties
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/zfs-properties-TjesHMT6CI
+outline_id: b8bb5393-a75d-465c-a790-543e1d23baaa
 ---
 User-Properties von bashclub-zsync. Sie stehen an den Datasets und lassen sich mit `zfs get` lesen.
 

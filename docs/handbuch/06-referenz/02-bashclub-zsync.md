@@ -1,7 +1,8 @@
 ---
 title: bashclub-zsync
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/bashclub-zsync-IXbqAnFlGT
+outline_id: 27eee6d8-a90b-41e9-bd43-c78f86bff83d
 ---
 ## `bashclub-zsync`
 Das Programm der Replikation auf dem Backupserver.

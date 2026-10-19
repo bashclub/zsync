@@ -1,7 +1,8 @@
 ---
 title: Verschlüsselte Datasets
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/verschlusselte-datasets-SWOgIcZkWy
+outline_id: b3ce5bef-62e9-410e-a1a3-7e837c004245
 ---
 ## Ausgangslage
 Auf der Quelle sind Datasets mit ZFS-Verschlüsselung angelegt (`encryption=on`), z. B. die Disks einer VM mit

@@ -64,7 +64,11 @@ def unwrap(text):
             out.append(line)
             continue
         prev = out[-1] if out else ""
-        if (not fence and line.strip() and prev.strip() and not BLOCK_START.match(line)
+        # a line that is bold as a whole (a message in the reference) stays a paragraph of its own
+        if not fence and line.strip() and re.fullmatch(r"\*\*.*\*\*", prev.strip()) and not BLOCK_START.match(line):
+            out.append("")
+            out.append(line)
+        elif (not fence and line.strip() and prev.strip() and not BLOCK_START.match(line)
                 and not re.match(r"\s*(\||#|:::|```|---$)", prev)):
             out[-1] = prev.rstrip() + " " + line.strip()
         else:

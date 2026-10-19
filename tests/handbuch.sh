@@ -27,5 +27,8 @@ while IFS=$'\t' read -r file _; do
   check "aufbereitbar: $file" eval '"$docs/render.py" render "$docs/$file" --allow-missing > /dev/null'
 done < <("$docs/render.py" list)
 
+# kein Text hinter einem schließenden ``` (Markdown nähme ihn als Sprache des Blocks)
+check "kein Text hinter \`\`\`" eval '! grep -rnE "^\`\`\` +[^ ]" "$docs"'
+
 echo "$((count - failed))/$count bestanden"
 [ $failed -eq 0 ]

@@ -1,7 +1,8 @@
 ---
 title: TrueNAS SCALE
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/truenas-scale-Lx9QrXsOD6
+outline_id: cbf37f27-c836-43cf-9ce7-3fa6e32e8805
 ---
 TrueNAS SCALE kann Quelle oder Backupserver sein. Pakete lassen sich dort nicht installieren; das schränkt beides ein.
 
@@ -16,8 +17,10 @@ es auf TrueNAS nicht, die Replikation läuft deshalb als root wie in 1.0:
 3. Auf dem Backupserver:
 ```bash
 source=truenas1
-bashclub-zsync-setup --source "$source" --root --run "$source"
+bashclub-zsync-setup --source "$source" --root "$source"
 ```
+4. Danach wie im [Standardfall](01-standardfall.md), Schritt 5 und 6: Monitoring vorbereiten (eigenes `checkzfs_prefix`,
+   `source_bookmark=0`), dann den ersten Lauf starten.
 
 **Snapshots:** Die Engine `internal` braucht auf TrueNAS nichts. Periodische Snapshots von TrueNAS heißen meist
 `auto-JJJJ-MM-TT_hh-mm`; sollen sie übertragen werden, das Label `auto` in `snapshot_filter` aufnehmen, z. B.

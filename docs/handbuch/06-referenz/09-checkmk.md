@@ -1,7 +1,8 @@
 ---
 title: Checkmk-Services
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/checkmk-services-DPJt9X4Xvs
+outline_id: 43dac6fa-4c8a-4551-8e50-0d3d1d7b3f1b
 ---
 Wie die Meldung an Checkmk funktioniert, erklärt das [Monitoring-Konzept](../01-konzept/07-monitoring-konzept.md).
 

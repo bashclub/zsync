@@ -23,19 +23,18 @@ Service der Config meldet weiter. Solange checkzfs das Monitoring macht, `source
 dem Setup haben `source_bookmark=1`. Eine eigene Prüfung in zsync, die checkzfs ersetzt, ist geplant.
 :::
 
-Mit checkzfs daher nur Hold und Resume einschalten (`source_bookmark=0` lassen).
-
-Alle drei auf einmal einschalten. Die Config steht in der ersten Zeile; vorhandene Einträge werden ersetzt, fehlende
+Hold und Resume einschalten. Die Config steht in der ersten Zeile; vorhandene Einträge werden ersetzt, fehlende
 angehängt:
 ```bash
 conf=/etc/bashclub/zsync.conf
-for kv in source_bookmark=1 source_hold=1 transfer_resume=1; do
+for kv in source_hold=1 transfer_resume=1; do
   k=${kv%%=*}
   if grep -q "^$k=" "$conf"; then sed -i "s|^$k=.*|$kv|" "$conf"; else echo "$kv" >> "$conf"; fi
 done
-grep -E '^(source_bookmark|source_hold|transfer_resume)=' "$conf"
+grep -E '^(source_hold|transfer_resume)=' "$conf"
 ```
-Sie gelten ab dem nächsten Lauf. Läuft die Config ohne root, braucht der Benutzer auf der Quelle die Rechte `hold`,
+Den Bookmark erst, wenn checkzfs nicht mehr das Monitoring macht: dann im selben Block zusätzlich `source_bookmark=1`.
+Die Werte gelten ab dem nächsten Lauf. Läuft die Config ohne root, braucht der Benutzer auf der Quelle die Rechte `hold`,
 `release` und `bookmark`; `bashclub-zsync-job-user` vergibt sie.
 
 Prüfen nach dem nächsten Lauf: Auf der Quelle steht je Dataset ein Bookmark, dessen Name Backupserver und Target

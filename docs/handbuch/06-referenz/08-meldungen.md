@@ -1,7 +1,8 @@
 ---
 title: Meldungen
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/meldungen-VaCnbVb33s
+outline_id: ddc7dcd1-6149-4025-8009-da2b183747d3
 ---
 Die Meldungen von `bashclub-zsync` mit Ursache und Abhilfe, in der Reihenfolge eines Laufs. `<dataset>` steht für den
 Namen auf der Quelle, `<replikat>` für das Dataset auf dem Backupserver.

@@ -1,7 +1,8 @@
 ---
 title: Backupserver nur zur Replikation eingeschaltet
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/backupserver-nur-zur-replikation-eingeschaltet-6LZfqwlQ6g
+outline_id: 67937742-02c8-45a9-82eb-775dc5747bfb
 ---
 Ab 2.0.
 

@@ -1,7 +1,8 @@
 ---
 title: Konfigurationsparameter
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/konfigurationsparameter-r8dFu8jd61
+outline_id: 0b6d21b2-6201-47bc-9ae7-57f9866b9a57
 ---
 Eine Config ist ein Shell-Skript mit Zuweisungen `name=wert`, z. B. `/etc/bashclub/pve1.conf`. Werte mit Leerzeichen
 oder `|` stehen in Anführungszeichen. Die Vorlage mit allen Parametern und Kommentaren liegt in

@@ -1,7 +1,8 @@
 ---
 title: Referenz
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/referenz-b562Lyqci1
+outline_id: ebc96ed5-77db-47e6-916d-a90e7ae656c9
 ---
 Nachschlagen statt lesen: jeder Parameter, jedes Programm, jede Datei und jede Meldung von bashclub-zsync. Die
 Erklärungen dahinter stehen im Bereich Konzept und Grundlagen.

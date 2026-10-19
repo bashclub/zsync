@@ -1,7 +1,8 @@
 ---
 title: Aufbewahrungsstufen
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/aufbewahrungsstufen-MyTgvvTC5z
+outline_id: dc9d8fc7-2567-47af-935c-9a9ef4f63760
 ---
 Wie weit ein Backup zurückreicht, hängt davon ab, welche Snapshots es auf der Quelle gibt und wie viele davon der
 Backupserver behält. Die Regeln dazu: [Snapshots und Aufbewahrung](../01-konzept/05-snapshots-und-aufbewahrung.md).

@@ -1,7 +1,8 @@
 ---
 title: Wechseldatenträger
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/wechseldatentrager-SrFfFhw8I7
+outline_id: 70125d38-b2f8-4909-9cfa-76948fccaf47
 ---
 Ab 2.0 mit `bashclub-zsync-disk` und `bashclub-zsync-setup --autorun`; `zsync-autorun` gab es schon in 1.0.
 
