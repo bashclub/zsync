@@ -1289,7 +1289,8 @@ for name in "${syncvols[@]}"; do
                         ds_detail[$name]+=", ${oldest#*@}"
                     fi
                 fi
-                snaps_to_delete=$(grep --after-context=200 $guid <<< "$target_snaps" | grep -v $guid | cut -f1)
+                # oldest first: if min_keep stops the deletion, the newest snapshots stay
+                snaps_to_delete=$(grep --after-context=200 $guid <<< "$target_snaps" | grep -v $guid | cut -f1 | tac)
                 snap_count=$(grep -c . <<< "$target_snaps")
 
                 for snap in $snaps_to_delete; do
