@@ -1,7 +1,8 @@
 ---
 title: Betrieb, Monitoring und Wartung
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/betrieb-monitoring-und-wartung-ng0e9bw5YE
+outline_id: ef0af7da-3773-42ef-9460-a99550be046f
 ---
 Was im laufenden Betrieb zu tun ist: nachsehen, überwachen, entscheiden, Platz planen, aktualisieren.
 

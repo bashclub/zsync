@@ -1,7 +1,8 @@
 ---
 title: Entscheidungen mit bashclub-zsync-maintenance
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/entscheidungen-mit-bashclub-zsync-maintenance-RnahDAyGKe
+outline_id: b1b95a0a-9b01-4fa3-8ba2-213ac803c228
 ---
 Ab 2.0. zsync löscht keine Replikate und ersetzt keine Ketten von selbst. Fälle, die eine Entscheidung brauchen,
 meldet es an Checkmk und markiert sie am Replikat. `bashclub-zsync-maintenance` zeigt sie und führt die Entscheidung

@@ -1,7 +1,8 @@
 ---
 title: Updates und Härtung
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/updates-und-hartung-jXKLhhnn8K
+outline_id: 667a9b9b-5a0e-4579-aab7-afcb1e7632e8
 ---
 ## Updates
 Die Pakete kommen aus der Paketquelle `release`. Ein Update während eines Laufs schadet nicht: Der laufende Prozess

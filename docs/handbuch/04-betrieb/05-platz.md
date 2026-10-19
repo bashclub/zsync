@@ -1,7 +1,8 @@
 ---
 title: Platz planen
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/platz-planen-ubxZd4nXfe
+outline_id: cfa74a15-4e96-44e3-86e4-60f752400620
 ---
 ## Was Platz braucht
 - **Die Daten selbst:** etwa so viel wie auf der Quelle (`refer` der Datasets); die Kompression der Quelle bleibt
