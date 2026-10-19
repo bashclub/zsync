@@ -21,7 +21,7 @@ outline:
 ```
 - `title`: Titel in Outline. Der Text beginnt ohne Überschrift erster Ebene (`#`), Outline zeigt den Titel selbst.
 - `audience`: `Anwender`, `Admin` oder `Anwender, Admin`.
-- `outline`: Adresse der Seite in Outline, beim ersten Veröffentlichen eingetragen.
+- `outline`, `outline_id`: Adresse und ID der Seite in Outline, beim ersten Veröffentlichen eingetragen.
 
 ## Versionen
 Das Handbuch beschreibt 2.0 und alles danach. Eine Historie zu 1.0 gibt es nicht.

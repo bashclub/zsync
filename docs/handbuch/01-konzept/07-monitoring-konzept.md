@@ -1,7 +1,8 @@
 ---
 title: Monitoring-Konzept
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/monitoring-konzept-kKCu5unJeG
+outline_id: ed075723-b975-4619-910a-fb3ae90cdad9
 ---
 Ein Backup, dessen Ausfall niemand bemerkt, ist keins. zsync meldet deshalb an Checkmk, ob die Replikation läuft und
 ob die Backups aktuell sind.

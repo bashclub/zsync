@@ -1,7 +1,8 @@
 ---
 title: Snapshots und Aufbewahrung
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/snapshots-und-aufbewahrung-qczGuG3x3D
+outline_id: fae1fb59-1221-4f17-8301-be3ab598cc72
 ---
 zsync überträgt nur Snapshots. Woher sie kommen, welche davon übertragen werden und wie lange sie auf dem
 Backupserver bleiben, regeln wenige Parameter der Config.
@@ -16,7 +17,9 @@ Es gibt zwei Wege, die sich kombinieren lassen:
   Das Label wird automatisch mit übertragen.
 
 ## Snapshot-Engines
-Die Snapshots von zsync legt eine von zwei Engines an (`zfs_auto_snapshot_engine`):
+Die Snapshots von zsync legt eine von zwei Engines an (`zfs_auto_snapshot_engine`). `zas` steht für
+`zfs-auto-snapshot`: zsync ruft dieses Programm auf der Quelle auf. `internal` ist der `remote-snapshot-manager`, den
+zsync mitbringt.
 
 | Engine | Wo sie läuft | Name der Snapshots |
 |---|---|---|
@@ -24,7 +27,8 @@ Die Snapshots von zsync legt eine von zwei Engines an (`zfs_auto_snapshot_engine
 | `zas` | `zfs-auto-snapshot` auf der Quelle, einmal für alle Datasets | `zfs-auto-snap_backup-2026-10-19-2300` |
 
 `internal` braucht auf der Quelle nichts außer ZFS. `zas` braucht das Paket `zfs-auto-snapshot` auf der Quelle; fehlt
-es, warnt zsync ab 2.0, dass keine Snapshots entstehen.
+es, warnt zsync ab 2.0, dass keine Snapshots entstehen. `zas` übergeht außerdem Datasets mit
+`com.sun:auto-snapshot=false`, wie `zfs-auto-snapshot` selbst; `internal` beachtet diese Property nicht.
 
 :::info
 **Geändert in 2.0:** Neue Configs verwenden `internal`. Bestehende Configs ohne den Parameter bleiben bei `zas`, wie

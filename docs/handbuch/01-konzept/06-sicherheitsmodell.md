@@ -1,7 +1,8 @@
 ---
 title: Sicherheitsmodell
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/sicherheitsmodell-vbQtnUNxxO
+outline_id: 731d0006-51e8-4120-8e4d-f593ab5670c5
 ---
 Ein Backup muss den Fall überstehen, für den es da ist: Die Quelle ist verloren, kaputt oder in fremder Hand. Daraus
 folgen die Regeln, nach denen zsync gebaut ist.
@@ -36,6 +37,10 @@ Alle Fälle können auch warten. Solange sie offen sind, warnt Checkmk.
 ## Pull: Die Quelle hat keinen Schlüssel zum Backup
 Der Backupserver meldet sich an der Quelle an, nie umgekehrt (siehe [Architektur](02-architektur.md)). Auf der Quelle
 liegt kein Schlüssel, der zum Backupserver führt.
+
+Bei lokaler Replikation liegen Quelle und Replikate auf demselben Host. Wer ihn übernimmt, erreicht beide. Schutz
+bietet dort ein Wechseldatenträger, der nur während des Laufs angeschlossen ist, oder zusätzlich eine entfernte
+Replikation auf einen zweiten Host.
 
 ## Betrieb ohne root
 Ab 2.0 braucht zsync root weder auf dem Backupserver noch auf der Quelle. Jeder Benutzer bekommt nur die ZFS-Rechte,

@@ -1,7 +1,8 @@
 ---
 title: Auswahl der Datasets
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/auswahl-der-datasets-fF54lds6nj
+outline_id: ab105d82-a45c-491c-a3e7-ad85b5b56ea5
 ---
 Welche Datasets der Quelle repliziert werden, steht nicht in der Config, sondern an den Datasets selbst: in der
 ZFS-Property `bashclub:zsync` (oder dem Namen, den `tag` in der Config setzt). ZFS vererbt sie an alle Kinder. Wer

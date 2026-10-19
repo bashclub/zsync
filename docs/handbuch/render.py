@@ -6,6 +6,8 @@
   render.py render <file> [--allow-missing]
                                          the text for Outline: without header, links to other articles
                                          as Outline addresses, a note on the source file at the end
+  render.py blocks <file> [<n>]          the bash blocks of an article (numbered), or only block n, to run them
+                                         word by word in a test container or on the test VM
 """
 import os
 import re
@@ -98,6 +100,11 @@ def render(path, allow_missing):
     return text.rstrip("\n") + note
 
 
+def blocks(path):
+    """the bash code blocks of an article"""
+    return re.findall(r"^```bash\n(.*?)^```", read(path)[1], re.S | re.M)
+
+
 def main():
     if len(sys.argv) >= 2 and sys.argv[1] == "list":
         for path, parent in articles():
@@ -105,6 +112,13 @@ def main():
             print("\t".join([rel(path), rel(parent) if parent else "-", head["title"], head.get("outline") or "-"]))
     elif len(sys.argv) >= 3 and sys.argv[1] == "render":
         sys.stdout.write(render(os.path.abspath(sys.argv[2]), "--allow-missing" in sys.argv[3:]))
+    elif len(sys.argv) >= 3 and sys.argv[1] == "blocks":
+        found = blocks(os.path.abspath(sys.argv[2]))
+        if len(sys.argv) >= 4:
+            sys.stdout.write(found[int(sys.argv[3]) - 1])
+        else:
+            for n, block in enumerate(found, 1):
+                print(f"### {n}\n{block}")
     else:
         sys.exit(__doc__)
 

@@ -1,7 +1,8 @@
 ---
 title: Architektur und Ablauf eines Laufs
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/architektur-und-ablauf-eines-laufs-VB3ib7hvH6
+outline_id: 0051873a-13d4-4e92-bcc2-a270992603da
 ---
 ## Pull: der Backupserver holt ab
 zsync läuft auf dem Backupserver. Er meldet sich per SSH an der Quelle an, liest die Liste der Datasets und holt die
@@ -34,8 +35,9 @@ Ein Dataset `rpool/data/vm-100-disk-0` der Quelle landet mit `target=backup/pve1
 Ab 2.0 legt `bashclub-zsync-setup` neue Configs geführt an, mit Benutzern ohne root und einem Timer.
 
 ## Lokaler Modus
-Ab 2.0 repliziert `source=local` Pools desselben Hosts ohne SSH, z. B. von `rpool` auf einen zweiten Pool. Datasets im
-Target werden dabei nie ausgewählt, auch wenn das Target im selben Pool liegt und das Tag erbt.
+Ab 2.0 repliziert `source=local` Pools desselben Hosts ohne SSH, z. B. von `rpool` auf einen zweiten Pool oder auf
+einen Wechseldatenträger, der am Proxmox-Server selbst hängt (siehe [Was ist bashclub-zsync](01-was-ist-bashclub-zsync.md)).
+Datasets im Target werden dabei nie ausgewählt, auch wenn das Target im selben Pool liegt und das Tag erbt.
 
 ## Ablauf eines Laufs
 Ein Lauf ist ein Aufruf von `bashclub-zsync -c <config>`, von Hand, per Cron oder (ab 2.0) per systemd-Timer.
@@ -45,8 +47,9 @@ Ein Lauf ist ein Aufruf von `bashclub-zsync -c <config>`, von Hand, per Cron ode
 3. **Liste:** zsync fragt die Quelle nach allen Datasets mit dem Tag. Ist die Quelle nicht erreichbar, endet der Lauf
    sofort mit Exit-Code 1.
 4. **Snapshots:** Ist die Snapshot-Engine eingeschaltet, legt sie auf der Quelle neue Snapshots an und löscht alte
-   (siehe [Snapshots und Aufbewahrung](05-snapshots-und-aufbewahrung.md)). Die Engine `zas` tut das hier einmal für
-   alle Datasets, die Engine `internal` je Dataset direkt vor dessen Transfer.
+   (siehe [Snapshots und Aufbewahrung](05-snapshots-und-aufbewahrung.md)). Die Engine `zas`
+   (`zfs-auto-snapshot` auf der Quelle) tut das hier einmal für alle Datasets, die Engine `internal`
+   (`remote-snapshot-manager` von zsync) je Dataset direkt vor dessen Transfer.
 5. **Je Dataset:**
    - **Transfer:** Gibt es das Replikat noch nicht, wird es vollständig übertragen (Erstreplikation). Sonst gehen nur
      die Snapshots seit dem letzten gemeinsamen Snapshot über (inkrementell).
