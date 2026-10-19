@@ -105,6 +105,7 @@ Jede ist einzeln möglich und hat einen Rückweg:
 - [Cron auf systemd-Timer](04-cron-auf-timer.md)
 - [Betrieb ohne root](05-betrieb-ohne-root.md)
 - [Snapshot-Engine und Label-Abgleich](06-snapshot-engine-und-labels.md)
-- [Neue Funktionen einschalten](07-neue-funktionen-einschalten.md)
+- [Neue Funktionen einschalten](07-neue-funktionen-einschalten.md), darunter die eingebaute Prüfung der Snapshots
+  statt checkzfs (`monitor_engine=internal`)
 
 Zurück auf 1.0: [Downgrade](09-downgrade.md).

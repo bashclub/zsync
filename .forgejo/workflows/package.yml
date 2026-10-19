@@ -40,12 +40,6 @@ jobs:
         curl -fsSL https://apt.bashclub.org/gpg/bashclub.pub | gpg --dearmor > /usr/share/keyrings/bashclub-archive-keyring.gpg
         . /etc/os-release
         suite=$VERSION_CODENAME
-        # TODO: entfernen, sobald bashclub-checkzfs auch für diese Distribution (noble, resolute) veröffentlicht ist.
-        # Geprüft wird das Paket, nicht die Distribution: Pulp hat noble/resolute schon, aber nur mit bashclub-zsync.
-        if ! curl -fsS "https://apt.bashclub.org/release/dists/$suite/main/binary-all/Packages" | grep -qx 'Package: bashclub-checkzfs'; then
-          echo "::warning::bashclub-checkzfs fehlt im bashclub-Repo für $suite, nutze bookworm"
-          suite=bookworm
-        fi
         if [ "${VERSION_ID%%.*}" -ge 13 ]; then
           printf '%s\n' 'Types: deb' 'URIs: https://apt.bashclub.org/release' "Suites: $suite" \
             'Components: main' 'Signed-By: /usr/share/keyrings/bashclub-archive-keyring.gpg' > /etc/apt/sources.list.d/bashclub.sources

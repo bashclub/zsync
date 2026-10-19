@@ -27,9 +27,15 @@ anlegen. Der Lauf repliziert, der Checkmk-Service bekommt aber keinen Zustand. A
 `bashclub-zsync` aufnehmen (`usermod -aG bashclub-zsync <benutzer>`) oder die Ordner neu anlegen lassen
 (`apt install --reinstall bashclub-zsync`).
 
-**`[WARN] checkzfs is disabled. for monitoring please install: …`**
-checkzfs ist nicht installiert. Auf Systemen mit Paket kommt es mit `bashclub-zsync`; bei manueller Installation siehe
-[TrueNAS SCALE und manuelle Installation](../02-installation/02-truenas-und-manuell.md).
+**`[WARN] monitor_engine=checkzfs, but checkzfs is not installed (package bashclub-checkzfs), using monitor_engine=internal.`**
+Ab 2.0. Die Config verlangt checkzfs, es ist aber nicht installiert. zsync prüft die Snapshots selbst. Abhilfe:
+`monitor_engine=internal` in die Config, oder `apt install bashclub-checkzfs`.
+
+**`[WARN] Unknown value monitor_engine=… (checkzfs or internal), using the default.`**
+Ab 2.0. Erlaubt sind `checkzfs` und `internal`; der Default ist checkzfs, wenn installiert, sonst `internal`.
+
+Bis 1.0.19 meldete ein Lauf ohne checkzfs `[WARN] checkzfs is disabled. for monitoring please install: …` und schrieb
+keine Services je Dataset. Ab 2.0 übernimmt dann die eingebaute Prüfung.
 
 **`[ERROR] source is empty. For local replication without ssh use source=local`**
 `source` fehlt in der Config. Für Pools desselben Hosts `source=local` setzen, sonst die Adresse der Quelle.
@@ -168,9 +174,15 @@ Ab 2.0. Ohne root fehlt evtl. das Recht `userprop` auf dem Target.
 
 ## Monitoring
 **`'NoneType' object has no attribute 'add_snapshot'`**
-Kommt von checkzfs: Auf der Quelle oder dem Backupserver existiert ein Bookmark, z. B. von zsync mit
-`source_bookmark=1`. Die checkzfs-Services fehlen. Abhilfe: `source_bookmark=0` in der Config und die Bookmarks
-dieser Config auf der Quelle löschen (siehe [Neue Funktionen einschalten](../02-installation/07-neue-funktionen-einschalten.md)).
+Kommt von checkzfs (`monitor_engine=checkzfs`): Auf der Quelle oder dem Backupserver existiert ein Bookmark, z. B. von
+zsync mit `source_bookmark=1`. Die Services je Dataset fehlen. Abhilfe: `monitor_engine=internal` in der Config, oder
+`source_bookmark=0` und die Bookmarks dieser Config auf der Quelle löschen (siehe
+[Neue Funktionen einschalten](../02-installation/07-neue-funktionen-einschalten.md)).
+
+**`[WARN] listing the snapshots of … failed, no check of the snapshots per dataset.`**
+Ab 2.0, `monitor_engine=internal`. Die Liste der Snapshots der Quelle ließ sich am Ende des Laufs nicht abfragen, meist
+weil die Verbindung abbrach. Die Services je Dataset behalten den Stand des letzten Laufs; der nächste Lauf versucht es
+erneut.
 
 **`[WARN] … is not writable for …, … is not stored.`**
 Ab 2.0. Der Benutzer des Laufs darf nicht in den Checkmk-Spool schreiben. Abhilfe auf dem betreffenden Host:

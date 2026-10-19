@@ -48,7 +48,7 @@ Wie das im Einzelnen funktioniert, erklärt das [Sicherheitsmodell](06-sicherhei
 | `bashclub-zsync` | Backupserver | die Replikation, Setup, Timer, Wechseldatenträger, Wartung, Monitoring |
 | `bashclub-zsync-source` | entfernte Quelle | ab 2.0, optional: eingeschränkte Benutzer und Befehle für die Replikation; bei lokaler Replikation nicht nötig |
 | `bashclub-zsync-restore` | Backupserver und das System, das wiederhergestellt wird | ab 2.0: Wiederherstellung von Datasets und ganzen Servern |
-| `bashclub-checkzfs` | Backupserver | wird mit `bashclub-zsync` installiert: prüft das Alter der Snapshots für Checkmk |
+| `bashclub-checkzfs` | Backupserver | empfohlen von `bashclub-zsync`: prüft das Alter der Snapshots für Checkmk, wenn `monitor_engine=checkzfs`; ab 2.0 kann zsync das selbst |
 
 Ohne `bashclub-zsync-source` braucht eine entfernte Quelle nur ZFS und einen SSH-Zugang für den Backupserver.
 

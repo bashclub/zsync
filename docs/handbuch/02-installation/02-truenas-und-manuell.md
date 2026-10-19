@@ -15,8 +15,7 @@ dir=$(zfs get -H -o value mountpoint "$pool")/scripts/bashclub-zsync
 mkdir -p "$dir" && cd "$dir"
 curl -fsSL -o bashclub-zsync "https://code.bashclub.org/bashclub/zsync/raw/tag/$ref/bashclub-zsync/usr/bin/bashclub-zsync"
 curl -fsSL -o remote-snapshot-manager "https://code.bashclub.org/bashclub/zsync/raw/tag/$ref/bashclub-zsync/usr/bin/remote-snapshot-manager"
-curl -fsSL -o checkzfs https://code.bashclub.org/bashclub/checkzfs/raw/branch/main/bashclub-checkzfs/usr/bin/checkzfs
-chmod +x bashclub-zsync remote-snapshot-manager checkzfs
+chmod +x bashclub-zsync remote-snapshot-manager
 echo "$ref"
 ```
 Die letzte Zeile zeigt die geladene Version. Für ein Update denselben Block noch einmal ausführen.
@@ -36,7 +35,8 @@ Einschränkungen auf TrueNAS:
 - **Snapshot-Engine `internal`:** `zfs-auto-snapshot` gibt es auf TrueNAS nicht.
 - **Log:** logrotate kennt den Ordner nicht. zsync rotiert das Log ab 2.0 selbst bei 10 MiB und behält 4 komprimierte
   alte Logs (`bashclub-zsync.log.1.gz` … `.4.gz`).
-- **Monitoring:** checkzfs läuft, der Service der Config (`zsync <config>`) fehlt, weil der Check im Paket liegt.
+- **Monitoring:** Die Services je Dataset prüft zsync selbst (`monitor_engine=internal` in der neuen Config); der
+  Service der Config (`zsync <config>`) fehlt, weil der Check im Paket liegt.
 
 ## TrueNAS SCALE als Quelle
 Als Quelle braucht TrueNAS nur SSH mit dem Schlüssel des Backupservers. `bashclub-zsync-source` lässt sich dort nicht
@@ -48,8 +48,6 @@ Ohne Paket, z. B. auf einer Distribution ohne Pakete von bashclub. Wie bei TrueN
 ref=$(curl -fsS 'https://code.bashclub.org/api/v1/repos/bashclub/zsync/tags?limit=50' | grep -o '"name":"v[0-9][^"]*"' | cut -d'"' -f4 | sort -V | tail -n1)
 curl -fsSL -o /usr/local/bin/bashclub-zsync "https://code.bashclub.org/bashclub/zsync/raw/tag/$ref/bashclub-zsync/usr/bin/bashclub-zsync"
 curl -fsSL -o /usr/local/bin/remote-snapshot-manager "https://code.bashclub.org/bashclub/zsync/raw/tag/$ref/bashclub-zsync/usr/bin/remote-snapshot-manager"
-curl -fsSL -o /usr/local/bin/checkzfs https://code.bashclub.org/bashclub/checkzfs/raw/branch/main/bashclub-checkzfs/usr/bin/checkzfs
-chmod +x /usr/local/bin/bashclub-zsync /usr/local/bin/remote-snapshot-manager /usr/local/bin/checkzfs
+chmod +x /usr/local/bin/bashclub-zsync /usr/local/bin/remote-snapshot-manager
 echo "$ref"
 ```
-checkzfs braucht `python3`.

@@ -41,8 +41,8 @@ bashclub-zsync-setup --source "$source" --tag bashclub:zsync-offsite --keep 0 --
   (`zsync-backup1`, wenn es auf `backup1` eingerichtet wurde). Die Zahlen bestimmen, wie lange `backup2` sie behält,
   hier länger als `backup1`.
 
-Danach wie im [Standardfall](01-standardfall.md), Schritt 5 und 6: Monitoring vorbereiten (eigenes `checkzfs_prefix`,
-`source_bookmark=0`), dann den ersten Lauf starten.
+Danach wie im [Standardfall](01-standardfall.md), Schritt 5 und 6: Monitoring vorbereiten (eigenes
+`checkzfs_prefix`), dann den ersten Lauf starten.
 
 Die Replikate auf `backup2` heißen `<target>/<target von backup1>/rpool/data/…`, z. B.
 `backup/zsync/backup1/backup/zsync/pve1/rpool/data/vm-100-disk-0`.

@@ -32,12 +32,10 @@ von root, weil `zsync-autorun` als root läuft.
 Eigenes Label je Platte (`zsync-usb-backup1`): Bei mehreren Platten im Wechsel löscht die Rotation der einen Platte
 sonst die Snapshots, auf denen die andere aufsetzt.
 
-Monitoring vorbereiten, wie für jede Replikation (eigenes Präfix, ohne Bookmarks für checkzfs; siehe
-[Standardfall](01-standardfall.md), Schritt 5):
+Monitoring vorbereiten, wie für jede Replikation (eigenes Präfix, siehe [Standardfall](01-standardfall.md), Schritt 5):
 ```bash
 label=usb-backup1
 sed -i "s/^checkzfs_prefix=.*/checkzfs_prefix=zsync-$label/" "/etc/bashclub/$label.conf"
-sed -i "s/^source_bookmark=.*/source_bookmark=0/" "/etc/bashclub/$label.conf"
 ```
 
 ## 2. Platte vorbereiten
