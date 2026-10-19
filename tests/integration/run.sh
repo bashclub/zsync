@@ -856,8 +856,9 @@ case_checkmk() {
   zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"; snap "$ZCI_POOL_SRC/data" 01
   # Dateien der testing-Versionen mit eigenem Namen für den Status
   echo '0 "zsync checkmk" - alt' > $old1; echo '0 "zsync x checkmk" - alt' > $old2
-  config checkmk; rm -f $spool; zsync
+  config checkmk; rm -f $spool; ZSYNC_WATCHDOG_INTERVAL=397 zsync
   check "alte Status-Dateien der testing-Versionen entfernt" not test -e $old1 -o -e $old2
+  check "Watchdog: kein sleep nach dem Lauf übrig" not pgrep -fx 'sleep 397'
   out=$(check_output)
   check "Service OK in der Lernphase ($out)" grep -qE '^0 "zsync checkmk" .*learning 0/5' <<< "$out"
   check "Statusdatei des Laufs entfernt" test -z "$(status_path state)"

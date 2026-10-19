@@ -570,8 +570,12 @@ function start_watchdog() {
     [[ -x $status_check ]] && [[ ! -e /etc/bashclub/zsync-checkmk.disabled ]] || return 0
     (
         trap - EXIT
+        # the end of the run stops the sleep as well: left alone it kept inherited file descriptors open for up to 5
+        # minutes (the output pipe of cron, the lock of a calling flock)
+        sleeper=
+        trap 'kill $sleeper 2>/dev/null; exit 0' TERM
         written=
-        while sleep "${ZSYNC_WATCHDOG_INTERVAL:-300}"; do
+        while sleep "${ZSYNC_WATCHDOG_INTERVAL:-300}" & sleeper=$!; wait $sleeper; do
             level=$(status_lines | head -1 | cut -d' ' -f1)
             if [ $checkzfs_spool -eq 0 ] || [ $checkzfs_local -gt 0 ] || [[ $level != "$written" ]]; then
                 write_monitor_spool > /dev/null 2>&1
