@@ -1,7 +1,8 @@
 ---
 title: Neue Funktionen einschalten
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/neue-funktionen-einschalten-GfRCUQW3df
+outline_id: 47f4fc6e-8cfb-4f79-97d9-1a17e6c568ea
 ---
 Einige Funktionen von 2.0 sind für Configs aus 1.0 aus, weil sie Platz kosten oder Snapshots anders löschen. Neue
 Configs aus `bashclub-zsync-setup` haben sie an. Jede lässt sich einzeln einschalten. Was sie tun, erklären die

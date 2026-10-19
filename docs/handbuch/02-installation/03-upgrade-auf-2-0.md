@@ -1,7 +1,8 @@
 ---
 title: Upgrade auf 2.0
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/upgrade-auf-20-LsQWHO6pdo
+outline_id: 9394557c-2b9d-4b20-8bb7-ff61c05711e5
 ---
 Das Update von 1.0 auf 2.0 ist ein normales Paketupdate. Bestehende Replikationen laufen danach ohne Eingriff weiter:
 mit derselben Config, demselben Cron-Job, als root, mit denselben Snapshots. Neue Funktionen, die den Betrieb ändern

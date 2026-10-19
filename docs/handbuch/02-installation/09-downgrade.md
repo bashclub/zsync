@@ -1,7 +1,8 @@
 ---
 title: Downgrade auf 1.0
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/downgrade-auf-10-QO6QO9qRzO
+outline_id: b261119a-a2e9-476f-b0ee-a369512f595b
 ---
 Ein Downgrade ist nicht vorgesehen, aber möglich: Die Paketquelle `release` behält die Versionen 1.0.18 und 1.0.19.
 Die Replikate und ihre Snapshots bleiben dabei unverändert; 1.0.19 repliziert weiter, ab dem neuesten gemeinsamen

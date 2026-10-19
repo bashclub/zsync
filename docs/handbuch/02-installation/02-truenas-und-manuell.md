@@ -1,7 +1,8 @@
 ---
 title: TrueNAS SCALE und manuelle Installation
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/truenas-scale-und-manuelle-installation-wTJxn9uta9
+outline_id: 9adbf129-5c86-474d-a6b4-6f09b1d400dc
 ---
 ## TrueNAS SCALE als Backupserver
 TrueNAS erlaubt keine Pakete, und ein Update ersetzt die Systemdateien. Die Skripte liegen deshalb auf einem

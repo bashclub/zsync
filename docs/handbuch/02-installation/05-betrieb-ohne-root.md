@@ -1,7 +1,8 @@
 ---
 title: Betrieb ohne root
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/betrieb-ohne-root-G66cFQQbep
+outline_id: cb41990a-87be-429f-8ab0-d03c97d29212
 ---
 Ab 2.0 läuft eine Replikation auf Wunsch ohne root, auf dem Backupserver wie auf der Quelle. Neue Replikationen
 richtet `bashclub-zsync-setup` so ein. Dieser Artikel stellt eine bestehende Config um, die als root läuft. Warum sich

@@ -1,7 +1,8 @@
 ---
 title: Installation
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/installation-O8tObXzYn1
+outline_id: a4bf0750-a8f9-4ee6-8cbd-a847b52eee15
 ---
 ## Unterstützte Plattformen
 | Plattform | Codename | Installation |
