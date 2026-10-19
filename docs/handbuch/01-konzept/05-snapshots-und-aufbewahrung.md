@@ -25,7 +25,8 @@ Die Snapshots von zsync legt eine von zwei Engines an (`zfs_auto_snapshot_engine
 | `zas` | `zfs-auto-snapshot` auf der Quelle, einmal für alle Datasets | `zfs-auto-snap_backup-2026-10-19-2300` |
 
 `internal` braucht auf der Quelle nichts außer ZFS. `zas` braucht das Paket `zfs-auto-snapshot` auf der Quelle; fehlt
-es, warnt zsync ab 2.0, dass keine Snapshots entstehen.
+es, warnt zsync ab 2.0, dass keine Snapshots entstehen. `zas` übergeht außerdem Datasets mit
+`com.sun:auto-snapshot=false`, wie `zfs-auto-snapshot` selbst; `internal` beachtet diese Property nicht.
 
 :::info
 **Geändert in 2.0:** Neue Configs verwenden `internal`. Bestehende Configs ohne den Parameter bleiben bei `zas`, wie

@@ -11,7 +11,7 @@ Der Artikel betrifft nur Configs, in denen zsync selbst Snapshots anlegt (`zfs_a
 
 ## Warum umstellen
 - **`internal`** braucht auf der Quelle kein `zfs-auto-snapshot` und legt den Snapshot je Dataset direkt vor dessen
-  Übertragung an.
+  Übertragung an. Anders als `zas` legt es auch Snapshots von Datasets mit `com.sun:auto-snapshot=false` an.
 - **`strict`** zählt nur Snapshots im Namensschema der Engine zum Label. Altlasten eines anderen Schemas blockieren dann
   nicht mehr die Rotation auf dem Backupserver.
 
@@ -52,14 +52,15 @@ bashclub-zsync -c "$conf"
    Im Log stehen jetzt Warnungen zu Snapshots des Labels in einem anderen Namensschema. Das sind die alten.
 
 3. Erst danach die alten Snapshots auf der Quelle löschen. Wer sie vorher löscht, kann den letzten gemeinsamen Snapshot
-   verlieren. Der Block meldet sich als root an der Quelle an, liest Port und Label aus der Config und zeigt zuerst
-   nur, was gelöscht würde:
+   verlieren. Der Block meldet sich als root an der Quelle an, liest Port, Tag und Label aus der Config und nimmt nur
+   die Datasets, die die Config repliziert; Replikate anderer Backups auf der Quelle bleiben unberührt. Er zeigt
+   zuerst nur, was gelöscht würde:
 ```bash
-( . "$conf"; ssh -p "$sshport" "root@${source#*@}" "zfs list -H -t snapshot -o name | grep '@zfs-auto-snap_${zfs_auto_snapshot_label}-' | xargs -r -n1 zfs destroy -nv" )
+( . "$conf"; ssh -p "$sshport" "root@${source#*@}" "zfs get -H -o name,value -t filesystem,volume $tag | awk '\$2 == \"all\" || \$2 == \"subvols\" { print \$1 }' | xargs -r -n1 zfs list -H -t snapshot -o name -d 1 | grep '@zfs-auto-snap_${zfs_auto_snapshot_label}-' | xargs -r -n1 zfs destroy -nv" )
 ```
    Stimmt die Liste, löschen:
 ```bash
-( . "$conf"; ssh -p "$sshport" "root@${source#*@}" "zfs list -H -t snapshot -o name | grep '@zfs-auto-snap_${zfs_auto_snapshot_label}-' | xargs -r -n1 zfs destroy -v" )
+( . "$conf"; ssh -p "$sshport" "root@${source#*@}" "zfs get -H -o name,value -t filesystem,volume $tag | awk '\$2 == \"all\" || \$2 == \"subvols\" { print \$1 }' | xargs -r -n1 zfs list -H -t snapshot -o name -d 1 | grep '@zfs-auto-snap_${zfs_auto_snapshot_label}-' | xargs -r -n1 zfs destroy -v" )
 ```
 
 4. Die alten Snapshots auf dem Backupserver löscht nach dem nächsten Lauf `bashclub-zsync-maintenance`: Fall

@@ -219,15 +219,15 @@ checkzfs_spool_maxage=87000
 - `bashclub-zsync` lists such snapshots as `[WARN]` (source and target) and warns if the oldest source snapshot of an interval is missing on the target (state `cleanup_blocked` in the monitoring).
 - The engine `zas` runs `zfs-auto-snapshot` on the source; the packages only recommend it (`bashclub-zsync` needs it on the backup server only for `source=local`). If it is missing on the source, `bashclub-zsync` warns that no snapshots are created.
 
-To switch an existing configuration from `zas` to `internal`, set both values and remove the remaining `zfs-auto-snapshot` snapshots of the label on the source. The commands read source, port and label from the configuration; the first one only shows what would be deleted:
+To switch an existing configuration from `zas` to `internal`, set both values, let one run transfer the first snapshot of the new name scheme (it is the common snapshot then), and only after that remove the remaining `zfs-auto-snapshot` snapshots of the label on the source. The commands log in as root, read port, tag and label from the configuration and only take the datasets the configuration replicates, so replicas of other backups on the source stay untouched; the first one only shows what would be deleted:
 ~~~
 conf=/etc/bashclub/zsync.conf
-( . "$conf"; ssh -p "$sshport" "$source" "zfs list -H -t snapshot -o name | grep '@zfs-auto-snap_${zfs_auto_snapshot_label}-' | xargs -r -n1 zfs destroy -nv" )
+( . "$conf"; ssh -p "$sshport" "root@${source#*@}" "zfs get -H -o name,value -t filesystem,volume $tag | awk '\$2 == \"all\" || \$2 == \"subvols\" { print \$1 }' | xargs -r -n1 zfs list -H -t snapshot -o name -d 1 | grep '@zfs-auto-snap_${zfs_auto_snapshot_label}-' | xargs -r -n1 zfs destroy -nv" )
 ~~~
 If the list is correct, delete them:
 ~~~
 conf=/etc/bashclub/zsync.conf
-( . "$conf"; ssh -p "$sshport" "$source" "zfs list -H -t snapshot -o name | grep '@zfs-auto-snap_${zfs_auto_snapshot_label}-' | xargs -r -n1 zfs destroy -v" )
+( . "$conf"; ssh -p "$sshport" "root@${source#*@}" "zfs get -H -o name,value -t filesystem,volume $tag | awk '\$2 == \"all\" || \$2 == \"subvols\" { print \$1 }' | xargs -r -n1 zfs list -H -t snapshot -o name -d 1 | grep '@zfs-auto-snap_${zfs_auto_snapshot_label}-' | xargs -r -n1 zfs destroy -v" )
 ~~~
 
 ### Local replication (pool to pool)
