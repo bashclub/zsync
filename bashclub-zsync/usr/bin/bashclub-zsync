@@ -34,7 +34,7 @@ sshport=22
 tag=bashclub:zsync
 
 # pipe separated list of the snapshot labels to replicate, each with the number of its snapshots to keep on this host:
-#   daily or daily=source  the target follows the source (deletes what the source deleted, at least min_keep remain)
+#   daily or daily=source  the target follows the source (deletes what the source deleted, the newest min_keep remain)
 #   daily=30               the 30 newest snapshots of the label stay on this host, whatever the source deletes
 snapshot_filter="hourly|daily|weekly|monthly"
 
@@ -774,7 +774,11 @@ for zvol in $tagged; do
         exclude_list="${exclude_list}\t${name}\n"
     fi
 done
-checkzfs_filter=${checkzfs_filter::-1}
+if [[ -n $checkzfs_filter ]]; then checkzfs_filter=${checkzfs_filter::-1}; fi
+# warning only: the run itself is fine, the monitoring shows the empty selection (last run with 0 datasets)
+if [ ${#syncvols[@]} -eq 0 ]; then
+    log "[WARN] no dataset on $source is selected for the replication, nothing is replicated. Select datasets on the source with the property $tag: all (the dataset and its children) or subvols (only its children)."
+fi
 # type and refquota (bytes, 0 = none, "-" for volumes) of all datasets on the source
 declare -A fstypes refquotas
 while IFS=$'\t' read -r dataset fstype refquota; do

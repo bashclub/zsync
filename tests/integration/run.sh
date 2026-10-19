@@ -60,6 +60,25 @@ case_rotation() {
   zsync
   equal "Exit-Code" 0 "$rc"
   equal "Ziel wie Quelle rotiert" "zfs-auto-snap_daily-03 zfs-auto-snap_daily-04" "$(snaps "$ZCI_POOL_DST/rotation/$ZCI_POOL_SRC/data")"
+  # min_keep stoppt das Löschen: die ältesten gehen zuerst, die neuesten bleiben (GitHub-PR #3)
+  set_conf "$conf" min_keep 3
+  for n in 05 06 07; do write "$ZCI_POOL_SRC/data" 1 f$n; snap "$ZCI_POOL_SRC/data" $n; done
+  zsync
+  for n in 03 04 05 06; do zfs destroy "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-$n"; done
+  write "$ZCI_POOL_SRC/data" 1 f08; snap "$ZCI_POOL_SRC/data" 08
+  zsync
+  equal "min_keep: Exit-Code" 0 "$rc"
+  equal "min_keep: die neuesten bleiben" "zfs-auto-snap_daily-06 zfs-auto-snap_daily-07 zfs-auto-snap_daily-08" "$(snaps "$ZCI_POOL_DST/rotation/$ZCI_POOL_SRC/data")"
+}
+
+# nichts auf der Quelle ausgewählt: Warnung im Log, kein Bash-Fehler, Exit 0, Monitoring WARN
+case_nothing_selected() {
+  zfs create "$ZCI_POOL_SRC/data"
+  config nothing_selected; zsync
+  equal "Exit-Code" 0 "$rc"
+  check "Warnung im Log" grep -q '\[WARN\] no dataset on root@localhost is selected for the replication' <(last_run_log)
+  check "kein Bash-Fehler" not grep -q 'substring expression' <(last_run_log)
+  equal "Status: 0 Datasets" "datasets=0" "$(grep '^datasets=' "$(status_path last)")"
 }
 
 # refquota auf der Quelle erhöht und mehr Daten als die alte refquota: Ziel wird angehoben, receive gelingt
@@ -1284,7 +1303,7 @@ case_result_busy() {
   rm -f $lockconf
 }
 
-all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_server hooks result_busy)
+all_cases=(replication engine_internal rotation nothing_selected refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_server hooks result_busy)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten, Pools und die installierten Pakete): ein zweiter wartet;

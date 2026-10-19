@@ -79,6 +79,8 @@
 - a log file in a directory that no logrotate config mentions (e.g. on TrueNAS SCALE) is rotated by bashclub-zsync itself at 10 MiB, 4 compressed old logs are kept
 
 ### Fixed
+- The target follows the source (`label` or `label=source`): when `min_keep` stops the deletion, the newest snapshots stay. Previously the deletion started with the newest snapshots older than the oldest source snapshot, so the oldest stayed and a gap remained (GitHub PR #3 by lgremme, #114).
+- A run without any dataset selected on the source logs a warning instead of the bash error `substring expression < 0`; the Checkmk service of the configuration warns (`last run selected no dataset on the source`) (#114).
 - `bashclub-zsync -s` did not run checkzfs (`run_checkzfs: command not found`), so its spool was not renewed and its services were missing from the output and the exit code (#106).
 - The state of a run and the checkzfs services are in one spool file, `<maxage>_<checkzfs_prefix>` as before 2.0; the state service is named `<checkzfs_prefix> <config>`, so backup servers with different prefixes on one source stay apart. The watchdog writes the checkzfs services of the last run along, so they do not disappear during a run. The separate state files of the testing versions are removed once, on the source with `rm -f` of a spool file, now allowed in `bashclub-zsync-remote` (#106).
 - The watchdog wrote locally even with the spool on the source: it now starts once the source has answered (#106).

@@ -13,7 +13,7 @@ tag=bashclub:zsync
 
 # pipe separated list of the snapshot labels to replicate, each with the number of its snapshots to keep on the
 # backup server: daily=30 keeps the 30 newest daily snapshots here, whatever the source deletes;
-# daily or daily=source follows the source (deletes what the source deleted, at least min_keep remain)
+# daily or daily=source follows the source (deletes what the source deleted, the newest min_keep remain)
 snapshot_filter="hourly=24|daily=30|weekly=8|monthly=12"
 
 # deprecated (will be removed in a later version): minimum number of snapshots per label that stay on the backup

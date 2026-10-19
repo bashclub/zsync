@@ -1,10 +1,24 @@
 # Paket bashclub-zsync-restore (Restore-Toolbox), eigener Lauf: bauen, testen, veröffentlichen wie bashclub-zsync
 name: bashclub-zsync-restore
+# nur bei Änderungen an diesem Paket (die Integrationstests im Lauf von bashclub-zsync bauen bei jeder Änderung alle
+# Pakete); Tags und manueller Start bauen es immer
 on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths:
+      - "bashclub-zsync-restore/**"
+      - "nfpm-restore.yaml"
+      - "packaging/copyright"
+      - "packaging/scripts/restore-*"
+      - ".forgejo/workflows/package-restore.yml"
   pull_request:
+    paths:
+      - "bashclub-zsync-restore/**"
+      - "nfpm-restore.yaml"
+      - "packaging/copyright"
+      - "packaging/scripts/restore-*"
+      - ".forgejo/workflows/package-restore.yml"
   workflow_dispatch:
 
 jobs:

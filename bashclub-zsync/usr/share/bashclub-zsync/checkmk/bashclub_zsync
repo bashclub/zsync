@@ -293,6 +293,10 @@ for id in $ids; do
         if [ ${last[rc]} -ne 0 ]; then
             raise 1 "last run $(duration $((NOW - ${last[end]}))) ago failed (exit code ${last[rc]}, ${last[datasets_failed]:-0} of ${last[datasets]:-0} datasets failed)$(level_mark 1)"
         fi
+        # nothing selected on the source: the run succeeds, but replicates nothing
+        if [[ ${last[datasets]} == 0 ]]; then
+            raise 1 "last run selected no dataset on the source (property $(conf_value "$conf" tag | grep . || echo bashclub:zsync) all or subvols)$(level_mark 1)"
+        fi
     fi
 
     #### state per dataset (written by the last run)

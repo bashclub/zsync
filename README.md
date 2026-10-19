@@ -145,7 +145,7 @@ tag=bashclub:zsync
 
 # pipe separated list of the snapshot labels to replicate, each with the number of its snapshots to keep on the
 # backup server: daily=30 keeps the 30 newest daily snapshots here, whatever the source deletes;
-# daily or daily=source follows the source (deletes what the source deleted, at least min_keep remain)
+# daily or daily=source follows the source (deletes what the source deleted, the newest min_keep remain)
 snapshot_filter="hourly|daily|weekly|monthly"
 
 # deprecated (will be removed in a later version): minimum number of snapshots per label that stay on the backup
@@ -333,7 +333,7 @@ Without questions, e.g. for scripts:
 Each case runs under the lock of its configuration and is logged on its own. A failed case does not stop the group, it stays open.
 
 ### Snapshots to keep on the backup server
-Each label in `snapshot_filter` can have the number of its snapshots that stay on the backup server: `snapshot_filter="hourly=24|daily=30|weekly=8|monthly=12"`. These snapshots are kept whatever happens on the source, so deleting snapshots on the source (also by an attacker) cannot shrink the backup. A label alone or `label=source` keeps the previous behavior: the backup server deletes what the source deleted, at least `min_keep` remain (deprecated, it will be removed in a later version). Existing configurations keep working unchanged; `bashclub-zsync-setup` writes numbers for new ones.
+Each label in `snapshot_filter` can have the number of its snapshots that stay on the backup server: `snapshot_filter="hourly=24|daily=30|weekly=8|monthly=12"`. These snapshots are kept whatever happens on the source, so deleting snapshots on the source (also by an attacker) cannot shrink the backup. A label alone or `label=source` keeps the previous behavior: the backup server deletes what the source deleted, the newest `min_keep` remain (deprecated, it will be removed in a later version). Existing configurations keep working unchanged; `bashclub-zsync-setup` writes numbers for new ones.
 
 Limit: who controls the source can still create many new snapshots of a label, so they push the older ones out of the number kept on the backup server.
 
