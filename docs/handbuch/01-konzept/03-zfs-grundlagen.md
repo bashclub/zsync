@@ -1,7 +1,8 @@
 ---
 title: ZFS-Grundlagen für zsync
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/zfs-grundlagen-fur-zsync-0w3Lfa5e3Q
+outline_id: 16d8c0ef-4406-416a-9c1e-1eef36d8609d
 ---
 Dieser Artikel erklärt die ZFS-Begriffe, auf denen zsync aufbaut. Wer sie kennt, versteht die Meldungen im Log und im
 Monitoring.
@@ -72,7 +73,6 @@ Bricht eine Übertragung ab (Netz, Neustart, abgebrochener Lauf), behält ZFS de
 Der nächste Lauf setzt dort fort, statt neu zu beginnen. Das zählt vor allem bei der Erstreplikation großer Datasets
 über eine langsame Leitung.
 
-:::info
-**Geändert in 2.0:** Bookmark, Hold und Resume gibt es ab 2.0. Bestehende Configs ohne diese Parameter laufen nach
-dem Update wie bisher (`0` = aus). Neue Configs aus `bashclub-zsync-setup` schalten alle drei ein (`1`).
-:::
+## Defaults
+Bestehende Configs ohne die Parameter `source_bookmark`, `source_hold` und `transfer_resume` laufen nach dem Update
+wie bisher, alle drei sind aus (`0`). Neue Configs aus `bashclub-zsync-setup` schalten alle drei ein (`1`).

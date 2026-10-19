@@ -1,7 +1,8 @@
 ---
 title: Glossar
 audience: Anwender, Admin
-outline:
+outline: https://docs.bashclub.org/doc/glossar-EldhNCFEHV
+outline_id: 88e2c31f-cf26-4a68-8e83-59a7f93945b8
 ---
 **Backupserver** – der Host, auf dem `bashclub-zsync` läuft und die Replikate liegen. Er holt die Daten von der
 Quelle ab.

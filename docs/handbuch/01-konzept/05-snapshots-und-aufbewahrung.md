@@ -1,7 +1,8 @@
 ---
 title: Snapshots und Aufbewahrung
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/snapshots-und-aufbewahrung-qczGuG3x3D
+outline_id: fae1fb59-1221-4f17-8301-be3ab598cc72
 ---
 zsync überträgt nur Snapshots. Woher sie kommen, welche davon übertragen werden und wie lange sie auf dem
 Backupserver bleiben, regeln wenige Parameter der Config.

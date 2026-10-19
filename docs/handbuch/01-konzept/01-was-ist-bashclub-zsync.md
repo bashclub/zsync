@@ -1,7 +1,8 @@
 ---
 title: Was ist bashclub-zsync
 audience: Anwender, Admin
-outline:
+outline: https://docs.bashclub.org/doc/was-ist-bashclub-zsync-suiy0tdctv
+outline_id: 57dbb59d-b6c5-4270-a59a-b8b10ab53f97
 ---
 bashclub-zsync repliziert ZFS-Datasets von einem Server (der **Quelle**) auf einen **Backupserver**. Es überträgt die
 Snapshots der Quelle und bewahrt sie auf dem Backupserver auf. Typisch ist ein Proxmox-Server als Quelle und ein
@@ -45,8 +46,8 @@ Ohne `bashclub-zsync-source` braucht die Quelle nur ZFS und einen SSH-Zugang fü
 
 :::info
 **Geändert in 2.0:** Bis 1.0.19 gab es nur das Paket `bashclub-zsync`, und der Backupserver meldete sich als root auf
-der Quelle an. Ab 2.0 geht beides auch ohne root, mit `bashclub-zsync-source` auf der Quelle. Bestehende
-Replikationen laufen nach dem Update unverändert als root weiter.
+der Quelle an. Ab 2.0 läuft die Replikation auf Wunsch ohne root, auf dem Backupserver wie auf der Quelle (dort mit
+`bashclub-zsync-source`). Bestehende Replikationen laufen nach dem Update unverändert als root weiter.
 :::
 
 ## Unterstützte Plattformen

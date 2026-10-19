@@ -1,7 +1,8 @@
 ---
 title: Konzept und Grundlagen
 audience: Anwender, Admin
-outline:
+outline: https://docs.bashclub.org/doc/konzept-und-grundlagen-dKqLsQ1g1M
+outline_id: 41703fee-7de0-45eb-b98a-5c6577fe3673
 ---
 Dieser Bereich erklärt, was bashclub-zsync tut und warum es so gebaut ist. Wer zsync einrichtet oder betreibt, sollte
 ihn einmal gelesen haben. Die Anleitungen in den anderen Bereichen setzen diese Begriffe voraus.

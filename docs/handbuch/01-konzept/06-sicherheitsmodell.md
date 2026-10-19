@@ -1,7 +1,8 @@
 ---
 title: Sicherheitsmodell
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/sicherheitsmodell-vbQtnUNxxO
+outline_id: 731d0006-51e8-4120-8e4d-f593ab5670c5
 ---
 Ein Backup muss den Fall überstehen, für den es da ist: Die Quelle ist verloren, kaputt oder in fremder Hand. Daraus
 folgen die Regeln, nach denen zsync gebaut ist.

@@ -1,7 +1,8 @@
 ---
 title: Architektur und Ablauf eines Laufs
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/architektur-und-ablauf-eines-laufs-VB3ib7hvH6
+outline_id: 0051873a-13d4-4e92-bcc2-a270992603da
 ---
 ## Pull: der Backupserver holt ab
 zsync läuft auf dem Backupserver. Er meldet sich per SSH an der Quelle an, liest die Liste der Datasets und holt die
