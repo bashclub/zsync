@@ -1,7 +1,8 @@
 ---
 title: Installation, Upgrade und Migration
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/installation-upgrade-und-migration-sInwjUhIRx
+outline_id: 2e914fb7-e9c7-4b13-8e4f-cd03b20ff2ae
 ---
 Dieser Bereich bringt bashclub-zsync auf die Systeme und bestehende Installationen auf 2.0.
 
