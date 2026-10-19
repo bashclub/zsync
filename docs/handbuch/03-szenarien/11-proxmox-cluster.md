@@ -13,6 +13,7 @@ Je Knoten eine Config, wie im [Standardfall](01-standardfall.md):
 for source in pve1 pve2 pve3; do
   bashclub-zsync-setup --yes --source "$source" "$source"
   sed -i "s/^checkzfs_prefix=.*/checkzfs_prefix=zsync-$source/" "/etc/bashclub/$source.conf"
+  sed -i "s/^source_bookmark=.*/source_bookmark=0/" "/etc/bashclub/$source.conf"
   systemctl start --no-block "bashclub-zsync@$source.service"
 done
 ```

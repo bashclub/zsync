@@ -14,6 +14,13 @@ Wie die Meldung an Checkmk funktioniert, erklärt das [Monitoring-Konzept](../01
 Beide kommen aus derselben Spool-Datei `/var/lib/check_mk_agent/spool/<checkzfs_spool_maxage>_<checkzfs_prefix>`.
 Nach dem ersten Lauf einer neuen Config die Service-Erkennung des Hosts in Checkmk ausführen.
 
+:::warning
+**checkzfs und Bookmarks:** checkzfs (bis Version 4.14) bricht ab, sobald auf der Quelle oder dem Backupserver ein
+Bookmark existiert (`'NoneType' object has no attribute 'add_snapshot'`). Dann fehlen alle checkzfs-Services; der
+Service der Config meldet weiter. Solange checkzfs das Monitoring macht, `source_bookmark=0` setzen. Neue Configs aus
+dem Setup haben `source_bookmark=1`. Eine eigene Prüfung in zsync, die checkzfs ersetzt, ist geplant.
+:::
+
 ## Zustände des Services der Config
 | Zustand | Erkennung | Status |
 |---|---|---|

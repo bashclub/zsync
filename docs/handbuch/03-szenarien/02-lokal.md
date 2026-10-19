@@ -28,8 +28,8 @@ bashclub-zsync-setup --source local --target "$pool/zsync/local" local
 Mit `--source local` läuft die Replikation als root, ohne Job-Benutzer und ohne `bashclub-zsync-source`. Das Setup
 fragt Zeitplan und Aufbewahrung wie im [Standardfall](01-standardfall.md).
 
-Danach wie im [Standardfall](01-standardfall.md), Schritt 5 und 6: eigenes `checkzfs_prefix` setzen, dann den ersten
-Lauf starten.
+Danach wie im [Standardfall](01-standardfall.md), Schritt 5 und 6: Monitoring vorbereiten (eigenes `checkzfs_prefix`,
+`source_bookmark=0`), dann den ersten Lauf starten.
 
 Datasets im Target werden nie ausgewählt, auch wenn das Target das Tag erbt. Liegt das Target im selben Pool wie die
 Quelle, schützt es nur vor versehentlichem Löschen, nicht vor dem Ausfall des Pools.

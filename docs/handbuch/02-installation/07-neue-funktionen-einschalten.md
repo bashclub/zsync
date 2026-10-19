@@ -16,6 +16,15 @@ Configs aus `bashclub-zsync-setup` haben sie an. Jede lässt sich einzeln einsch
 | `snapshot_filter` mit Zahlen | der Backupserver behält eine feste Anzahl je Label, egal was die Quelle löscht | so viel Platz, wie die Snapshots belegen |
 
 ## Bookmark, Hold und Resume
+:::warning
+**checkzfs und Bookmarks:** checkzfs (bis Version 4.14) bricht ab, sobald auf der Quelle oder dem Backupserver ein
+Bookmark existiert (`'NoneType' object has no attribute 'add_snapshot'`). Dann fehlen alle checkzfs-Services; der
+Service der Config meldet weiter. Solange checkzfs das Monitoring macht, `source_bookmark=0` setzen. Neue Configs aus
+dem Setup haben `source_bookmark=1`. Eine eigene Prüfung in zsync, die checkzfs ersetzt, ist geplant.
+:::
+
+Mit checkzfs daher nur Hold und Resume einschalten (`source_bookmark=0` lassen).
+
 Alle drei auf einmal einschalten. Die Config steht in der ersten Zeile; vorhandene Einträge werden ersetzt, fehlende
 angehängt:
 ```bash
@@ -35,8 +44,13 @@ enthält:
 ( . "$conf"; ssh -p "$sshport" "root@${source#*@}" zfs list -H -t bookmark -o name | grep "#zsync_$(hostname -s)_" | head )
 ```
 
-Rückweg: dieselben Zeilen mit `0`. Vorhandene Bookmarks stören nicht; sie lassen sich auf der Quelle mit
-`zfs destroy <dataset>#<bookmark>` entfernen.
+Rückweg: dieselben Zeilen mit `0`. Danach die Bookmarks dieser Config auf der Quelle löschen, sonst bricht checkzfs
+weiter ab. Der Block meldet sich als root an der Quelle an und nimmt nur die Bookmarks dieses Backupservers und
+Targets:
+```bash
+conf=/etc/bashclub/zsync.conf
+( . "$conf"; ssh -p "$sshport" "root@${source#*@}" "zfs list -H -t bookmark -o name | grep '#zsync_$(hostname -s)_${target//\//_}\$' | xargs -r -n1 zfs destroy -v" )
+```
 
 ## Feste Anzahl je Label
 Mit Zahlen in `snapshot_filter` folgt der Backupserver nicht mehr den Löschungen der Quelle. Beim nächsten Lauf löscht

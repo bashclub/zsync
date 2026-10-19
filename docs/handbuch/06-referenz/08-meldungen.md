@@ -166,6 +166,11 @@ Ab 2.0. Replikat ohne Dataset auf der Quelle oder nicht mehr ausgewählt. Behalt
 Ab 2.0. Ohne root fehlt evtl. das Recht `userprop` auf dem Target.
 
 ## Monitoring
+**`'NoneType' object has no attribute 'add_snapshot'`**
+Kommt von checkzfs: Auf der Quelle oder dem Backupserver existiert ein Bookmark, z. B. von zsync mit
+`source_bookmark=1`. Die checkzfs-Services fehlen. Abhilfe: `source_bookmark=0` in der Config und die Bookmarks
+dieser Config auf der Quelle löschen (siehe [Neue Funktionen einschalten](../02-installation/07-neue-funktionen-einschalten.md)).
+
 **`[WARN] … is not writable for …, … is not stored.`**
 Ab 2.0. Der Benutzer des Laufs darf nicht in den Checkmk-Spool schreiben. Abhilfe auf dem betreffenden Host:
 `install -d -m 3775 -g bashclub-zsync /var/lib/check_mk_agent/spool`.

@@ -150,6 +150,13 @@ Ab 2.0. `1`: Bookmark auf den neuesten übertragenen Snapshot auf der Quelle,
 `<dataset>#zsync_<backupserver>_<target mit _>`. Hat die Quelle den Snapshot gelöscht, geht die Replikation vom
 Bookmark aus weiter.
 
+:::warning
+**checkzfs und Bookmarks:** checkzfs (bis Version 4.14) bricht ab, sobald auf der Quelle oder dem Backupserver ein
+Bookmark existiert (`'NoneType' object has no attribute 'add_snapshot'`). Dann fehlen alle checkzfs-Services; der
+Service der Config meldet weiter. Solange checkzfs das Monitoring macht, `source_bookmark=0` setzen. Neue Configs aus
+dem Setup haben `source_bookmark=1`. Eine eigene Prüfung in zsync, die checkzfs ersetzt, ist geplant.
+:::
+
 ### `source_hold`
 Ab 2.0. `1`: Hold auf die Basis und alle noch zu sendenden Snapshots eines Datasets, solange es übertragen wird. Tag
 wie der Bookmark. Holds eines abgebrochenen Laufs löst der nächste Lauf.
