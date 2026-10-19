@@ -684,49 +684,72 @@ zfs_auto_snapshot_keep=3"
 }
 # Entscheidungen: verwaistes Replikat, gerissene Kette, Snapshot-Altlast; Aktionen mit Vorschau, Sperre und Protokoll
 case_maintenance() {
-  local m=bashclub-zsync-maintenance mlog=/var/log/bashclub-zsync/maintenance.log list c
-  for c in data gone broken; do zfs create "$ZCI_POOL_SRC/$c"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/$c"; snap "$ZCI_POOL_SRC/$c" 01; done
+  local m=bashclub-zsync-maintenance mlog=/var/log/bashclub-zsync/maintenance.log list c T=$ZCI_POOL_DST/maintenance/$ZCI_POOL_SRC
+  for c in data gone gone/sub broken other; do zfs create "$ZCI_POOL_SRC/$c"; snap "$ZCI_POOL_SRC/$c" 01; done
+  for c in data gone broken other; do zfs set bashclub:zsync=all "$ZCI_POOL_SRC/$c"; done
   # legacy: ein Snapshot des Labels im Schema von zas wird mitrepliziert und ist am Ziel eine Altlast (wie bei einem
   # Wechsel der Engine)
   config maintenance "zfs_auto_snapshot_keep=3
 zfs_auto_snapshot_label_match=legacy"
   zsync
   equal "Erstreplikation" 0 "$rc"
-  zfs destroy -r "$ZCI_POOL_SRC/gone"
+  zfs destroy -r "$ZCI_POOL_SRC/gone"; zfs destroy -r "$ZCI_POOL_SRC/other"
   zfs list -H -o name -t snapshot "$ZCI_POOL_SRC/broken" | xargs -n1 zfs destroy
   snap "$ZCI_POOL_SRC/broken" 02
   zfs snapshot "$ZCI_POOL_SRC/data@zfs-auto-snap_backup-2026-01-01-0000"
   zsync
+  # zsync markiert die Fälle am Replikat
+  check "Markierung orphan" grep -q "^orphan;[0-9]*;$conf;" <<< "$(prop "$T/gone" bashclub:zsync-case)"
+  check "Markierung am Kind (eigener Fall)" grep -q "^orphan;" <<< "$(zfs get -H -o value -s local bashclub:zsync-case "$T/gone/sub")"
+  check "Markierung broken" grep -q "^broken;" <<< "$(prop "$T/broken" bashclub:zsync-case)"
+  check "Markierung leftovers mit Anzahl" grep -q "^leftovers;.*;1 snapshots of the label" <<< "$(prop "$T/data" bashclub:zsync-case)"
+  local before; before=$(zfs get -H -p -o value written "$T/gone")
   list=$(ZSYNC_CONF_DIR=$CONF_DIR $m --list --tsv)
-  equal "drei offene Fälle" 3 "$(grep -c . <<< "$list")"
+  equal "fünf Fälle (tsv: auch das Kind)" 5 "$(grep -c . <<< "$list")"
   local orphan broken left
-  orphan=$(awk -F'\t' '$3 == "orphan" { print $1 }' <<< "$list")
+  orphan=$(awk -F'\t' -v d="$T/gone" '$3 == "orphan" && $4 == d { print $1 }' <<< "$list")
   broken=$(awk -F'\t' '$3 == "broken" { print $1 }' <<< "$list")
   left=$(awk -F'\t' '$3 == "leftovers" { print $1 }' <<< "$list")
   check "Fall verwaistes Replikat" test -n "$orphan"
   check "Fall gerissene Kette" test -n "$broken"
   check "Fall Snapshot-Altlast" test -n "$left"
-  # Fragen: leere Antwort = später (letzte Option), nichts ändert sich
-  local out; out=$(printf '\n\n\n' | ZSYNC_CONF_DIR=$CONF_DIR $m 2>&1)
-  check "Fragen: drei Fälle gezeigt" grep -q '^\[3/3\]' <<< "$out"
-  equal "Fragen: später ändert nichts" 3 "$(ZSYNC_CONF_DIR=$CONF_DIR $m --list --tsv | grep -c .)"
-  check "Probelauf zeigt den Befehl" grep -q "zfs rename $ZCI_POOL_DST/maintenance/$ZCI_POOL_SRC/broken" <<< "$(ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$broken" rename --dry-run)"
-  check "Probelauf ändert nichts" exists "$ZCI_POOL_DST/maintenance/$ZCI_POOL_SRC/broken"
+  check "Übersicht: Kind unter dem Elternteil" grep -qE "$T/gone \+1 " <<< "$(ZSYNC_CONF_DIR=$CONF_DIR $m --list)"
+  # Übersicht, dann „alle später“ (Standard): nichts ändert sich
+  local out; out=$(printf '\n' | ZSYNC_CONF_DIR=$CONF_DIR $m 2>&1)
+  check "Übersicht vor der Frage ($out)" grep -q "^case 4: " <<< "$out"
+  check "Übersicht: Anzahl je Typ" grep -q "2 x orphan" <<< "$out"
+  equal "alle später ändert nichts" 5 "$(ZSYNC_CONF_DIR=$CONF_DIR $m --list --tsv | grep -c .)"
+  # einzeln: bisheriger Ablauf, leere Antworten = später
+  out=$(printf '3\n\n\n\n\n' | ZSYNC_CONF_DIR=$CONF_DIR $m 2>&1)
+  check "einzeln: vier Fälle nacheinander" grep -q '^\[4/4\]' <<< "$out"
+  check "Probelauf zeigt den Befehl" grep -q "zfs rename $T/broken" <<< "$(ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$broken" rename --dry-run)"
+  check "Probelauf ändert nichts" exists "$T/broken"
   check "unbekannte Option abgewiesen" not env ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$orphan" rename
+  # je Typ ohne Fragen: Vorschau der ganzen Gruppe
+  out=$(ZSYNC_CONF_DIR=$CONF_DIR $m --decide-type orphan delete --dry-run 2>&1)
+  check "je Typ: Vorschau der Gruppe ($out)" grep -q "delete for all 2 cases of type orphan" <<< "$out"
+  check "je Typ: Platz zusammen" grep -q "together .* used" <<< "$out"
+  check "je Typ: Probelauf ändert nichts" exists "$T/other"
   # während eines Laufs (Sperre der Config) wird nichts ausgeführt
   flock "$conf" sleep 5 & sleep 1
   check "während eines Laufs abgewiesen" not env ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$orphan" keep
   wait
-  check "verwaistes Replikat behalten" env ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$orphan" keep
-  equal "Markierung gesetzt" keep "$(prop "$ZCI_POOL_DST/maintenance/$ZCI_POOL_SRC/gone" bashclub:zsync-orphan)"
-  check "gerissene Kette umbenannt" env ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$broken" rename
-  check "altes Replikat bleibt erhalten" exists "$ZCI_POOL_DST/maintenance/$ZCI_POOL_SRC/broken.broken-$(date +%Y-%m-%d)"
-  check "Altlast gelöscht" env ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$left" delete
-  check "Altlast weg" not exists "$ZCI_POOL_DST/maintenance/$ZCI_POOL_SRC/data@zfs-auto-snap_backup-2026-01-01-0000"
+  # je Typ im geführten Modus: orphan behalten (beide), broken umbenennen, Altlast löschen
+  out=$(printf '2\n1\ny\n1\ny\n1\ny\n' | ZSYNC_CONF_DIR=$CONF_DIR $m 2>&1); echo "$out" >> "$log"
+  equal "orphan behalten: Markierung" keep "$(prop "$T/gone" bashclub:zsync-orphan)"
+  equal "orphan behalten: auch das zweite" keep "$(prop "$T/other" bashclub:zsync-orphan)"
+  check "gerissene Kette umbenannt" exists "$T/broken.broken-$(date +%Y-%m-%d)"
+  equal "umbenannte Kette ohne Markierung" "" "$(zfs get -H -o value -s local bashclub:zsync-case "$T/broken.broken-$(date +%Y-%m-%d)")"
+  check "Altlast weg" not exists "$T/data@zfs-auto-snap_backup-2026-01-01-0000"
+  equal "Altlast: Markierung entfernt" "" "$(zfs get -H -o value -s local bashclub:zsync-case "$T/data")"
   equal "keine offenen Fälle mehr" "no open cases" "$(ZSYNC_CONF_DIR=$CONF_DIR $m --list)"
-  check "Entscheidungen protokolliert" test "$(grep -c "case \($orphan\|$broken\|$left\)" "$mlog")" -ge 3
+  check "Entscheidungen einzeln protokolliert" test "$(grep -c "case \($orphan\|$broken\|$left\)" "$mlog")" -ge 3
+  # die Quelle löscht die Altlast auch (sonst käme sie mit dem nächsten Delta wieder)
+  zfs destroy "$ZCI_POOL_SRC/data@zfs-auto-snap_backup-2026-01-01-0000"
   zsync
-  check "nächster Lauf repliziert die umbenannte Kette neu" exists "$ZCI_POOL_DST/maintenance/$ZCI_POOL_SRC/broken@zfs-auto-snap_daily-02"
+  check "nächster Lauf repliziert die umbenannte Kette neu" exists "$T/broken@zfs-auto-snap_daily-02"
+  equal "behaltenes Replikat: Markierung vom Lauf entfernt" "" "$(zfs get -H -o value -s local bashclub:zsync-case "$T/gone")"
+  equal "Altlast: nach dem Lauf ohne Markierung" "" "$(zfs get -H -o value -s local bashclub:zsync-case "$T/data")"
 }
 # Anzahl am Backupserver je Label (snapshot_filter="daily=3"): unabhängig davon, was die Quelle löscht; daily ohne Zahl
 # folgt der Quelle wie bisher
@@ -1264,9 +1287,12 @@ case_result_busy() {
 all_cases=(replication engine_internal rotation refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_server hooks result_busy)
 cases=("${@:-${all_cases[@]}}")
 safety
-# ein Lauf zur Zeit (CI und remote.sh teilen sich Platten und Pools): ein zweiter wartet
-exec 9> /run/lock/zsync-ci.lock
-flock 9 || { echo "Sperre /run/lock/zsync-ci.lock nicht erhalten"; exit 2; }
+# ein Lauf zur Zeit (CI und remote.sh teilen sich Platten, Pools und die installierten Pakete): ein zweiter wartet;
+# ci.sh und remote.sh halten die Sperre schon vor dem Installieren der Pakete (ZCI_LOCK_HELD=1)
+if [[ $ZCI_LOCK_HELD != 1 ]]; then
+  exec 9> /run/lock/zsync-ci.lock
+  flock 9 || { echo "Sperre /run/lock/zsync-ci.lock nicht erhalten"; exit 2; }
+fi
 rm -rf /var/log/zsync-ci
 echo "bashclub-zsync $(dpkg-query -W -f='${Version}' bashclub-zsync 2>/dev/null), $(zfs version | head -1)"
 skipped_cases=()

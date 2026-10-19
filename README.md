@@ -311,11 +311,26 @@ The age of the replicated snapshots per dataset is still checked by checkzfs.
 | snapshots of the label in another name scheme on the target | `delete`, `later` |
 | old chain after a rollback on the source (`<replica>.zsync-branch-<date>`) | `keep` (archive, no warning anymore), `delete` (the replication already continues on the new chain), `later` |
 
-All open cases one after the other:
+`bashclub-zsync` marks each case on the replica during its run (`bashclub:zsync-case=<type>;<since>;<config>;<detail>`) and removes the marking when the case is resolved. The tool reads all cases with one query and reads snapshots only for a decision. Cases of a run before the update appear after the next run of the configuration.
+
+Without parameters it first shows an overview of all open cases:
+- datasets below a case of the same type count with it (`+3 datasets below`): `delete` and `rename` take them along, `keep` is inherited;
+- the number of cases per type.
+
+Then it asks:
+- **all: later** – nothing changes;
+- **per case type** – one option for all cases of a type, with a preview of the whole group (all commands, what `destroy` deletes, the space used), then a confirmation;
+- **one by one** – context, options and preview for each case.
+
 ~~~
 bashclub-zsync-maintenance
 ~~~
-Without questions, e.g. for scripts: `bashclub-zsync-maintenance --list [--tsv]` and `bashclub-zsync-maintenance --decide <case> <option> [--dry-run]`.
+Without questions, e.g. for scripts:
+- `bashclub-zsync-maintenance --list [--tsv]` lists the cases; `--tsv` gives one line per case, also for the datasets below another one.
+- `bashclub-zsync-maintenance --decide <case> <option> [--dry-run]` decides one case.
+- `bashclub-zsync-maintenance --decide-type <type> <option> [--dry-run]` decides all cases of a type.
+
+Each case runs under the lock of its configuration and is logged on its own. A failed case does not stop the group, it stays open.
 
 ### Snapshots to keep on the backup server
 Each label in `snapshot_filter` can have the number of its snapshots that stay on the backup server: `snapshot_filter="hourly=24|daily=30|weekly=8|monthly=12"`. These snapshots are kept whatever happens on the source, so deleting snapshots on the source (also by an attacker) cannot shrink the backup. A label alone or `label=source` keeps the previous behavior: the backup server deletes what the source deleted, at least `min_keep` remain (deprecated, it will be removed in a later version). Existing configurations keep working unchanged; `bashclub-zsync-setup` writes numbers for new ones.

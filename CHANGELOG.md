@@ -7,6 +7,10 @@
 - license: GPL-3.0-or-later instead of MIT from 2.0.0 on (both packages, SPDX headers in all files, DEP-5 copyright file `/usr/share/doc/<package>/copyright` with the MIT notice of the versions up to 1.0.19); contributions with Developer Certificate of Origin (`Signed-off-by`, CONTRIBUTING.md) (#72)
 
 ### Added
+- `bashclub-zsync-maintenance` (#111):
+  - **Overview first:** datasets below a case count with it; the number of cases per type is shown.
+  - **Then:** all later, decide per case type (preview of the whole group with commands, what `destroy` deletes and the space used, then a confirmation) or one by one. `--decide-type <type> <option>` does the same for scripts.
+  - **One query for all cases:** `bashclub-zsync` marks each case on the replica (`bashclub:zsync-case`, written only when a case arises or changes) and removes the marking when it is resolved. The tool reads all cases with one query and reads snapshots only for a decision, so it stays fast with many snapshots.
 - Interface for other tools, e.g. Miyagi (#99).
   - `bashclub-zsync -c <config> --result`: the last run as `key=value` (`format=1`), with state counts, open decisions and interrupted transfers (`resume.<dataset>`), read only from the run status.
   - `bashclub-zsync busy [--wait [<seconds>]]`: is a replication, maintenance action, restore job or removable disk run active.

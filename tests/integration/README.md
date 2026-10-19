@@ -11,6 +11,8 @@ und prüft das Ergebnis am Ziel. Am Ende werden die Pools zerstört.
 | `remote.sh <root@host> [fall …]` | vom Entwicklungsrechner: Paket aus dem Arbeitsstand bauen (nfpm-Container), auf der VM installieren, testen |
 | `ci.sh` | CI-Job auf dem Runner mit Label `zfs`: Paket bauen (nfpm), installieren, testen |
 
+Nur ein Lauf zur Zeit: `run.sh` nimmt die Sperre `/run/lock/zsync-ci.lock`. `ci.sh` und `remote.sh` nehmen sie schon vor dem Installieren der Pakete und reichen sie mit `ZCI_LOCK_HELD=1` weiter, damit kein Lauf mit den Paketen eines anderen Branches testet.
+
 Fälle: `replication` (Dateisystem mit Kind, Volume, raw-verschlüsselt), `engine_internal`, `rotation`,
 `refquota`, `rollback` (neue Kette per Klon, alter Zweig, verschlüsselt, Kind-Datasets, Entscheidung), `broken_chain`, `orphans`, `local_mode`, `bandwidth_lock`, `bookmark` (Anfügen aus dem Bookmark, auch raw-verschlüsselt), `hold` (Basis und geplante Snapshots während des
 Deltas nicht löschbar), `deleted_during` (Snapshot während der Replikation gelöscht), `resume` (abgebrochene Erstreplikation und Delta
