@@ -98,6 +98,13 @@ printf '%s\n' $((T - 9000)) $((T - 550)) $((T - 500)) $((T - 300)) > "$w/lib/$id
 # abgebrochener Lauf
 reset; last 0 $((T - 3600)); history 3600 6; state send $((T - 300)) rpool/data; expect "Prozess weg: WARN abgebrochen" 1 "aborted in phase send \(rpool/data\)"
 proc 100 1 S 999 "bash other"; expect "pid wiederverwendet: WARN abgebrochen" 1 "aborted in phase send"
+# nichts auf der Quelle ausgewählt: Lauf ok, aber WARN; alte .last ohne datasets= bleibt OK
+reset; last 0 $((T - 1800)); history 3600 6; sed -i 's/^datasets=3$/datasets=0/' "$w/lib/$id.last"
+expect "kein Dataset ausgewählt: WARN" 1 "last run selected no dataset on the source \(property bashclub:zsync all or subvols\)"
+reset 'tag=bashclub:zsync-pve1'; last 0 $((T - 1800)); history 3600 6; sed -i 's/^datasets=3$/datasets=0/' "$w/lib/$id.last"
+expect "kein Dataset ausgewählt, eigener tag" 1 "property bashclub:zsync-pve1 all or subvols"
+reset; last 0 $((T - 1800)); history 3600 6; sed -i '/^datasets=/d' "$w/lib/$id.last"
+expect "Status ohne datasets= (vor 2.0): OK" 0 "last successful run 30m ago"
 # Config gelöscht
 reset; last 0 $((T - 60)); rm "$conf"; expect_none "Config gelöscht: kein Service"
 # Zustand pro Dataset (.datasets: Dataset, Zustand, seit, Detail)
