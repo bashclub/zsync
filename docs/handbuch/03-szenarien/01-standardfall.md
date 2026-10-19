@@ -63,8 +63,8 @@ Die Vorschläge:
 | Aufbewahrung hier | `hourly=24\|daily=30\|weekly=8\|monthly=12\|zsync-<backupserver>=14` |
 
 Nach der Zusammenfassung und `y` legt das Setup an:
-- `/etc/bashclub/pve1.conf` mit den Defaults neuer Configs (Engine `internal`, `strict`, Bookmark, Hold, Resume; den
-  Bookmark schaltet Schritt 5 wieder aus)
+- `/etc/bashclub/pve1.conf` mit den Defaults neuer Configs (Engine `internal`, `strict`, Bookmark, Hold, Resume,
+  eingebaute Prüfung der Snapshots)
 - das Target mit `mountpoint=none`
 - den Benutzer `zsync-pve1` mit eigenem Schlüssel und Rechten nur auf das Target
 - auf der Quelle den Benutzer `zsync-<backupserver>-pve1`, eingeschränkt auf die Adresse des Backupservers, die Befehle
@@ -116,7 +116,7 @@ install -d -m 3775 -g bashclub-zsync /var/lib/check_mk_agent/spool
 In Checkmk für den Backupserver die Service-Erkennung
 ausführen und übernehmen:
 - `zsync-pve1 pve1`: der Zustand der Replikation
-- `zsync-pve1:zsync-<backupserver>-pve1@pve1:22#rpool/data/…`: je Dataset Alter und Anzahl der Snapshots (checkzfs)
+- `zsync-pve1:zsync-<backupserver>-pve1@pve1:22#rpool/data/…`: je Dataset Alter und Anzahl der Snapshots
 
 Die Spool-Datei heißt `/var/lib/check_mk_agent/spool/87000_zsync-pve1`.
 
