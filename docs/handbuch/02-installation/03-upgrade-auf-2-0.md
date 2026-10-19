@@ -32,6 +32,7 @@ Auf dem Backupserver:
 | `zfs_auto_snapshot_label_match` | `legacy` | `strict` |
 | `snapshot_filter` | Labels ohne Zahl: der Quelle folgen | feste Anzahl je Label |
 | `source_bookmark`, `source_hold`, `transfer_resume` | `0` | `1` |
+| `monitor_engine` | checkzfs, wenn installiert, sonst `internal` | `internal` |
 | `trigger` | `cron` | `systemd` |
 | `run_as` | root | eigener Benutzer |
 

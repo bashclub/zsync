@@ -43,4 +43,4 @@ bashclub-zsync -c /etc/bashclub/local.conf -s
 Das Log beginnt mit `Local mode: replicating datasets of this host without ssh (source=local)`.
 
 ## Monitoring
-Wie im [Standardfall](01-standardfall.md): Spool auf dem Host, mit eigenem Präfix Service `zsync-local local`. checkzfs vergleicht ohne SSH.
+Wie im [Standardfall](01-standardfall.md): Spool auf dem Host, mit eigenem Präfix Service `zsync-local local`. Die Prüfung je Dataset vergleicht ohne SSH.

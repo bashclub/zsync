@@ -49,9 +49,9 @@ Timer startet keinen zweiten.
 ## Unterbrechungen
 Ab 2.0 setzt `transfer_resume=1` (Default neuer Configs) eine abgebrochene Übertragung im nächsten Lauf fort, statt neu
 zu beginnen. Das zählt vor allem bei der Erstreplikation großer Disks, die über eine langsame Leitung Tage dauern kann.
-`source_bookmark=1` würde die Kette halten, wenn der Backupserver länger nicht repliziert hat, als die Quelle ihre
-Snapshots behält; solange checkzfs das Monitoring macht, bleibt es aus (siehe [Standardfall](01-standardfall.md),
-Schritt 5). Dann die Snapshots auf der Quelle lange genug behalten (`--keep`, Aufbewahrung von `zfs-auto-snapshot`).
+`source_bookmark=1` (Default neuer Configs) hält die Kette, auch wenn der Backupserver länger nicht repliziert hat, als
+die Quelle ihre Snapshots behält. Mit `monitor_engine=checkzfs` bleibt es aus; dann die Snapshots auf der Quelle lange
+genug behalten (`--keep`, Aufbewahrung von `zfs-auto-snapshot`).
 
 ## Erstreplikation vor Ort
 Bei sehr großen Datenmengen die Erstreplikation im LAN machen und den Backupserver danach an den anderen Standort

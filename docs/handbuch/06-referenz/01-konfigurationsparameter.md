@@ -58,7 +58,7 @@ Ein Target gehört genau einer Config. Läuft die Config ohne root, braucht das 
 
 ### `source`
 SSH-Adresse der Quelle: `root@pve1`, `zsync-backup1-pve1@192.0.2.10` oder nur ein Hostname.
-- Ab 2.0: `local` repliziert Pools desselben Hosts ohne SSH. checkzfs läuft dann ebenfalls lokal
+- Ab 2.0: `local` repliziert Pools desselben Hosts ohne SSH. Die Prüfung je Dataset läuft dann ebenfalls lokal
   (`checkzfs_local` gilt als gesetzt).
 - Leer ist ein Fehler: der Lauf endet mit Exit-Code 1 und dem Hinweis auf `source=local`.
 
