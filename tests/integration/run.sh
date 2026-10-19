@@ -71,6 +71,38 @@ case_rotation() {
   equal "min_keep: die neuesten bleiben" "zfs-auto-snap_daily-06 zfs-auto-snap_daily-07 zfs-auto-snap_daily-08" "$(snaps "$ZCI_POOL_DST/rotation/$ZCI_POOL_SRC/data")"
 }
 
+# Basis des Deltas außerhalb des Filters: Wechsel von zas/legacy auf internal/strict und ein aus snapshot_filter
+# gestrichenes Label; der neueste Snapshot des Replikats bleibt die Basis, die neuen Snapshots werden übertragen
+case_engine_switch() {
+  local d="$ZCI_POOL_DST/engine_switch/$ZCI_POOL_SRC/data"
+  zfs create -o com.sun:auto-snapshot=true "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  config engine_switch 'snapshot_filter=""
+zfs_auto_snapshot_keep=3
+zfs_auto_snapshot_engine=zas
+zfs_auto_snapshot_label_match=legacy'
+  zsync
+  equal "zas: Exit-Code" 0 "$rc"
+  check "zas: Snapshot übertragen" grep -q 'zfs-auto-snap_backup-' <<< "$(snaps "$d")"
+  set_conf "$conf" zfs_auto_snapshot_engine internal; set_conf "$conf" zfs_auto_snapshot_label_match strict
+  sleep 61   # eigener Snapshot-Name pro Minute (remote-snapshot-manager)
+  zsync
+  equal "nach dem Wechsel: Exit-Code" 0 "$rc"
+  equal "nach dem Wechsel: neuer Snapshot übertragen" "$(snaps "$ZCI_POOL_SRC/data" | awk '{ print $NF }')" "$(snaps "$d" | awk '{ print $NF }')"
+  check "nach dem Wechsel: Snapshot im Schema internal" grep -qE '^backup-[0-9]{4}-' <<< "$(snaps "$d" | awk '{ print $NF }')"
+  # Label aus snapshot_filter gestrichen, während der neueste Snapshot des Replikats dieses Label trägt
+  set_conf "$conf" zfs_auto_snapshot_keep 0
+  sed -i 's#^snapshot_filter=.*#snapshot_filter="hourly|daily"#' "$conf"
+  snap "$ZCI_POOL_SRC/data" 01
+  sleep 1.05; zfs snapshot "$ZCI_POOL_SRC/data@zfs-auto-snap_hourly-01"
+  zsync
+  equal "hourly als neuester: Exit-Code" 0 "$rc"
+  sed -i 's#^snapshot_filter=.*#snapshot_filter="daily"#' "$conf"
+  snap "$ZCI_POOL_SRC/data" 02
+  zsync
+  equal "Label gestrichen: Exit-Code" 0 "$rc"
+  equal "Label gestrichen: neuer daily übertragen" "zfs-auto-snap_daily-02" "$(snaps "$d" | awk '{ print $NF }')"
+}
+
 # nichts auf der Quelle ausgewählt: Warnung im Log, kein Bash-Fehler, Exit 0, Monitoring WARN
 case_nothing_selected() {
   zfs create "$ZCI_POOL_SRC/data"
@@ -1318,7 +1350,7 @@ case_result_busy() {
   rm -f $lockconf
 }
 
-all_cases=(replication engine_internal rotation nothing_selected refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_server hooks result_busy)
+all_cases=(replication engine_internal engine_switch rotation nothing_selected refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_server hooks result_busy)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten, Pools und die installierten Pakete): ein zweiter wartet;
