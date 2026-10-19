@@ -27,8 +27,8 @@ bashclub-zsync-setup --source "$source" --port 2222 --schedule "0 22 * * *" "$(e
 neu anlegen wie in [Betrieb ohne root](../02-installation/05-betrieb-ohne-root.md), Schritt 3. Bei dynamischen Adressen
 besser ein VPN mit fester Adresse.
 
-Danach wie im [Standardfall](01-standardfall.md), Schritt 5 und 6: eigenes `checkzfs_prefix` setzen, dann den ersten
-Lauf starten.
+Danach wie im [Standardfall](01-standardfall.md), Schritt 5 und 6: Monitoring vorbereiten (eigenes `checkzfs_prefix`,
+`source_bookmark=0`), dann den ersten Lauf starten.
 
 ## Bandbreite begrenzen
 Ab 2.0. `pv` auf dem Backupserver installieren und das Limit in die Config schreiben, hier 10 MiB/s (etwa 84 Mbit/s):
@@ -48,8 +48,9 @@ Timer startet keinen zweiten.
 ## Unterbrechungen
 Ab 2.0 setzt `transfer_resume=1` (Default neuer Configs) eine abgebrochene Übertragung im nächsten Lauf fort, statt neu
 zu beginnen. Das zählt vor allem bei der Erstreplikation großer Disks, die über eine langsame Leitung Tage dauern kann.
-`source_bookmark=1` (ebenfalls Default) hält die Kette, wenn der Backupserver länger nicht repliziert hat, als die
-Quelle ihre Snapshots behält.
+`source_bookmark=1` würde die Kette halten, wenn der Backupserver länger nicht repliziert hat, als die Quelle ihre
+Snapshots behält; solange checkzfs das Monitoring macht, bleibt es aus (siehe [Standardfall](01-standardfall.md),
+Schritt 5). Dann die Snapshots auf der Quelle lange genug behalten (`--keep`, Aufbewahrung von `zfs-auto-snapshot`).
 
 ## Erstreplikation vor Ort
 Bei sehr großen Datenmengen die Erstreplikation im LAN machen und den Backupserver danach an den anderen Standort

@@ -24,6 +24,13 @@ Replikation selbst:
 
 Zu jedem Zustand nennt der Service die Ursache und, wo nötig, die Entscheidung in `bashclub-zsync-maintenance`.
 
+:::warning
+**checkzfs und Bookmarks:** checkzfs (bis Version 4.14) bricht ab, sobald auf der Quelle oder dem Backupserver ein
+Bookmark existiert (`'NoneType' object has no attribute 'add_snapshot'`). Dann fehlen alle checkzfs-Services; der
+Service der Config meldet weiter. Solange checkzfs das Monitoring macht, `source_bookmark=0` setzen. Neue Configs aus
+dem Setup haben `source_bookmark=1`. Eine eigene Prüfung in zsync, die checkzfs ersetzt, ist geplant.
+:::
+
 ## Der Spool: Meldung zum Ende des Laufs
 zsync schreibt beides in eine Datei im Spool des Checkmk-Agenten: `/var/lib/check_mk_agent/spool/87000_zsync` (aus
 `checkzfs_spool_maxage` und `checkzfs_prefix`). Der Agent liefert sie bei jeder Abfrage mit aus, solange sie jünger

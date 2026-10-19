@@ -31,10 +31,12 @@ von root, weil `zsync-autorun` als root läuft.
 Eigenes Label je Platte (`zsync-usb-backup1`): Bei mehreren Platten im Wechsel löscht die Rotation der einen Platte
 sonst die Snapshots, auf denen die andere aufsetzt.
 
-Eigenes Präfix für das Monitoring, wie für jede Replikation:
+Monitoring vorbereiten, wie für jede Replikation (eigenes Präfix, ohne Bookmarks für checkzfs; siehe
+[Standardfall](01-standardfall.md), Schritt 5):
 ```bash
 label=usb-backup1
 sed -i "s/^checkzfs_prefix=.*/checkzfs_prefix=zsync-$label/" "/etc/bashclub/$label.conf"
+sed -i "s/^source_bookmark=.*/source_bookmark=0/" "/etc/bashclub/$label.conf"
 ```
 
 ## 2. Platte vorbereiten
@@ -73,8 +75,8 @@ Nach der Mail kann die Platte abgezogen werden. Für die Mail braucht der Host e
 
 ## Mehrere Platten im Wechsel
 Für jede Platte Schritt 1 und 2 mit eigenem Namen (`usb-backup1`, `usb-backup2`, …). Jede hat ihre Config, ihr Label und
-ihre Replikate. Mit Bookmarks (Default neuer Configs) geht die Replikation auch nach Wochen außer Haus ohne
-Erstreplikation weiter, wenn die Quelle die Snapshots inzwischen gelöscht hat.
+ihre Replikate. Die Snapshots ihres Labels legt und löscht nur der Lauf dieser Platte; der letzte übertragene bleibt
+deshalb auf der Quelle, bis die Platte wiederkommt, auch nach Wochen außer Haus. Bookmarks braucht es dafür nicht.
 
 ## Monitoring
 Configs mit `trigger=autorun` haben keine Altersprüfung, weil niemand weiß, wann die Platte wieder kommt. Soll Checkmk

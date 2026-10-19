@@ -40,15 +40,16 @@ bashclub-zsync-setup --source "$source" --tag bashclub:zsync-offsite --keep 0 --
   (`zsync-backup1`, wenn es auf `backup1` eingerichtet wurde). Die Zahlen bestimmen, wie lange `backup2` sie behält,
   hier länger als `backup1`.
 
-Danach wie im [Standardfall](01-standardfall.md), Schritt 5 und 6: eigenes `checkzfs_prefix` setzen, dann den ersten
-Lauf starten.
+Danach wie im [Standardfall](01-standardfall.md), Schritt 5 und 6: Monitoring vorbereiten (eigenes `checkzfs_prefix`,
+`source_bookmark=0`), dann den ersten Lauf starten.
 
 Die Replikate auf `backup2` heißen `<target>/<target von backup1>/rpool/data/…`, z. B.
 `backup/zsync/backup1/backup/zsync/pve1/rpool/data/vm-100-disk-0`.
 
 ## Was zu beachten ist
 - **Rotation:** `backup2` bekommt nur Snapshots, die es auf `backup1` gibt, solange es sie gibt. Läuft `backup2` seltener,
-  als `backup1` die Snapshots behält, reißt die Kette; Bookmarks (Default neuer Configs) helfen dann.
+  als `backup1` die Snapshots behält, reißt die Kette. Bookmarks würden helfen, bleiben aber aus, solange checkzfs das
+  Monitoring macht.
 - **Holds:** Während `backup2` überträgt, hält es die Snapshots auf `backup1`. Will die Rotation auf `backup1` einen davon
   löschen, scheitert das mit `dataset is busy` und gelingt im nächsten Lauf.
 - **Zeitplan:** `backup2` am besten zeitversetzt nach `backup1`, z. B. nachts.

@@ -42,7 +42,8 @@ bashclub-zsync-setup --source "$source" --external "$source"
 ```
 Ausgabe am Ende, z. B.: `runuser -u zsync-pve1 -- bashclub-zsync -c /etc/bashclub/pve1.conf`.
 
-Eigenes `checkzfs_prefix` wie im [Standardfall](01-standardfall.md), Schritt 5.
+Monitoring vorbereiten wie im [Standardfall](01-standardfall.md), Schritt 5 (eigenes `checkzfs_prefix`,
+`source_bookmark=0`).
 
 ## Ausschalten erst, wenn nichts mehr läuft
 Ab 2.0 zeigt `bashclub-zsync busy`, ob noch eine Replikation, eine Wartungsaktion, ein Restore-Job oder ein
