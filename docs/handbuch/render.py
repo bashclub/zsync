@@ -1,0 +1,113 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+"""Prepare the handbook articles for Outline (Git is the source, Outline only shows them).
+
+  render.py list                         all articles in order: file, parent, title, Outline address
+  render.py render <file> [--allow-missing]
+                                         the text for Outline: without header, links to other articles
+                                         as Outline addresses, a note on the source file at the end
+"""
+import os
+import re
+import sys
+
+ROOT = os.path.dirname(os.path.abspath(__file__))
+REPO_URL = "https://code.bashclub.org/bashclub/zsync/src/branch/main/docs/handbuch/"
+LINK = re.compile(r"\]\((?!https?://|#|mailto:)([^)#\s]+\.md)(#[^)\s]*)?\)")
+
+
+def read(path):
+    """header (dict) and text of an article"""
+    with open(path, encoding="utf-8") as f:
+        content = f.read()
+    m = re.match(r"---\n(.*?)\n---\n", content, re.S)
+    if not m:
+        sys.exit(f"{path}: no header (--- title: … ---)")
+    head = {}
+    for line in m.group(1).splitlines():
+        key, _, value = line.partition(":")
+        head[key.strip()] = value.strip()
+    if not head.get("title"):
+        sys.exit(f"{path}: no title")
+    return head, content[m.end():].lstrip("\n")
+
+
+def articles():
+    """(path, parent path or None) in the order of Outline"""
+    result = []
+    for section in sorted(d for d in os.listdir(ROOT) if re.match(r"\d+-", d) and os.path.isdir(os.path.join(ROOT, d))):
+        index = os.path.join(ROOT, section, "_index.md")
+        if not os.path.isfile(index):
+            sys.exit(f"{section}: no _index.md")
+        result.append((index, None))
+        for name in sorted(n for n in os.listdir(os.path.join(ROOT, section)) if re.match(r"\d+-.*\.md$", n)):
+            result.append((os.path.join(ROOT, section, name), index))
+    return result
+
+
+def rel(path):
+    return os.path.relpath(path, ROOT)
+
+
+BLOCK_START = re.compile(r"\s*([-*+] |\d+\. |\||#|:::|>|```|---$)")
+
+
+def unwrap(text):
+    """join the lines of a paragraph or list item wrapped in the source (Outline would keep the line breaks)"""
+    out = []
+    fence = False
+    for line in text.split("\n"):
+        if line.lstrip().startswith("```"):
+            fence = not fence
+            out.append(line)
+            continue
+        prev = out[-1] if out else ""
+        if (not fence and line.strip() and prev.strip() and not BLOCK_START.match(line)
+                and not re.match(r"\s*(\||#|:::|```|---$)", prev)):
+            out[-1] = prev.rstrip() + " " + line.strip()
+        else:
+            out.append(line)
+    return "\n".join(out)
+
+
+def render(path, allow_missing):
+    head, text = read(path)
+    if re.match(r"# ", text):
+        sys.exit(f"{rel(path)}: the text must not start with a heading of the first level, Outline shows the title")
+    missing = []
+
+    def link(m):
+        target = os.path.normpath(os.path.join(os.path.dirname(path), m.group(1)))
+        if not os.path.isfile(target):
+            sys.exit(f"{rel(path)}: link to a missing file {m.group(1)}")
+        url = read(target)[0].get("outline", "")
+        if not url:
+            missing.append(rel(target))
+            return "]()"
+        # anchors in Outline: h-<heading as in the source>
+        anchor = "#h-" + m.group(2)[1:] if m.group(2) else ""
+        return f"]({url}{anchor})"
+
+    text = LINK.sub(link, unwrap(text))
+    if missing and not allow_missing:
+        sys.exit(f"{rel(path)}: links to articles that are not published yet: {', '.join(sorted(set(missing)))}")
+    # links whose target is not published yet: only the text stays
+    text = re.sub(r"\[([^\]]*)\]\(\)", r"\1", text)
+    note = (f"\n\n---\n\n*Quelle dieser Seite: [{rel(path)}]({REPO_URL}{rel(path)}) im Repository von bashclub-zsync. "
+            "Änderungen bitte dort, diese Seite wird daraus erzeugt.*\n")
+    return text.rstrip("\n") + note
+
+
+def main():
+    if len(sys.argv) >= 2 and sys.argv[1] == "list":
+        for path, parent in articles():
+            head = read(path)[0]
+            print("\t".join([rel(path), rel(parent) if parent else "-", head["title"], head.get("outline") or "-"]))
+    elif len(sys.argv) >= 3 and sys.argv[1] == "render":
+        sys.stdout.write(render(os.path.abspath(sys.argv[2]), "--allow-missing" in sys.argv[3:]))
+    else:
+        sys.exit(__doc__)
+
+
+if __name__ == "__main__":
+    main()
