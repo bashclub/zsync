@@ -11,9 +11,10 @@ exec 9> /run/lock/zsync-ci.lock
 flock 9
 export ZCI_LOCK_HELD=1
 dpkg -i dist/*.deb > /dev/null
-# Tests ohne ZFS: command=-Wrapper und Checkmk-Check
+# Tests ohne ZFS: command=-Wrapper, Checkmk-Check, Vollständigkeit der Referenz im Handbuch
 tests/remote.sh | tail -1
 tests/restore-remote.sh | tail -1
 tests/schedule.sh | tail -1
 tests/checkmk.sh | tail -1
+tests/handbuch.sh | tail -1
 tests/integration/run.sh
