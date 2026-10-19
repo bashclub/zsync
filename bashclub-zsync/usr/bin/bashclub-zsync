@@ -1194,7 +1194,10 @@ for name in "${syncvols[@]}"; do
                     zfs set canmount=noauto $target/$name
                 fi
                 if [[ -z $delta_snaps ]]; then
-                    delta_snaps=$(grep -E "$snapshot_regex" <<< "$source_snaps" | grep --after-context=200 $guid | grep -v $guid | cut -f1)
+                    # all source snapshots after the base (by guid), then the filter: the base itself may not match it
+                    # (a label removed from snapshot_filter, or an engine switch to strict), it is still the base
+                    delta_snaps=$(awk -F'\t' -v g="$guid" 'found { print } $2 == g { found = 1 }' <<< "$source_snaps" \
+                        | grep -E "$snapshot_regex" | head -n 200 | cut -f1)
                 fi
                 # base and all snapshots still to be sent stay on the source until this dataset is done
                 hold_snaps "$last" $delta_snaps
