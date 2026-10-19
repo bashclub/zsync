@@ -38,6 +38,10 @@ Alle Fälle können auch warten. Solange sie offen sind, warnt Checkmk.
 Der Backupserver meldet sich an der Quelle an, nie umgekehrt (siehe [Architektur](02-architektur.md)). Auf der Quelle
 liegt kein Schlüssel, der zum Backupserver führt.
 
+Bei lokaler Replikation liegen Quelle und Replikate auf demselben Host. Wer ihn übernimmt, erreicht beide. Schutz
+bietet dort ein Wechseldatenträger, der nur während des Laufs angeschlossen ist, oder zusätzlich eine entfernte
+Replikation auf einen zweiten Host.
+
 ## Betrieb ohne root
 Ab 2.0 braucht zsync root weder auf dem Backupserver noch auf der Quelle. Jeder Benutzer bekommt nur die ZFS-Rechte,
 die er braucht (`zfs allow`).

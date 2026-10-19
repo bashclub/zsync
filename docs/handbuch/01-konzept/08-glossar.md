@@ -4,8 +4,8 @@ audience: Anwender, Admin
 outline: https://docs.bashclub.org/doc/glossar-EldhNCFEHV
 outline_id: 88e2c31f-cf26-4a68-8e83-59a7f93945b8
 ---
-**Backupserver** – der Host, auf dem `bashclub-zsync` läuft und die Replikate liegen. Er holt die Daten von der
-Quelle ab.
+**Backupserver** – der Host, auf dem `bashclub-zsync` läuft und die Replikate liegen. Bei einer entfernten Quelle holt
+er die Daten per SSH ab; bei lokaler Replikation ist er zugleich die Quelle.
 
 **Bookmark** – Lesezeichen auf einen Snapshot ohne Daten. Ab 2.0 setzt zsync einen auf der Quelle, damit die
 Replikation auch dann weitergeht, wenn der Snapshot dort schon gelöscht ist.
@@ -17,7 +17,7 @@ Target, Auswahl, Aufbewahrung, Monitoring.
 **Dataset** – ein ZFS-Dateisystem oder -Volume, z. B. die Disk einer VM (`rpool/data/vm-100-disk-0`).
 
 **Engine** – das Werkzeug, das die Snapshots von zsync anlegt: `internal` (`remote-snapshot-manager`) oder `zas`
-(`zfs-auto-snapshot`). Siehe [Snapshots und Aufbewahrung](05-snapshots-und-aufbewahrung.md).
+(`zfs-auto-snapshot`), eingestellt mit `zfs_auto_snapshot_engine`. Siehe [Snapshots und Aufbewahrung](05-snapshots-und-aufbewahrung.md).
 
 **Erstreplikation** – die erste, vollständige Übertragung eines Datasets.
 
@@ -29,6 +29,9 @@ inkrementelle Übertragung.
 **Hold** – Sperre gegen das Löschen eines Snapshots. Ab 2.0 hält zsync die Snapshots, die es gerade überträgt.
 
 **Hook** – eigenes Skript, das ab 2.0 vor oder nach einem Lauf startet (`/etc/bashclub/hooks.d/`).
+
+**internal** – Wert von `zfs_auto_snapshot_engine` für die Engine `remote-snapshot-manager`, die zsync mitbringt.
+Siehe Engine.
 
 **Job-Benutzer** – ab 2.0 ein eigener Benutzer je Replikation: `zsync-<name>` auf dem Backupserver,
 `zsync-<backupserver>-<name>` auf der Quelle. Er hat nur die Rechte, die diese Replikation braucht.
@@ -45,7 +48,8 @@ Snapshot mehr haben, und **in Gefahr**, wenn die nächste Rotation auf der Quell
 
 **Pull** – der Backupserver holt die Daten ab. Gegenteil: Push, die Quelle liefert. zsync repliziert nur per Pull.
 
-**Quelle** – der Host, dessen Datasets gesichert werden, z. B. ein Proxmox-Server.
+**Quelle** – der Host, dessen Datasets gesichert werden, z. B. ein Proxmox-Server. Bei lokaler Replikation ist es derselbe
+Host wie der Backupserver.
 
 **Replikat** – die Kopie eines Datasets auf dem Backupserver, unter dem Target, z. B.
 `backup/pve1/rpool/data/vm-100-disk-0`.
@@ -69,3 +73,8 @@ Siehe [Auswahl der Datasets](04-auswahl-der-datasets.md).
 
 **Verwaistes Replikat** – Replikat, dessen Dataset es auf der Quelle nicht mehr gibt oder das nicht mehr ausgewählt
 ist. Es wird nie automatisch gelöscht.
+
+**Wechseldatenträger** – Platte, die nur zur Replikation angeschlossen wird; `zsync-autorun` repliziert beim Anschließen,
+exportiert den Pool und schaltet die Platte ab.
+
+**zas** – Wert von `zfs_auto_snapshot_engine` für die Engine `zfs-auto-snapshot` auf der Quelle. Siehe Engine.

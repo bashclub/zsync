@@ -17,7 +17,9 @@ Es gibt zwei Wege, die sich kombinieren lassen:
   Das Label wird automatisch mit übertragen.
 
 ## Snapshot-Engines
-Die Snapshots von zsync legt eine von zwei Engines an (`zfs_auto_snapshot_engine`):
+Die Snapshots von zsync legt eine von zwei Engines an (`zfs_auto_snapshot_engine`). `zas` steht für
+`zfs-auto-snapshot`: zsync ruft dieses Programm auf der Quelle auf. `internal` ist der `remote-snapshot-manager`, den
+zsync mitbringt.
 
 | Engine | Wo sie läuft | Name der Snapshots |
 |---|---|---|
