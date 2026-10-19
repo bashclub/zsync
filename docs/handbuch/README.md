@@ -1,7 +1,8 @@
 # Handbuch bashclub-zsync: Regeln für Autoren
 
 Das Handbuch entsteht hier im Repo und wird nach Outline veröffentlicht:
-https://docs.bashclub.org/collection/bashclub-zsync-MKfiJIBPou
+- öffentlich, ohne Login: https://docs.bashclub.org/s/bashclub-zsync
+- mit Login (für Autoren beim Veröffentlichen): https://docs.bashclub.org/collection/bashclub-zsync-MKfiJIBPou
 
 **Git ist die Quelle.** Änderungen direkt in Outline werden beim nächsten Veröffentlichen überschrieben. Jede Seite
 in Outline endet mit einem Link auf ihre Datei hier.
