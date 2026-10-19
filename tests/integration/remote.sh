@@ -16,4 +16,5 @@ done
 ssh "$host" 'rm -rf /root/zsync-ci && mkdir -p /root/zsync-ci'
 scp -q "$dist"/*.deb "$host":/root/zsync-ci/
 scp -qr "$repo/tests/integration" "$host":/root/zsync-ci/
-ssh "$host" "dpkg -i /root/zsync-ci/*.deb > /dev/null && /root/zsync-ci/integration/run.sh $*"
+# Sperre vor dem Installieren: ein laufender CI-Job testet sonst mit diesen Paketen
+ssh "$host" "exec 9> /run/lock/zsync-ci.lock; flock 9; export ZCI_LOCK_HELD=1; dpkg -i /root/zsync-ci/*.deb > /dev/null && /root/zsync-ci/integration/run.sh $*"

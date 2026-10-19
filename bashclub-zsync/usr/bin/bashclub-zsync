@@ -351,7 +351,8 @@ function finish_status() {
     if [ $code -eq 0 ]; then
         prev[ok_start]=$run_start; prev[ok_end]=$end; prev[ok_duration]=$((end - run_start))
     fi
-    printf 'config=%s\nstart=%s\nend=%s\nduration=%s\nrc=%s\ndatasets=%s\ndatasets_failed=%s\nok_start=%s\nok_end=%s\nok_duration=%s\n' \
+    # marks=1: this version marks open decisions on the replicas (bashclub-zsync-maintenance)
+    printf 'config=%s\nstart=%s\nend=%s\nduration=%s\nrc=%s\ndatasets=%s\ndatasets_failed=%s\nok_start=%s\nok_end=%s\nok_duration=%s\nmarks=1\n' \
         "$conf_path" $run_start $end $((end - run_start)) $code $datasets_total $datasets_failed \
         "${prev[ok_start]}" "${prev[ok_end]}" "${prev[ok_duration]}" > "$status_lib.last.tmp" \
         && mv -f "$status_lib.last.tmp" "$status_lib.last"
@@ -959,7 +960,7 @@ function label_leftovers() {
 # state of each dataset for the monitoring (written to <config>.datasets):
 # ok, branched, cleanup_blocked, failed, at_risk, diverged, broken, empty, no_snapshots, orphan_missing, orphan_unselected,
 # orphan_kept, branch (old chain after a rollback on the source), branch_kept
-declare -A ds_state ds_detail
+declare -A ds_state ds_detail ds_leftovers
 
 # fix for a target without a usable snapshot: keep the old replica under a new name, the next run replicates again
 # newest target snapshot missing on the source (rollback there, or its newest snapshots deleted): the replication
@@ -1310,6 +1311,7 @@ for name in "${syncvols[@]}"; do
         if [ $zfs_auto_snapshot_keep -gt 1 ]; then
             leftovers=$(zfs list -H -o name -t snapshot $target/$name 2>/dev/null | label_leftovers)
             if [[ -n $leftovers ]]; then
+                ds_leftovers[$name]=$(grep -c . <<< "$leftovers")
                 log "[WARN] $name - snapshots on the target contain the label $zfs_auto_snapshot_label, but do not match the name scheme of the snapshot engine $zfs_auto_snapshot_engine. They are not deleted by zsync in strict mode, check and delete them if they are no longer needed:\n$(sed 's/^/\t/' <<< "$leftovers")"
             fi
         fi
@@ -1383,6 +1385,33 @@ if [[ -n $status_file ]]; then
         printf '%s\t%s\t%s\t%s\n' "$n" "${ds_state[$n]}" "${since["$n|${ds_state[$n]}"]:-$run_start}" "${ds_detail[$n]}"
     done | sort > "$status_lib.datasets.tmp" && mv -f "$status_lib.datasets.tmp" "$status_lib.datasets"
 fi
+
+#### open decisions for bashclub-zsync-maintenance as user property of the replica, so it reads all of them with one
+# query: bashclub:zsync-case=<type>;<since>;<config>;<detail>; written only when a case arises or changes its type,
+# removed when the case is resolved; datasets this run did not evaluate keep their marking
+declare -A case_now=()
+while IFS=$'\t' read -r n v; do
+    if [[ -n $n ]]; then case_now[$n]=$v; fi
+done <<< "$(zfs get -H -o name,value -s local -r -t filesystem,volume bashclub:zsync-case $target 2>/dev/null)"
+for n in "${!ds_state[@]}"; do
+    replica=$target/$n
+    case ${ds_state[$n]} in
+        orphan_missing|orphan_unselected) case_type=orphan ;;
+        broken|empty) case_type=broken ;;
+        branch) case_type=branch ;;
+        *) if [[ -n ${ds_leftovers[$n]} ]]; then case_type=leftovers; else case_type=; fi ;;
+    esac
+    old=${case_now[$replica]}
+    if [[ -z $case_type ]]; then
+        if [[ -n $old ]]; then zfs inherit bashclub:zsync-case "$replica" 2>/dev/null; fi
+        continue
+    fi
+    if [[ ${old%%;*} == "$case_type" ]]; then continue; fi
+    if [[ $case_type == leftovers ]]; then detail="${ds_leftovers[$n]} snapshots of the label in another name scheme"
+    else detail=${ds_detail[$n]}; fi
+    zfs set "bashclub:zsync-case=$case_type;$(date +%s);$conf_path;${detail//;/,}" "$replica" 2>/dev/null \
+        || log "[WARN] marking the open decision on $replica failed (bashclub:zsync-case), bashclub-zsync-maintenance does not show it."
+done
 
 #### monitoring: checkzfs at the end of the run, its output goes with the state into the spool file (on_exit)
 if [ $checkzfs_disabled -eq 0 ]; then
