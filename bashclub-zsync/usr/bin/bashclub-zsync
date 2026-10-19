@@ -216,6 +216,15 @@ if [ $status_mode -eq 1 ] && [ $conf_given -eq 0 ]; then
     exit $worst
 fi
 
+# -s as root for a configuration that runs as another user (run_as): as this user, with its key for the source and
+# its run status; as root the source refuses the key of root, and a spool file of root blocks the next run of the user
+if [ $status_mode -eq 1 ] && [ "$(id -u)" -eq 0 ] && [[ -f $conf ]]; then
+    owner=$(sed -n 's/^[[:space:]]*run_as=//p' "$conf" 2>/dev/null | tail -1 | tr -d "\"'" | cut -d' ' -f1)
+    if [[ -n $owner ]] && [[ $owner != root ]] && id -u "$owner" > /dev/null 2>&1; then
+        exec runuser -u "$owner" -- "$BASH" "$0" ${debug:+-d} -c "$conf" -s ${1:+"$1"}
+    fi
+fi
+
 function log() {
     # status mode (-s): only warnings and errors, on stderr (stdout is the state)
     if [ $status_mode -eq 1 ]; then
