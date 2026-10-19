@@ -1,6 +1,8 @@
 # zsync
 
 > Development takes place at https://code.bashclub.org/bashclub/zsync
+>
+> Handbook (German, no login required): https://docs.bashclub.org/s/bashclub-zsync
 
 ZFS replication script by Thorsten Spille <thorsten@spille-edv.de>
 - replicates ZFS filesystems/volumes with user parameter bashclub:zsync (or custom name) configured
