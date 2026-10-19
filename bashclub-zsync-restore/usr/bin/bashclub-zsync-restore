@@ -862,6 +862,11 @@ function cmd_run() {
     trap 'st_phase=stopped; st_error="stopped"; release_held; state_write; log "stopped"; exit 143' TERM INT
     trap 'release_held' EXIT
     log "restore job $id ($job_mode, $direction${login:+ $login}), ${#items[@]} datasets"
+    # no shutdown or sleep in the middle of a restore (root can override it, a tool asks "bashclub-zsync busy")
+    if [ -d /run/systemd/system ] && command -v systemd-inhibit > /dev/null; then
+        systemd-inhibit --what=shutdown:sleep --mode=block --who=bashclub-zsync-restore --why="restore job $id" \
+            tail --pid=$$ -f /dev/null > /dev/null 2>&1 &
+    fi
     connect
     [[ -n $job_bwlimit ]] && ! command -v pv > /dev/null && log "WARN pv is not installed, transfer without bandwidth limit"
     # reattach on this host (push, local): no run of the configuration at the same time

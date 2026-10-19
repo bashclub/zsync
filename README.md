@@ -333,6 +333,19 @@ restored=rpool/data
 zfs get -H -o name,property,value -s local -r all "$restored" | awk -F'\t' '$2 ~ /^bashclub:zsync-source\./ && $3 ~ /^local:/ { sub(/^bashclub:zsync-source\./, "", $2); sub(/^local:/, "", $3); printf "zfs set \"%s=%s\" %s\n", $2, $3, $1 }'
 ~~~
 
+### Result, busy and shutdown protection (for other tools)
+For a tool that starts the backup server, runs the replication and shuts it down again (e.g. Miyagi):
+- **`bashclub-zsync -c <config> --result`** prints the last run as `key=value`, one value per line. The first line is the version of the format (`format=1`), so new keys can be added without breaking a script.
+  - Keys: `running`, `rc`, `start`, `end`, `duration`, `datasets`, `datasets_failed`, `ok_start`/`ok_end`/`ok_duration` (last successful run), `state.<state>=<count>` (states of the datasets as in the Checkmk check), `decisions` (open cases of `bashclub-zsync-maintenance`).
+  - `resume_datasets` and `resume.<dataset>=1` list transfers that were interrupted and continue in the next run.
+  - It reads only the run status: nothing is run, the source is not asked, unknown values are left out.
+- **`bashclub-zsync busy`** checks whether anything is active: a replication, a maintenance action, a restore job or a removable disk. Exit code 0 means nothing is active; 1 means something is active, and it is listed. `bashclub-zsync busy --wait [<seconds>]` waits until nothing is active (with seconds: at most that long, then exit code 1).
+- **Shutdown protection:** while a run or a restore job is active, a systemd inhibitor blocks shutdown and sleep (`systemd-inhibit --list`). root can override it, so a tool should ask `busy` before it shuts down. A job user without the polkit right gets no inhibitor; the run goes on.
+
+~~~
+bashclub-zsync -c /etc/bashclub/zsync.conf && bashclub-zsync busy --wait 3600 && poweroff
+~~~
+
 ### Hooks before and after a run
 Own steps before and after the replication (e.g. for a tool like Miyagi, or a notification), without changing bashclub-zsync. They run inside the lock of the run, as the user of the run, in lexical order:
 - `/etc/bashclub/hooks.d/pre-run/` and `/etc/bashclub/hooks.d/post-run/` for all configurations;

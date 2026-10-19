@@ -7,6 +7,10 @@
 - license: GPL-3.0-or-later instead of MIT from 2.0.0 on (both packages, SPDX headers in all files, DEP-5 copyright file `/usr/share/doc/<package>/copyright` with the MIT notice of the versions up to 1.0.19); contributions with Developer Certificate of Origin (`Signed-off-by`, CONTRIBUTING.md) (#72)
 
 ### Added
+- Interface for other tools, e.g. Miyagi (#99).
+  - `bashclub-zsync -c <config> --result`: the last run as `key=value` (`format=1`), with state counts, open decisions and interrupted transfers (`resume.<dataset>`), read only from the run status.
+  - `bashclub-zsync busy [--wait [<seconds>]]`: is a replication, maintenance action, restore job or removable disk run active.
+  - A systemd inhibitor against shutdown and sleep while a run or a restore job is active.
 - Hooks before and after a run (#100).
   - Executable files in `/etc/bashclub/hooks.d/{pre-run,post-run}/` (all configurations) and `/etc/bashclub/hooks.d/<config>/{pre-run,post-run}/`, run inside the lock in lexical order; only files and folders of root that only root may write.
   - The environment has the configuration, target, source, exit code and duration; the output goes into the log.
