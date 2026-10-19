@@ -1,7 +1,8 @@
 ---
 title: Umzug von Replikaten auf einen anderen Pool
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/umzug-von-replikaten-auf-einen-anderen-pool-1eJEhF0iBe
+outline_id: b95ba30b-caa4-4e28-88b9-bb0a0cfd419c
 ---
 Die Replikate einer Config ziehen mit allen Snapshots in ein neues Target um, auf einen anderen Pool desselben
 Backupservers oder auf einen neuen Backupserver. Die Kette mit der Quelle bleibt erhalten: Danach überträgt zsync wie

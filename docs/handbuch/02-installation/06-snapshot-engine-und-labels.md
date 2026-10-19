@@ -1,7 +1,8 @@
 ---
 title: Snapshot-Engine und Label-Abgleich
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/snapshot-engine-und-label-abgleich-sQ7STeuNPa
+outline_id: a5a7a8ff-cf7e-4c51-b0bb-ccb005750573
 ---
 Configs aus 1.0 ohne die Parameter `zfs_auto_snapshot_engine` und `zfs_auto_snapshot_label_match` verwenden nach dem
 Update weiter die Engine `zas` und den Label-Abgleich `legacy`. Neue Configs verwenden `internal` und `strict`. Was die

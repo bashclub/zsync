@@ -1,7 +1,8 @@
 ---
 title: Cron auf systemd-Timer
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/cron-auf-systemd-timer-eyigqq2J2E
+outline_id: 990fdecc-a219-48cb-b7f0-0cf9432a1b0f
 ---
 Ab 2.0 kann systemd die Läufe einer Config starten statt Cron. Das ist freiwillig; Cron-Jobs laufen nach dem Update
 unverändert weiter.
