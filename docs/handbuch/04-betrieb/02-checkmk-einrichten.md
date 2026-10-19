@@ -1,7 +1,8 @@
 ---
 title: Checkmk einrichten
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/checkmk-einrichten-W9fFT6EImu
+outline_id: d3de9333-6971-45a9-a582-5795eabb5676
 ---
 Wie die Meldung funktioniert, erklärt das [Monitoring-Konzept](../01-konzept/07-monitoring-konzept.md); alle Services
 und Schwellwerte stehen in der Referenz [Checkmk-Services](../06-referenz/09-checkmk.md).

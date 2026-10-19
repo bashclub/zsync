@@ -1,7 +1,8 @@
 ---
 title: Täglicher Betrieb
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/taglicher-betrieb-tSXICBsExq
+outline_id: 46b28759-0518-4b4e-98ef-cf1cd1d2ddd5
 ---
 Im Normalbetrieb ist nichts zu tun: Die Timer starten die Läufe, Checkmk meldet, wenn etwas nicht stimmt. Dieser
 Artikel zeigt, wo man nachsieht.

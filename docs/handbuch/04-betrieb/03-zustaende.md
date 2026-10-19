@@ -1,7 +1,8 @@
 ---
 title: Zustände und was zu tun ist
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/zustande-und-was-zu-tun-ist-GJ2iPyVoCa
+outline_id: 5b0b4ba5-c658-4d13-a574-05197373f16e
 ---
 Was der Checkmk-Service der Config (`<präfix> <config>`) meldet und was zu tun ist. Der Text des Services nennt das
 betroffene Dataset und die Ursache. Die genaue Meldung im Log steht in [Meldungen](../06-referenz/08-meldungen.md).
