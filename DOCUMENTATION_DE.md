@@ -1,3 +1,5 @@
+> Das ausführliche Handbuch (ohne Login lesbar): https://docs.bashclub.org/s/bashclub-zsync
+
 # Konfiguration auf dem Zielserver
 
 1. Öffnen Sie eine SSH-Verbindung zum Zielserver, entweder über die Befehlszeile oder ein SSH-Tool wie PuTTY.
