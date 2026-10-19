@@ -1,4 +1,0 @@
-# SPDX-License-Identifier: GPL-3.0-or-later
-target: replica create,destroy,receive,userprop,canmount,mountpoint 
-
-source: send,snapshot
