@@ -573,12 +573,17 @@ case_job_user() {
 snapshot_filter=\"\"
 zfs_auto_snapshot_keep=3
 source_hold=1
-source_bookmark=1"
+source_bookmark=1
+checkzfs_disabled=0
+monitor_engine=internal"
   su - $backup -c 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new zsync-cij@localhost exit'
   echo "===== $(date +%T) als $backup" >> "$log"
   su - $backup -c "bashclub-zsync -c $conf" >> "$log" 2>&1; rc=$?
   equal "Replikation über den Jobbenutzer: Exit-Code" 0 "$rc"
   equal "Snapshot repliziert" 1 "$(zfs list -H -o name -t snapshot "$ZCI_POOL_DST/job_user/$ZCI_POOL_SRC/data" 2>/dev/null | wc -l)"
+  # interne Prüfung je Dataset: die Liste der Quelle geht durch bashclub-zsync-remote
+  check "interne Prüfung über den Jobbenutzer" grep -q "^0 zsync:zsync-cij@localhost:22#$ZCI_POOL_SRC/data age=" "$LIB_DIR/$backup/$id.checkzfs"
+  check "interne Prüfung: Liste der Quelle erlaubt" not grep -q 'listing the snapshots' <(last_run_log)
   check "nicht getaggtes Dataset nicht lesbar" not su - $backup -c "ssh -o BatchMode=yes zsync-cij@localhost zfs send -w $ZCI_POOL_SRC/other@zfs-auto-snap_daily-01 > /dev/null"
   check "keine Shell" not su - $backup -c "ssh -o BatchMode=yes zsync-cij@localhost id"
   check "Job entfernen" $job remove cij
@@ -880,6 +885,43 @@ case_permissions() {
   check "Status von root in seinem Ordner" test -f "/var/lib/bashclub-zsync/root/$id.last"
   check "keine Status-Datei im Basisordner" test -z "$(find /var/lib/bashclub-zsync /run/bashclub-zsync -maxdepth 1 -type f)"
 }
+# eingebaute Prüfung je Dataset (monitor_engine=internal, #63): Services wie checkzfs, eine Zeile je Dataset, Bookmarks
+case_monitor_internal() {
+  local spool=/var/lib/check_mk_agent/spool/87000_zci-mon line out
+  zfs create "$ZCI_POOL_SRC/data"; zfs create "$ZCI_POOL_SRC/data/a"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  snap "$ZCI_POOL_SRC/data" 01; zfs snapshot "$ZCI_POOL_SRC/data/a@zfs-auto-snap_daily-01"
+  config monitor_internal "checkzfs_disabled=0
+checkzfs_prefix=zci-mon
+monitor_engine=internal
+source_bookmark=1"
+  zsync
+  equal "Exit-Code" 0 "$rc"
+  check "Bookmark auf der Quelle" test -n "$(zfs list -H -t bookmark -o name "$ZCI_POOL_SRC/data")"
+  check "Log nennt die Engine" grep -q 'check of the snapshots per dataset: internal' <(last_run_log)
+  check "kein Python-Fehler" not grep -qE 'Traceback|add_snapshot' <(last_run_log)
+  line=$(grep "zci-mon:root@localhost:22#$ZCI_POOL_SRC/data " $spool)
+  check "Service wie checkzfs ($line)" grep -qE "^0 zci-mon:root@localhost:22#$ZCI_POOL_SRC/data age=[0-9]+;90000;360000\|creation=[0-9]+;;\|file_size=[0-9]+;;\|fs_used=[0-9]+;;\|file_count=1;150;165 $ZCI_POOL_DST/monitor_internal/$ZCI_POOL_SRC/data - OK$" <<< "$line"
+  equal "eine Zeile je Dataset" 2 "$(grep -c '^[0-3] zci-mon:' $spool)"
+  # Rollback auf der Quelle und Anzahl über der Schwelle: -s zeigt CRIT und WARN, ohne zu replizieren
+  snap "$ZCI_POOL_SRC/data" 02; zsync
+  zfs rollback -r "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-01"
+  set_conf "$conf" checkzfs_max_snapshot_count 0,5
+  out=$(bashclub-zsync -c "$conf" -s 2>&1)
+  check "-s: Rollback CRIT ($out)" grep -qE "^CRIT +zci-mon:root@localhost:22#$ZCI_POOL_SRC/data .*rollback" <<< "$out"
+  check "-s: zu viele Snapshots WARN" grep -qE "^WARN +zci-mon:root@localhost:22#$ZCI_POOL_SRC/data/a .*too many snapshots on the replica" <<< "$out"
+  # ohne monitor_engine: checkzfs, wenn installiert (wie vor 2.0), sonst intern
+  sed -i '/^monitor_engine=/d' "$conf"; set_conf "$conf" source_bookmark 0
+  zsync
+  if command -v checkzfs > /dev/null; then
+    check "ohne monitor_engine: checkzfs" grep -q 'installed checkzfs found' <(last_run_log)
+  else
+    check "ohne monitor_engine: intern" grep -q 'check of the snapshots per dataset: internal' <(last_run_log)
+  fi
+  set_conf "$conf" monitor_engine foo; zsync
+  check "unbekannter Wert: Warnung" grep -q 'Unknown value monitor_engine=foo' <(last_run_log)
+  rm -f $spool
+}
+
 case_checkmk() {
   # eine Spool-Datei je Lauf unter dem Namen von checkzfs: <maxage>_<checkzfs_prefix>
   local spool=/var/lib/check_mk_agent/spool/87000_zsync out before mid host
@@ -1350,7 +1392,7 @@ case_result_busy() {
   rm -f $lockconf
 }
 
-all_cases=(replication engine_internal engine_switch rotation nothing_selected refquota rollback broken_chain orphans local_mode bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_server hooks result_busy)
+all_cases=(replication engine_internal engine_switch rotation nothing_selected refquota rollback broken_chain orphans local_mode monitor_internal bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_server hooks result_busy)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten, Pools und die installierten Pakete): ein zweiter wartet;

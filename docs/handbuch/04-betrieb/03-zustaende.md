@@ -60,7 +60,7 @@ Auf der Quelle wurde zurückgerollt oder der neueste Snapshot gelöscht, und zsy
 **Alte Kette nach einem Rollback (WARN)**
 Nach einem Rollback auf der Quelle hat zsync auf einer neuen Kette weiterrepliziert und die alte behalten. Prüfen, ob
 der Rollback gewollt war. Dann mit `bashclub-zsync-maintenance` behalten (Archiv) oder löschen. War er nicht gewollt
-(Angriff), enthält die alte Kette die Stände vor dem Rollback; siehe Bereich Restore und Notfall.
+(Angriff), enthält die alte Kette die Stände vor dem Rollback; siehe [Ransomware und Angriffe](../05-restore/06-ransomware.md).
 
 **Rotation am Ziel blockiert (WARN)**
 Der älteste Snapshot eines Labels auf der Quelle fehlt am Ziel; zsync löscht für dieses Label auf dem Backupserver
@@ -75,11 +75,14 @@ und das Tag noch erbt.
 Hinweise ohne Warnung: behaltene Replikate und Ketten, neue Kette im letzten Lauf, Datasets ohne passende Snapshots,
 Replikate ohne Quelle in der Wartezeit.
 
-## checkzfs-Services je Dataset
-**Alle checkzfs-Services fehlen**, im Log steht `'NoneType' object has no attribute 'add_snapshot'`: checkzfs bricht
-ab, weil auf der Quelle oder dem Backupserver ein Bookmark existiert. Abhilfe: `source_bookmark=0` und die Bookmarks
-löschen, siehe [Neue Funktionen einschalten](../02-installation/07-neue-funktionen-einschalten.md).
+## Services je Dataset
+**Alle Services je Dataset fehlen**, im Log steht `'NoneType' object has no attribute 'add_snapshot'`: checkzfs bricht
+ab, weil auf der Quelle oder dem Backupserver ein Bookmark existiert. Abhilfe: `monitor_engine=internal`, siehe
+[Neue Funktionen einschalten](../02-installation/07-neue-funktionen-einschalten.md).
 
+- **Kein Replikat gefunden:** Das Dataset ist ausgewählt, aber noch nicht repliziert, meist vor der Erstreplikation.
+- **Neuester Snapshot des Replikats fehlt auf der Quelle (CRIT):** Rollback auf der Quelle; siehe oben, alte Kette.
+- **Kein gemeinsamer Snapshot (CRIT, nur `monitor_engine=internal`):** Kette gerissen, siehe oben.
 - **Alter des neuesten Snapshots zu hoch:** Für dieses Dataset kam länger nichts an. Zusammen mit einem Problem im
   Service der Config ansehen.
 - **Zu viele Snapshots:** Die Aufbewahrung behält mehr, als `checkzfs_max_snapshot_count` erlaubt, oder die Rotation

@@ -19,7 +19,7 @@ keine Pakete und keine Anpassungen.
 ## Was wohin gehört
 | System | Paket | Pflicht? |
 |---|---|---|
-| Backupserver | `bashclub-zsync` (bringt `bashclub-checkzfs` und `bashclub-zsync-restore` mit) | ja |
+| Backupserver | `bashclub-zsync` (bringt `bashclub-zsync-restore` mit) | ja |
 | Quelle | `bashclub-zsync-source` | ab 2.0, für den Betrieb ohne root; `bashclub-zsync-setup` installiert es selbst, wenn es sich als root anmelden darf |
 | System, das wiederhergestellt wird | `bashclub-zsync-restore` | nur für eine Wiederherstellung per Pull |
 
@@ -60,9 +60,10 @@ Neben `release` gibt es `testing` mit dem jeweils neuesten Stand aus der Entwick
 ```bash
 apt install -y bashclub-zsync
 ```
-Mit installiert werden `bashclub-checkzfs` (Monitoring), `bashclub-zsync-restore` (Wiederherstellung) und, als
-Empfehlung, `zfs-auto-snapshot`, `cryptsetup` und ein `mail`-Befehl. Die letzten beiden braucht nur `zsync-autorun`
-für Wechseldatenträger. Für ein Bandbreitenlimit zusätzlich `pv`:
+Mit installiert werden `bashclub-zsync-restore` (Wiederherstellung) und, als Empfehlung, `bashclub-checkzfs` (nur für
+`monitor_engine=checkzfs`; ab 2.0 prüft zsync die Snapshots selbst), `zfs-auto-snapshot`, `cryptsetup` und ein
+`mail`-Befehl. Die letzten beiden braucht nur `zsync-autorun` für Wechseldatenträger. Für ein Bandbreitenlimit
+zusätzlich `pv`:
 ```bash
 apt install -y pv
 ```

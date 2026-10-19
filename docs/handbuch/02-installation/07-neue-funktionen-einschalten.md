@@ -10,32 +10,42 @@ Configs aus `bashclub-zsync-setup` haben sie an. Jede lässt sich einzeln einsch
 
 | Parameter | Wirkung | Kosten |
 |---|---|---|
+| `monitor_engine=internal` | zsync prüft die Snapshots je Dataset selbst, statt checkzfs; dieselben Services in Checkmk | keine, checkzfs wird dafür nicht mehr gebraucht |
 | `source_bookmark=1` | Replikation geht weiter, auch wenn die Quelle den letzten übertragenen Snapshot schon gelöscht hat | kein Platz, ein Bookmark je Dataset auf der Quelle |
 | `source_hold=1` | Snapshots, die gerade übertragen werden, kann niemand löschen | Snapshots bleiben bis zum Ende des Datasets |
 | `transfer_resume=1` | abgebrochene Übertragungen setzen im nächsten Lauf fort | der empfangene Teil belegt bis dahin Platz auf dem Backupserver |
 | `snapshot_filter` mit Zahlen | der Backupserver behält eine feste Anzahl je Label, egal was die Quelle löscht | so viel Platz, wie die Snapshots belegen |
 
-## Bookmark, Hold und Resume
-:::warning
-**checkzfs und Bookmarks:** checkzfs (bis Version 4.14) bricht ab, sobald auf der Quelle oder dem Backupserver ein
-Bookmark existiert (`'NoneType' object has no attribute 'add_snapshot'`). Dann fehlen alle checkzfs-Services; der
-Service der Config meldet weiter. Solange checkzfs das Monitoring macht, `source_bookmark=0` setzen. Neue Configs aus
-dem Setup haben `source_bookmark=1`. Eine eigene Prüfung in zsync, die checkzfs ersetzt, ist geplant.
-:::
-
-Hold und Resume einschalten. Die Config steht in der ersten Zeile; vorhandene Einträge werden ersetzt, fehlende
-angehängt:
+## Eingebaute Prüfung statt checkzfs
+Ab 2.0. Die Services je Dataset (`<checkzfs_prefix>:<source>:<port>#<dataset>`) kommen dann von zsync selbst, mit
+denselben Namen und Schwellwerten (`checkzfs_*`); eine neue Service-Erkennung in Checkmk ist nicht nötig. zsync fragt
+dafür am Ende des Laufs einmal die Snapshots von Quelle und Backupserver ab, Bookmarks stören nicht. Die Config steht in
+der ersten Zeile:
 ```bash
 conf=/etc/bashclub/zsync.conf
-for kv in source_hold=1 transfer_resume=1; do
+if grep -q '^monitor_engine=' "$conf"; then sed -i 's/^monitor_engine=.*/monitor_engine=internal/' "$conf"; else echo monitor_engine=internal >> "$conf"; fi
+grep '^monitor_engine=' "$conf"
+```
+Sofort prüfen, ohne zu replizieren: `bashclub-zsync -c "$conf" -s` zeigt die Services je Dataset und schreibt den
+Spool neu.
+
+Unterschied zu checkzfs: eine Zeile je Dataset statt zwei (Quelle und Replikat unter demselben Namen); sie zeigt den
+schlechteren Zustand beider. Ohne den Eintrag nimmt zsync checkzfs, wenn es installiert ist, sonst die eingebaute
+Prüfung. Rückweg: `monitor_engine=checkzfs`, vorher die Bookmarks ausschalten (unten).
+
+## Bookmark, Hold und Resume
+Alle drei auf einmal einschalten; den Bookmark nur mit der eingebauten Prüfung (oben), checkzfs bricht an Bookmarks ab.
+Die Config steht in der ersten Zeile; vorhandene Einträge werden ersetzt, fehlende angehängt:
+```bash
+conf=/etc/bashclub/zsync.conf
+for kv in source_bookmark=1 source_hold=1 transfer_resume=1; do
   k=${kv%%=*}
   if grep -q "^$k=" "$conf"; then sed -i "s|^$k=.*|$kv|" "$conf"; else echo "$kv" >> "$conf"; fi
 done
-grep -E '^(source_hold|transfer_resume)=' "$conf"
+grep -E '^(source_bookmark|source_hold|transfer_resume)=' "$conf"
 ```
-Den Bookmark erst, wenn checkzfs nicht mehr das Monitoring macht: dann im selben Block zusätzlich `source_bookmark=1`.
-Die Werte gelten ab dem nächsten Lauf. Läuft die Config ohne root, braucht der Benutzer auf der Quelle die Rechte `hold`,
-`release` und `bookmark`; `bashclub-zsync-job-user` vergibt sie.
+Die Werte gelten ab dem nächsten Lauf. Läuft die Config ohne root, braucht der Benutzer auf der Quelle die Rechte
+`hold`, `release` und `bookmark`; `bashclub-zsync-job-user` vergibt sie.
 
 Prüfen nach dem nächsten Lauf: Auf der Quelle steht je Dataset ein Bookmark, dessen Name Backupserver und Target
 enthält:
@@ -43,9 +53,9 @@ enthält:
 ( . "$conf"; ssh -p "$sshport" "root@${source#*@}" zfs list -H -t bookmark -o name | grep "#zsync_$(hostname -s)_" | head )
 ```
 
-Rückweg: dieselben Zeilen mit `0`. Danach die Bookmarks dieser Config auf der Quelle löschen, sonst bricht checkzfs
-weiter ab. Der Block meldet sich als root an der Quelle an und nimmt nur die Bookmarks dieses Backupservers und
-Targets:
+Rückweg: dieselben Zeilen mit `0`. Soll checkzfs wieder prüfen, danach die Bookmarks dieser Config auf der Quelle
+löschen, sonst bricht es weiter ab. Der Block meldet sich als root an der Quelle an und nimmt nur die Bookmarks dieses
+Backupservers und Targets:
 ```bash
 conf=/etc/bashclub/zsync.conf
 ( . "$conf"; ssh -p "$sshport" "root@${source#*@}" "zfs list -H -t bookmark -o name | grep '#zsync_$(hostname -s)_${target//\//_}\$' | xargs -r -n1 zfs destroy -v" )

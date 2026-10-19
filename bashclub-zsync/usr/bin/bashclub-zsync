@@ -100,6 +100,11 @@ transfer_resume=0
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
+# check of the snapshots per dataset (services <checkzfs_prefix>:<source>#<dataset>): checkzfs (package
+# bashclub-checkzfs) or internal (built in, from the snapshot lists of the end of the run, same services and
+# thresholds checkzfs_*); empty = checkzfs if installed, otherwise internal; new configs get internal
+monitor_engine=
+
 # do not connect to source host (if replication is local)
 checkzfs_local=0
 
@@ -439,6 +444,7 @@ bandwidth_limit=$bandwidth_limit
 source_bookmark=1
 source_hold=1
 transfer_resume=1
+monitor_engine=internal
 checkzfs_disabled=$checkzfs_disabled
 checkzfs_local=$checkzfs_local
 checkzfs_prefix=$checkzfs_prefix
@@ -564,6 +570,77 @@ function run_checkzfs() {
         printf '%s\n' "$checkzfs_lines" > "$checkzfs_cache.tmp" && mv -f "$checkzfs_cache.tmp" "$checkzfs_cache"
     fi
 }
+# internal check of the snapshots per dataset (monitor_engine=internal), instead of checkzfs: one service per replicated
+# dataset with the name and the thresholds of checkzfs (checkzfs_prefix, checkzfs_max_age in minutes,
+# checkzfs_max_snapshot_count), the worse state of source and replica in one line; bookmarks are not snapshots here.
+# Two lists: all datasets and snapshots of the source (one ssh call, allowed for job users) and the target.
+# run_internal_check [file]: with a file name the output is also copied there
+function run_internal_check() {
+    local source_list target_list service_source=
+    source_list=$(remote "zfs list -Hp -t filesystem,volume,snapshot -o name,guid,creation,written,used -s createtxg")
+    if [ $? -ne 0 ]; then
+        log "[WARN] listing the snapshots of $source failed, no check of the snapshots per dataset."
+        return 1
+    fi
+    target_list=$(zfs list -Hp -t filesystem,volume,snapshot -o name,guid,creation,written,used,com.sun:auto-snapshot -s createtxg -r "$target" 2>/dev/null)
+    if [[ $checkzfs_local -eq 0 ]]; then service_source="$source:$sshport#"; fi
+    checkzfs_lines=$(
+        { sed 's/^/S\t/' <<< "$source_list"; sed 's/^/T\t/' <<< "$target_list"
+          if [ ${#syncvols[@]} -gt 0 ]; then printf 'V\t%s\n' "${syncvols[@]}"; fi; } |
+        awk -F'\t' -v now="$(date +%s)" -v target="$target" -v prefix="${checkzfs_prefix// /_}:$service_source" \
+            -v max_age="$checkzfs_max_age" -v max_count="$checkzfs_max_snapshot_count" '
+        function problem(level, text) { if (level > st) st = level; msg = msg (msg == "" ? "" : "; ") text }
+        function threshold(value, limits, text,    l) {
+            split(limits, l, ",")
+            if (l[2] != "" && value > l[2] + 0) problem(2, text)
+            else if (l[1] != "" && value > l[1] + 0) problem(1, text)
+        }
+        $1 == "S" && index($2, "@") { ds = substr($2, 1, index($2, "@") - 1); sguid[ds, $3] = 1; scount[ds]++
+                                      screation[ds] = $4; swritten[ds] = $5; next }
+        $1 == "S" { sused[$2] = $6; next }
+        $1 == "T" && index($2, "@") { ds = substr($2, 1, index($2, "@") - 1); n = ++tcount[ds]
+                                      tguid[ds, n] = $3; tcreation[ds, n] = $4; twritten[ds, n] = $5
+                                      if (substr($2, index($2, "@") + 1) ~ /^zfs-auto-snap_/) tzas[ds] = 1; next }
+        $1 == "T" { texists[$2] = 1; tused[$2] = $6; tauto[$2] = $7; next }
+        $1 == "V" { vols[++nv] = $2 }
+        END {
+            split(max_age, a, ","); split(max_count, c, ",")
+            for (v = 1; v <= nv; v++) {
+                d = vols[v]; r = target "/" d; st = 0; msg = ""
+                # without snapshots on the source no service, as with checkzfs (the service of the config shows it)
+                if (scount[d] == 0) continue
+                if (!(r in texists)) {
+                    problem(1, "no replica found")
+                    replica = ""; creation = screation[d]; written = swritten[d]; used = sused[d]; count = scount[d]
+                } else {
+                    replica = r; used = tused[r]; count = tcount[r] + 0; common = 0
+                    for (i = tcount[r]; i >= 1; i--) if ((d, tguid[r, i]) in sguid) { common = i; break }
+                    if (common == 0) {
+                        problem(2, "no snapshot in common with the source"); creation = 0; written = 0
+                    } else {
+                        creation = tcreation[r, common]; written = twritten[r, common]
+                        if (common != tcount[r]) problem(2, "the newest snapshot of the replica does not exist on the source anymore (rollback)")
+                    }
+                    if (tzas[r] && tauto[r] != "false") problem(tauto[r] == "true" ? 2 : 1, "com.sun:auto-snapshot is not false on the replica")
+                    threshold(count, max_count, "too many snapshots on the replica")
+                }
+                age = creation > 0 ? now - creation : 0
+                if (creation > 0) threshold(age / 60, max_age, "the newest snapshot is too old")
+                threshold(scount[d], max_count, "too many snapshots on the source")
+                printf "%d %s%s age=%d;%s;%s|creation=%d;;|file_size=%d;;|fs_used=%d;;|file_count=%d;%s;%s %s - %s\n", \
+                    st, prefix, d, age, (a[1] != "" ? a[1] * 60 : ""), (a[2] != "" ? a[2] * 60 : ""), creation, written, used, \
+                    count, c[1], c[2], replica, (msg == "" ? "OK" : msg)
+            }
+        }')
+    if [[ -n $1 ]]; then printf '%s\n' "$checkzfs_lines" > "$1"; fi
+    if [[ -n $checkzfs_lines ]] && [[ -d $status_lib_dir ]] && [[ -O $status_lib_dir ]]; then
+        printf '%s\n' "$checkzfs_lines" > "$checkzfs_cache.tmp" && mv -f "$checkzfs_cache.tmp" "$checkzfs_cache"
+    fi
+}
+# the check of the snapshots per dataset with the engine of the config (monitor_engine)
+function run_monitor() {
+    if [[ $monitor_engine == "internal" ]]; then run_internal_check "$@"; else run_checkzfs "$@"; fi
+}
 # during a run: every ZSYNC_WATCHDOG_INTERVAL seconds (default 5 min), on the source only if the state changed
 watchdog_pid=
 function start_watchdog() {
@@ -651,16 +728,26 @@ if [ $status_mode -eq 0 ] && [ -d /run/systemd/system ] && command -v systemd-in
     inhibit_pid=$!
 fi
 
-# checked after loading the config, so checkzfs_disabled from the config is respected
-if [[ -n $checkzfs ]]; then
-    if [ $checkzfs_disabled -eq 0 ]; then
-        log "[INFO] installed checkzfs found: $checkzfs"
-    else
-        log "[INFO] checkzfs is disabled by configuration."
-    fi
+# checked after loading the config, so monitor_engine and checkzfs_disabled from the config are respected:
+# without monitor_engine checkzfs if installed (as before 2.0), otherwise the internal check
+case $monitor_engine in
+    ""|checkzfs|internal) ;;
+    *)
+        log "[WARN] Unknown value monitor_engine=$monitor_engine (checkzfs or internal), using the default."
+        monitor_engine= ;;
+esac
+if [[ -z $monitor_engine ]]; then
+    if [[ -n $checkzfs ]]; then monitor_engine=checkzfs; else monitor_engine=internal; fi
+elif [[ $monitor_engine == "checkzfs" ]] && [[ -z $checkzfs ]]; then
+    log "[WARN] monitor_engine=checkzfs, but checkzfs is not installed (package bashclub-checkzfs), using monitor_engine=internal."
+    monitor_engine=internal
+fi
+if [ $checkzfs_disabled -ne 0 ]; then
+    log "[INFO] the check of the snapshots per dataset is disabled by configuration (checkzfs_disabled)."
+elif [[ $monitor_engine == "checkzfs" ]]; then
+    log "[INFO] installed checkzfs found: $checkzfs"
 else
-    checkzfs_disabled=1
-    log "[WARN] checkzfs is disabled. for monitoring please install:\n\thttps://code.bashclub.org/bashclub/checkzfs\n"
+    log "[INFO] check of the snapshots per dataset: internal (monitor_engine=internal)"
 fi
 
 if [[ -z $source ]]; then
@@ -672,7 +759,7 @@ zsync_sshport=-p$sshport
 config_log="[INFO] Configuration:"
 for setting in target source sshport tag snapshot_filter min_keep zfs_auto_snapshot_keep zfs_auto_snapshot_label \
                zfs_auto_snapshot_engine zfs_auto_snapshot_label_match \
-               bandwidth_limit source_bookmark source_hold transfer_resume checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
+               bandwidth_limit source_bookmark source_hold transfer_resume monitor_engine checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
                checkzfs_spool checkzfs_spool_maxage trigger schedule run_as log_file; do
     config_log+="\n\t$setting=${!setting}"
 done
@@ -816,9 +903,9 @@ log "$checkzfs_headline\ncheckzfs_filter=$checkzfs_filter\n"
 if [ $status_mode -eq 1 ]; then
     shown=$(mktemp)
     if [ $checkzfs_disabled -eq 0 ]; then
-        run_checkzfs "$shown"
+        run_monitor "$shown"
     else
-        echo "checkzfs is disabled or not installed, no checkzfs services" >&2
+        echo "the check of the snapshots per dataset is disabled (checkzfs_disabled), no services per dataset" >&2
     fi
     status_now=$(status_lines)
     write_monitor_spool
@@ -1434,11 +1521,12 @@ for n in "${!ds_state[@]}"; do
         || log "[WARN] marking the open decision on $replica failed (bashclub:zsync-case), bashclub-zsync-maintenance does not show it."
 done
 
-#### monitoring: checkzfs at the end of the run, its output goes with the state into the spool file (on_exit)
+#### monitoring: checkzfs or the internal check at the end of the run, the output goes with the state into the spool
+# file (on_exit)
 if [ $checkzfs_disabled -eq 0 ]; then
-    log "[INFO] Running checkzfs..."
+    log "[INFO] Checking the snapshots per dataset ($monitor_engine)..."
     status checkzfs
-    run_checkzfs
+    run_monitor
 fi
 
 exit $rc

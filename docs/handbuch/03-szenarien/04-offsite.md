@@ -28,8 +28,8 @@ bashclub-zsync-setup --source "$source" --port 2222 --schedule "0 22 * * *" "$(e
 neu anlegen wie in [Betrieb ohne root](../02-installation/05-betrieb-ohne-root.md), Schritt 3. Bei dynamischen Adressen
 besser ein VPN mit fester Adresse.
 
-Danach wie im [Standardfall](01-standardfall.md), Schritt 5 und 6: Monitoring vorbereiten (eigenes `checkzfs_prefix`,
-`source_bookmark=0`), dann den ersten Lauf starten.
+Danach wie im [Standardfall](01-standardfall.md), Schritt 5 und 6: Monitoring vorbereiten (eigenes
+`checkzfs_prefix`), dann den ersten Lauf starten.
 
 ## Bandbreite begrenzen
 Ab 2.0. `pv` auf dem Backupserver installieren und das Limit in die Config schreiben, hier 10 MiB/s (etwa 84 Mbit/s):

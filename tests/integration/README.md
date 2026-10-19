@@ -36,7 +36,7 @@ Eine **VM** (kein LXC-Container: der teilt das ZFS-Modul des Hosts), Debian 13, 
 # ZFS (contrib) und Werkzeuge
 sed -i '/^Components:/{/contrib/!s/$/ contrib/}' /etc/apt/sources.list.d/debian.sources
 apt update && apt install -y linux-headers-amd64 zfs-dkms zfsutils-linux zfs-auto-snapshot pv git curl
-# bashclub-Paketquellen release und testing (Abhängigkeit bashclub-checkzfs)
+# bashclub-Paketquellen release und testing (bashclub-checkzfs für die Tests mit monitor_engine=checkzfs)
 wget -qO- https://apt.bashclub.org/gpg/bashclub.pub | gpg --dearmor > /usr/share/keyrings/bashclub-archive-keyring.gpg
 for r in release testing; do cat > /etc/apt/sources.list.d/bashclub-$r.sources << EOT
 Types: deb

@@ -19,8 +19,8 @@ es auf TrueNAS nicht, die Replikation läuft deshalb als root wie in 1.0:
 source=truenas1
 bashclub-zsync-setup --source "$source" --root "$source"
 ```
-4. Danach wie im [Standardfall](01-standardfall.md), Schritt 5 und 6: Monitoring vorbereiten (eigenes `checkzfs_prefix`,
-   `source_bookmark=0`), dann den ersten Lauf starten.
+4. Danach wie im [Standardfall](01-standardfall.md), Schritt 5 und 6: Monitoring vorbereiten (eigenes
+   `checkzfs_prefix`), dann den ersten Lauf starten.
 
 **Snapshots:** Die Engine `internal` braucht auf TrueNAS nichts. Periodische Snapshots von TrueNAS heißen meist
 `auto-JJJJ-MM-TT_hh-mm`; sollen sie übertragen werden, das Label `auto` in `snapshot_filter` aufnehmen, z. B.
