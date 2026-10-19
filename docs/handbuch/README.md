@@ -70,6 +70,12 @@ Ein neuer Artikel wird zuerst angelegt und seine Adresse in `outline:` eingetrag
 aufgelöst. Links auf noch nicht veröffentlichte Artikel bricht `render` ab (`--allow-missing` lässt nur den Text
 stehen).
 
+## Prüfung
+`tests/handbuch.sh` läuft in der CI: Jeder Parameter mit Default in `bashclub-zsync` braucht einen Abschnitt und eine
+Zeile in der Übersicht der Referenz (`06-referenz/01-konfigurationsparameter.md`), jedes Programm aus den Paketen einen
+Abschnitt `` ## `name` `` in der Referenz, und jeder Artikel muss sich aufbereiten lassen. Die Referenz wird von Hand
+gepflegt; die Prüfung fällt auf, wenn ein neuer Parameter oder ein neues Programm fehlt.
+
 ## Definition of Done
 Ein Feature-Ticket aktualisiert die betroffenen Artikel (Konzept, Referenz, Szenario, Migration) im selben PR, mit
 Versionsvermerk.
