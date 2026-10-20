@@ -1,6 +1,10 @@
 # zsync
 
-[Deutsch](README.de.md) · Support the development: [Ko-fi](https://ko-fi.com/thorakel)
+[Deutsch](README.de.md)
+
+Like bashclub-zsync?
+
+<a href="https://ko-fi.com/A0A1J73JR"><img src="docs/handbuch/kofi-button-en.png" alt="Support the development" height="41"></a>
 
 > Development takes place at https://code.bashclub.org/bashclub/zsync
 >

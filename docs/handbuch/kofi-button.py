@@ -3,7 +3,7 @@
 """Draw the Ko-fi button of the handbook as a PNG, in the style of the Ko-fi widget (Widget_2.js): Outline and the
 README pages show no JavaScript, so the button is a picture with the text and the color of choice.
 
-  kofi-button.py <out.png> [<text>] [<color>]     default: "Unterstütze mich auf Ko-fi" #72a4f2
+  kofi-button.py <out.png> [<text>] [<color>]     default: "Unterstütze die Entwicklung" #72a4f2
 
 Needs Pillow, the font Quicksand (OFL, github.com/google/fonts, ofl/quicksand/Quicksand[wght].ttf) and the cup of
 Ko-fi (https://storage.ko-fi.com/cdn/cup-border.png) next to this file or in $KOFI_ASSETS.
@@ -16,7 +16,7 @@ from PIL import Image, ImageDraw, ImageFont
 S = 4   # drawn at four times the size, then scaled down: smooth edges
 assets = os.environ.get("KOFI_ASSETS", os.path.dirname(os.path.abspath(__file__)))
 out = sys.argv[1] if len(sys.argv) > 1 else sys.exit(__doc__)
-text = sys.argv[2] if len(sys.argv) > 2 else "Unterstütze mich auf Ko-fi"
+text = sys.argv[2] if len(sys.argv) > 2 else "Unterstütze die Entwicklung"
 color = sys.argv[3] if len(sys.argv) > 3 else "#72a4f2"
 
 font = ImageFont.truetype(os.path.join(assets, "Quicksand[wght].ttf"), 14 * S)
