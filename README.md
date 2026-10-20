@@ -194,6 +194,13 @@ source_hold=1
 # existing configurations without this setting keep 0, new configurations get 1
 transfer_resume=1
 
+# chain broken (no common snapshot with the source, e.g. the dataset was created again there) or replica without
+# snapshots: 1 = keep the old replica as <replica>.zsync-branch-<date> and replicate the dataset again, if there is
+# enough space on the target; the admin keeps or deletes the old one with bashclub-zsync-maintenance
+# 0 = report the error in every run until the admin decides with bashclub-zsync-maintenance (rename or delete)
+# existing configurations without this setting keep 0, new configurations get 1
+broken_rename=1
+
 # check of the snapshots per dataset (services <checkzfs_prefix>:<source>#<dataset>): checkzfs (package
 # bashclub-checkzfs) or internal (built in, from the snapshots of the replicated datasets at the end of the run, same
 # services and thresholds checkzfs_*); empty = checkzfs if installed, otherwise internal; new configs get internal
@@ -263,6 +270,9 @@ If the newest snapshots of a replica do not exist on the source anymore (rolled 
 - while the old chain exists, the rotation keeps the common snapshot it starts from
 
 Without root the user needs the permissions `clone`, `promote` and `rename` on its target (see [Running without root](#running-without-root)); without them the dataset is reported as before (newest common snapshot in the log and the Checkmk check) until it is fixed.
+
+### Broken chain
+No common snapshot with the source (all snapshots of the replica rotated out there, or the dataset was created again) or a replica without snapshots: with `broken_rename=1` (new configurations) the old replica stays complete as `<replica>.zsync-branch-<date>`, the dataset is replicated again in the same run and its children go back below it; the admin keeps or deletes the old one with `bashclub-zsync-maintenance`. Without enough space on the target nothing changes and the monitoring reports CRIT. Existing configurations without the setting report the error in every run until the admin decides.
 
 ### refquota
 The `refquota` of a filesystem is replicated with the initial replication only. If it is raised on the source later, the target keeps the old value and the replication fails with "quota exceeded" as soon as the data exceeds it. Before each incremental replication `bashclub-zsync` therefore raises the `refquota` on the target to the value of the source, or removes it if the source has none. It never lowers it, and `quota` is not changed.

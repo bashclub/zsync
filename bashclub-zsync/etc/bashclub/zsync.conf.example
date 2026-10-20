@@ -75,6 +75,13 @@ source_hold=1
 # existing configurations without this setting keep 0, new configurations get 1
 transfer_resume=1
 
+# chain broken (no common snapshot with the source, e.g. the dataset was created again there) or replica without
+# snapshots: 1 = keep the old replica as <replica>.zsync-branch-<date> and replicate the dataset again, if there is
+# enough space on the target; the admin keeps or deletes the old one with bashclub-zsync-maintenance
+# 0 = report the error in every run until the admin decides with bashclub-zsync-maintenance (rename or delete)
+# existing configurations without this setting keep 0, new configurations get 1
+broken_rename=1
+
 # check of the snapshots per dataset (services <checkzfs_prefix>:<source>#<dataset>): checkzfs (package
 # bashclub-checkzfs) or internal (built in, from the snapshot lists of the end of the run, same services and
 # thresholds checkzfs_*); empty = checkzfs if installed, otherwise internal; new configs get internal

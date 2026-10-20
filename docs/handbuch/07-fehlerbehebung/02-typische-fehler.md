@@ -54,10 +54,11 @@ Die Quelle hat alle Snapshots gelöscht, die auch das Replikat hat, meist weil d
 hat, als die Quelle ihre Snapshots behält. Oder das Dataset wurde auf der Quelle gelöscht und neu angelegt (z. B. eine
 VM-Disk nach einem Restore aus einem anderen Backup).
 
-zsync überträgt dann nicht selbst neu, weil das das alte Replikat ersetzen würde (siehe
+Ohne `broken_rename=1` überträgt zsync dann nicht selbst neu, weil das das alte Replikat ersetzen würde (siehe
 [ZFS-Grundlagen](../01-konzept/03-zfs-grundlagen.md)). Abhilfe mit `bashclub-zsync-maintenance`: `rename` behält das
 alte Replikat unter neuem Namen, der nächste Lauf überträgt vollständig neu; `delete` löscht es. Siehe
-[Entscheidungen](../04-betrieb/04-wartung.md).
+[Entscheidungen](../04-betrieb/04-wartung.md). Ab 2.0 macht zsync das mit `broken_rename=1` (Default neuer Configs)
+selbst, sofern der Platz reicht.
 
 Vorbeugen: `source_bookmark=1` (der Bookmark hält die Kette, auch wenn die Snapshots weg sind) und genug Snapshots auf
 der Quelle für die längste Pause des Backupservers.
