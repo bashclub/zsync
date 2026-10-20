@@ -129,9 +129,9 @@ expect "quittiert und ohne Snapshots: OK mit Hinweis" 0 "1 kept replicas without
 reset; last 0 $((T - 1800)); history 3600 6; ds pool/b cleanup_blocked $((T - 7200)) "oldest source snapshot zfs-auto-snap_backup-2026-07-20-1051 missing on the target"
 expect "Rotation am Ziel blockiert: WARN, Lauf ok" 1 "rotation on the target blocked: pool/b \(oldest source snapshot zfs-auto-snap_backup-2026-07-20-1051 missing on the target, since 2h 0m\)"
 reset; last 0 $((T - 1800)); history 3600 6; ds pool/x branched $T "new chain from daily-02, old chain x.zsync-branch-2026-10-17-1200"
-expect "neue Kette im letzten Lauf: OK mit Hinweis" 0 "new chain after a rollback on the source: pool/x \(new chain from daily-02"
+expect "neue Kette im letzten Lauf: OK mit Hinweis" 0 "new chain after a rollback or a broken chain on the source: pool/x \(new chain from daily-02"
 reset; last 0 $((T - 1800)); history 3600 6; ds pool/x.zsync-branch-2026-10-17-1200 branch $T "old chain since 2026-10-17-1200 (newest common snapshot daily-02, 2 newer snapshots, 1G)"
-expect "alte Kette: WARN mit Hinweis auf das Wartungswerkzeug" 1 "old chain after a rollback on the source, keep or delete it: pool/x.zsync-branch-2026-10-17-1200.*bashclub-zsync-maintenance"
+expect "alte Kette: WARN mit Hinweis auf das Wartungswerkzeug" 1 "old chain after a rollback or a broken chain on the source, keep or delete it: pool/x.zsync-branch-2026-10-17-1200.*bashclub-zsync-maintenance"
 reset; last 0 $((T - 1800)); history 3600 6; ds pool/x.zsync-branch-2026-10-17-1200 branch_kept $T "old chain"
 expect "alte Kette behalten: OK mit Hinweis" 0 "1 old chains kept"
 reset; last 0 $((T - 1800)); history 3600 6; for x in a b c d e; do ds pool/$x broken $T "x"; done

@@ -143,6 +143,20 @@ Ab 2.0. Ein Schritt beim Anlegen der neuen Kette scheiterte, meist fehlende Rech
 **`[WARN] <dataset> - marking … failed (bashclub:zsync-branch).`**
 Ab 2.0. Die alte Kette ist angelegt, aber nicht markiert; `bashclub-zsync-maintenance` zeigt sie dann nicht.
 
+**`[WARN] <dataset> - <ursache>. The old replica with all its snapshots stays as <replikat>.zsync-branch-<datum>, <dataset> is replicated again. …`**
+Ab 2.0, `broken_rename=1`. Kette gerissen oder Replikat ohne Snapshots: zsync behält das alte Replikat und überträgt
+neu, im selben Lauf. Die alte Kette mit `bashclub-zsync-maintenance` behalten oder löschen.
+
+**`[WARN] <dataset> - <ursache>, but there is not enough space for a new replication (needs about …, … available on …). …`**
+Ab 2.0, `broken_rename=1`. Für die Neuübertragung reicht der Platz auf dem Backupserver nicht; zsync ändert nichts,
+Checkmk meldet CRIT. Platz schaffen (z. B. alte Ketten löschen) oder mit `bashclub-zsync-maintenance` entscheiden.
+
+**`[ERROR] <dataset> - <replikat>.zsync-branch-<datum> exists already …`** und **`[ERROR] <dataset> - renaming … failed, nothing was changed.`**
+Ab 2.0, `broken_rename=1`. Das Umbenennen des alten Replikats ging nicht; ohne root fehlt evtl. das Recht `rename`.
+
+**`[ERROR] <dataset> - moving … below the new replica failed: …`**
+Ab 2.0. Ein Kind des alten Replikats ließ sich nicht unter das neue schieben; die Meldung nennt den Befehl.
+
 **`[ERROR] <dataset> - the newest snapshot on … does not exist on the source anymore (rollback or deleted on the source). Newest common snapshot: …`**
 Rollback auf der Quelle, und die neue Kette ließ sich nicht anlegen (siehe die Meldungen davor).
 
@@ -157,7 +171,7 @@ angelegt. Nur eine neue Erstreplikation hilft. Mit `bashclub-zsync-maintenance` 
 löschen; der nächste Lauf überträgt neu.
 
 **`[ERROR] No snapshot found on … to add incremental snapshots to. …`** zusammen mit
-**`[ERROR] <dataset> - to keep the empty replica rename it, …`**
+**`[ERROR] <dataset> - the replica has no snapshot, decide: …`**
 Das Replikat hat keinen Snapshot. Wie oben mit `bashclub-zsync-maintenance` entscheiden.
 
 ## Je Dataset: Rotation
@@ -171,7 +185,7 @@ Ab 2.0. Altlasten auf dem Replikat; im Modus `strict` löscht zsync sie nicht. L
 `bashclub-zsync-maintenance` (Fall `leftovers`).
 
 ## Abgleich am Ende
-**`[WARN] <replikat> is the old chain after a rollback on the source: …. Keep or delete it: bashclub-zsync-maintenance`**
+**`[WARN] <replikat> is the old chain after a rollback or a broken chain on the source: …. Keep or delete it: bashclub-zsync-maintenance`**
 Ab 2.0. Eine alte Kette wartet auf die Entscheidung.
 
 **`[WARN] <replikat> … and is not replicated anymore (…). Keep it: zfs set bashclub:zsync-orphan=keep … - check the deletion: zfs destroy -rnv …`**

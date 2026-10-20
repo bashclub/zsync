@@ -48,6 +48,10 @@ Es gibt keinen gemeinsamen Snapshot mehr mit der Quelle; zsync kann dieses Datas
 Replikation), oder das Dataset wurde auf der Quelle neu angelegt. Entscheiden mit
 [bashclub-zsync-maintenance](04-wartung.md): `rename` behält das alte Replikat, der nächste Lauf überträgt neu.
 
+Ab 2.0 mit `broken_rename=1` (Default neuer Configs) wartet zsync nicht: Es behält das alte Replikat als alte Kette,
+überträgt neu, und der Service meldet die alte Kette (WARN) zur Entscheidung. CRIT bleibt es nur, wenn der Platz für
+die Neuübertragung nicht reicht; der Service nennt das.
+
 **Kette in Gefahr (WARN)**
 Die letzte Übertragung scheiterte, und ihre Basis ist der älteste Snapshot des Labels auf der Quelle. Scheitert auch
 der nächste Lauf und rotiert die Quelle dazwischen, reißt die Kette. Jetzt die Ursache der gescheiterten Übertragung

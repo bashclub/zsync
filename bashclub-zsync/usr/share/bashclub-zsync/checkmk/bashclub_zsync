@@ -428,7 +428,7 @@ for id in $ids; do
         raise 1 "newest target snapshot missing on the source: $(shortlist "${ds_div[@]}")$(level_mark 1)"
     fi
     if [ ${#ds_branch[@]} -gt 0 ]; then
-        raise 1 "old chain after a rollback on the source, keep or delete it: $(shortlist "${ds_branch[@]}")$(level_mark 1)"
+        raise 1 "old chain after a rollback or a broken chain on the source, keep or delete it: $(shortlist "${ds_branch[@]}")$(level_mark 1)"
     fi
     if [ ${#ds_blocked[@]} -gt 0 ]; then
         raise 1 "rotation on the target blocked: $(shortlist "${ds_blocked[@]}")$(level_mark 1)"
@@ -442,7 +442,7 @@ for id in $ids; do
     if [ ${#ds_failed[@]} -gt 0 ]; then state_text+=("failed: $(shortlist "${ds_failed[@]}")"); fi
     if [ $orphan_new -gt 0 ]; then state_text+=("$orphan_new new datasets only on the target"); fi
     if [ $kept -gt 0 ]; then state_text+=("$kept kept replicas without source"); fi
-    if [ ${#branched[@]} -gt 0 ]; then state_text+=("new chain after a rollback on the source: $(shortlist "${branched[@]}")"); fi
+    if [ ${#branched[@]} -gt 0 ]; then state_text+=("new chain after a rollback or a broken chain on the source: $(shortlist "${branched[@]}")"); fi
     if [ $branch_kept -gt 0 ]; then state_text+=("$branch_kept old chains kept"); fi
     if [ $nosnap -gt 0 ]; then state_text+=("$nosnap datasets without matching snapshots"); fi
     if [ ${#excluded[@]} -gt 0 ]; then state_text+=("excluded: $(shortlist "${excluded[@]}")"); fi

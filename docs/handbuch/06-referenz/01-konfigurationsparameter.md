@@ -38,6 +38,7 @@ oder `|` stehen in Anführungszeichen. Die Vorlage mit allen Parametern und Komm
 | `source_bookmark` | `0` | `1` | `1` | 2.0 |
 | `source_hold` | `0` | `1` | `1` | 2.0 |
 | `transfer_resume` | `0` | `1` | `1` | 2.0 |
+| `broken_rename` | `0` | `1` | `1` | 2.0 |
 | `monitor_engine` | leer (`checkzfs`, wenn installiert, sonst `internal`) | `internal` | `internal` | 2.0 |
 | `checkzfs_disabled` | `0` | `0` | `0` | 1.0 |
 | `checkzfs_local` | `0` | `0` | `0` | 1.0 |
@@ -167,6 +168,15 @@ wie der Bookmark. Holds eines abgebrochenen Laufs löst der nächste Lauf.
 ### `transfer_resume`
 Ab 2.0. `1`: Übertragungen sind fortsetzbar (`zfs receive -s`). Ein abgebrochener Transfer setzt im nächsten Lauf
 fort. Mit `0` verwirft zsync einen angefangenen Empfang (`zfs receive -A`) mit Warnung.
+
+### `broken_rename`
+Ab 2.0. Was bei gerissener Kette (kein gemeinsamer Snapshot mit der Quelle und kein Bookmark, von dem es weitergeht)
+oder einem Replikat ohne Snapshots passiert:
+- `1`: zsync benennt das alte Replikat in `<replikat>.zsync-branch-<datum>` um, überträgt das Dataset im selben Lauf
+  neu und schiebt die Kinder (eigene Replikate) unter das neue zurück. Die alte Kette ist ein Fall für
+  `bashclub-zsync-maintenance` (behalten oder löschen). Reicht der Platz auf dem Backupserver für die Neuübertragung
+  nicht (Belegung des Datasets auf der Quelle gegen den freien Platz des Targets), ändert zsync nichts und meldet CRIT.
+- `0`: Fehler bei jedem Lauf, bis der Admin mit `bashclub-zsync-maintenance` entscheidet (Verhalten von 1.0).
 
 ## Monitoring
 

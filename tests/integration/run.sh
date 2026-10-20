@@ -152,7 +152,7 @@ case_rollback() {
   equal "Zustand der neuen Kette" branched "$(state_of "$ZCI_POOL_SRC/data")"
   equal "Zustand des alten Zweigs" branch "$(state_of "${branch#$ZCI_POOL_DST/rollback/}")"
   check "kein Anfügen aus einem Bookmark nach Rollback" not grep -q 'continuing from the bookmark' "$log"
-  check "Checkmk: WARN zum alten Zweig" grep -qE '^1 "zsync rollback" .*old chain after a rollback on the source' <<< "$(check_output)"
+  check "Checkmk: WARN zum alten Zweig" grep -qE '^1 "zsync rollback" .*old chain after a rollback or a broken chain on the source' <<< "$(check_output)"
   # Entscheidung: alten Zweig löschen
   list=$(ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-maintenance --list --tsv)
   local case_id; case_id=$(awk -F'\t' -v r="$branch" '$3 == "branch" && $4 == r { print $1 }' <<< "$list")
@@ -193,7 +193,9 @@ case_broken_chain() {
   zsync
   equal "neu angelegt: Zustand danach" ok "$(state_of "$ZCI_POOL_SRC/vm")"
   equal "neu angelegt: neues Dataset repliziert" "$new" "$(guid "$T/vm@zfs-auto-snap_daily-01")"
-  equal "neu angelegt: alte Kette behalten" "$old" "$(guid "$T/vm.broken-$(date +%Y-%m-%d)@zfs-auto-snap_daily-01")"
+  local kept; kept=$(zfs list -H -o name -d 1 "$T" | grep -F "$T/vm.zsync-branch-" | head -1)
+  equal "neu angelegt: alte Kette behalten" "$old" "$(guid "$kept@zfs-auto-snap_daily-01")"
+  check "neu angelegt: alte Kette markiert" grep -q "renamed in bashclub-zsync-maintenance" <<< "$(prop "$kept" bashclub:zsync-branch)"
 }
 
 # Replikat ohne Quelle und quittiertes Replikat
@@ -828,8 +830,9 @@ zfs_auto_snapshot_label_match=legacy"
   out=$(printf '2\n1\ny\n1\ny\n1\ny\n' | ZSYNC_CONF_DIR=$CONF_DIR $m 2>&1); echo "$out" >> "$log"
   equal "orphan behalten: Markierung" keep "$(prop "$T/gone" bashclub:zsync-orphan)"
   equal "orphan behalten: auch das zweite" keep "$(prop "$T/other" bashclub:zsync-orphan)"
-  check "gerissene Kette umbenannt" exists "$T/broken.broken-$(date +%Y-%m-%d)"
-  equal "umbenannte Kette ohne Markierung" "" "$(zfs get -H -o value -s local bashclub:zsync-case "$T/broken.broken-$(date +%Y-%m-%d)")"
+  local renamed; renamed=$(zfs list -H -o name -d 1 "$T" | grep -F "$T/broken.zsync-branch-" | head -1)
+  check "gerissene Kette umbenannt ($renamed)" test -n "$renamed"
+  equal "umbenannte Kette ohne Markierung" "" "$(zfs get -H -o value -s local bashclub:zsync-case "$renamed")"
   check "Altlast weg" not exists "$T/data@zfs-auto-snap_backup-2026-01-01-0000"
   equal "Altlast: Markierung entfernt" "" "$(zfs get -H -o value -s local bashclub:zsync-case "$T/data")"
   equal "keine offenen Fälle mehr" "no open cases" "$(ZSYNC_CONF_DIR=$CONF_DIR $m --list)"
@@ -1536,7 +1539,7 @@ case_cascade() {
   local branches; branches=$(zfs list -H -o name -r $B2 | grep zsync-branch)
   equal "Rollback: genau eine alte Kette auf Stufe 2 ($branches)" 1 "$(grep -c . <<< "$branches")"
   equal "Rollback: die alte Kette auf Stufe 2 ist ihre eigene" local "$(zfs get -H -o source bashclub:zsync-branch "$branches" 2>/dev/null)"
-  check "Rollback: alte Kette von backup1 nicht ausgewählt" grep -q "old chain after a rollback on the source)" <<< "$(last_log)"
+  check "Rollback: alte Kette von backup1 nicht ausgewählt" grep -q "old chain after a rollback or a broken chain on the source)" <<< "$(last_log)"
   # Rotation auf backup1, bevor Stufe 2 holt: der Bookmark auf backup1 hält die Kette
   local i; snap "$ZCI_POOL_SRC/data/vm" 06; snap "$ZCI_POOL_SRC/data/vm" 07; stage new $c1
   for i in 01 02 03 04 05 06; do zfs destroy "$ZCI_POOL_SRC/data/vm@zfs-auto-snap_daily-$i"; done
@@ -1595,7 +1598,53 @@ case_cascade_upgrade() {
   check "backup1 vor Stufe 2 aktualisiert: ct@07 fehlt auf Stufe 2" not on_stage2 ct 07
 }
 
-all_cases=(replication engine_internal engine_switch rotation nothing_selected refquota rollback broken_chain orphans local_mode monitor_internal bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_removable restore_server hooks result_busy cascade cascade_local cascade_upgrade)
+case_broken_rename() {
+  local S=$ZCI_POOL_SRC T=$ZCI_POOL_DST/broken_rename/$ZCI_POOL_SRC c1 kept list
+  # Elternteil mit eigener Kette und Kind mit intakter Kette
+  zfs create "$S/data"; zfs set bashclub:zsync=all "$S/data"; zfs create "$S/data/child"
+  write "$S/data" 1; write "$S/data/child" 1; snap "$S/data" 01; snap "$S/data/child" 01
+  zfs create "$S/vm"; zfs set bashclub:zsync=all "$S/vm"; write "$S/vm" 1; snap "$S/vm" 01
+  zfs create "$S/empty"; zfs set bashclub:zsync=all "$S/empty"; write "$S/empty" 1; snap "$S/empty" 01
+  config broken_rename "broken_rename=1"; zsync
+  c1=$(guid "$T/data/child@zfs-auto-snap_daily-01")
+  # data: alle Snapshots des Replikats auf der Quelle wegrotiert; vm: neu angelegt; empty: Replikat ohne Snapshots
+  snap "$S/data" 02; zfs destroy "$S/data@zfs-auto-snap_daily-01"; snap "$S/data/child" 02
+  zfs destroy -r "$S/vm"; sleep 1.05; zfs create "$S/vm"; zfs set bashclub:zsync=all "$S/vm"; write "$S/vm" 1; snap "$S/vm" 01
+  zfs destroy "$T/empty@zfs-auto-snap_daily-01"
+  zsync
+  equal "Exit-Code: weiter ohne Fehler" 0 "$rc"
+  local ds old
+  for ds in data vm empty; do
+    old=$(zfs list -H -o name -d 1 "$T" | grep -F "$T/$ds.zsync-branch-" | head -1)
+    check "$ds: alte Kette umbenannt ($old)" test -n "$old"
+    check "$ds: alte Kette markiert" test -n "$(zfs get -H -o value -s local bashclub:zsync-branch "$old" 2>/dev/null)"
+    equal "$ds: neu repliziert" branched "$(state_of "$S/$ds")"
+  done
+  equal "data: neuer Stand" "$(guid "$S/data@zfs-auto-snap_daily-02")" "$(guid "$T/data@zfs-auto-snap_daily-02")"
+  equal "vm: neues Dataset" "$(guid "$S/vm@zfs-auto-snap_daily-01")" "$(guid "$T/vm@zfs-auto-snap_daily-01")"
+  check "Ursache neu angelegt im Log" grep -q "$S/vm - the dataset was created again on the source. The old replica" <<< "$(last_run_log)"
+  check "Ursache Rotation im Log" grep -q "$S/data - all snapshots of the replica were deleted by the rotation" <<< "$(last_run_log)"
+  check "Ursache leeres Replikat im Log" grep -q "$S/empty - the replica has no snapshot. The old replica" <<< "$(last_run_log)"
+  # das Kind wieder unter dem neuen Replikat, seine Kette läuft inkrementell weiter
+  equal "Kind: alte Kette erhalten" "$c1" "$(guid "$T/data/child@zfs-auto-snap_daily-01")"
+  equal "Kind: inkrementell weiter" "$(guid "$S/data/child@zfs-auto-snap_daily-02")" "$(guid "$T/data/child@zfs-auto-snap_daily-02")"
+  equal "Kind: Zustand" ok "$(state_of "$S/data/child")"
+  # die alten Ketten sind Fälle für die Wartung (nach dem nächsten Lauf markiert)
+  zsync
+  list=$(ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-maintenance --list --tsv)
+  equal "drei alte Ketten in der Wartung" 3 "$(awk -F'\t' '$3 == "branch"' <<< "$list" | grep -c .)"
+  check "Checkmk: Hinweis auf die Wartung" grep -q "bashclub-zsync-maintenance" <<< "$(check_output)"
+  # zu wenig Platz: nichts umbenannt, CRIT, der Admin entscheidet
+  zfs set quota=$(( $(zfs get -Hp -o value used "$ZCI_POOL_DST/broken_rename") + 262144 )) "$ZCI_POOL_DST/broken_rename"
+  zfs destroy -r "$S/vm"; sleep 1.05; zfs create "$S/vm"; zfs set bashclub:zsync=all "$S/vm"; write "$S/vm" 1; snap "$S/vm" 01
+  zsync
+  equal "zu wenig Platz: Zustand broken" broken "$(state_of "$S/vm")"
+  equal "zu wenig Platz: nichts umbenannt" 1 "$(zfs list -H -o name -d 1 "$T" | grep -cF "$T/vm.zsync-branch-")"
+  check "zu wenig Platz: Hinweis im Log" grep -q "not enough space for a new replication" <<< "$(last_run_log)"
+  check "zu wenig Platz: Checkmk CRIT" grep -q '^2 ' <<< "$(check_output)"
+}
+
+all_cases=(replication engine_internal engine_switch rotation nothing_selected refquota rollback broken_chain orphans local_mode monitor_internal bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_removable restore_server hooks result_busy cascade cascade_local cascade_upgrade broken_rename)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten, Pools und die installierten Pakete): ein zweiter wartet;

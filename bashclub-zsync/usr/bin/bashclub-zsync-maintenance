@@ -11,7 +11,7 @@
 #                                                    rename (the next run replicates again, the old replica stays)
 #                                                    / delete (the next run replicates again) / later
 #   leftovers  snapshots of the label in another name scheme on the target (#3)            delete / later
-#   branch     old chain after a rollback on the source (#65), the replication continues on the new chain
+#   branch     old chain after a rollback or a broken chain on the source (#65), the replication continues on the new chain
 #                                                    keep (bashclub:zsync-orphan=keep) / delete / later
 
 PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
@@ -117,9 +117,12 @@ function commands_of() {
         orphan:keep|branch:keep) printf 'zfs\tset\tbashclub:zsync-orphan=keep\t%s\n' "$replica" ;;
         orphan:delete|broken:delete|branch:delete) printf 'zfs\tdestroy\t-r\t%s\n' "$replica" ;;
         broken:rename)
-            new=$replica.broken-$(date +%Y-%m-%d)
+            # an old chain like after a rollback: the next run replicates again and moves the children back below
+            # the new replica; the old one is a case of type branch (keep or delete)
+            new=$replica.zsync-branch-$(date +%Y-%m-%d-%H%M)
             printf 'zfs\trename\t%s\t%s\n' "$replica" "$new"
-            printf 'zfs\tinherit\t-r\tbashclub:zsync-case\t%s\n' "$new" ;;
+            printf 'zfs\tinherit\t-r\tbashclub:zsync-case\t%s\n' "$new"
+            printf 'zfs\tset\tbashclub:zsync-branch=%s;renamed in bashclub-zsync-maintenance\t%s\n' "$(date +%Y-%m-%d-%H%M)" "$new" ;;
         leftovers:delete)
             leftovers_of "$conf" "$replica" | while read -r snap; do printf 'zfs\tdestroy\t%s\n' "$snap"; done
             printf 'zfs\tinherit\tbashclub:zsync-case\t%s\n' "$replica" ;;
