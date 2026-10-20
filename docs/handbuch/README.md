@@ -65,9 +65,10 @@ Das Handbuch beschreibt 2.0 und alles danach. Eine Historie zu 1.0 gibt es nicht
 ## Veröffentlichen
 `render.py` bereitet eine Datei für Outline auf: Kopf entfernt, Links auf Outline-Adressen, am Ende ein Link
 „Weiter“ auf den nächsten Artikel in der Reihenfolge von `render.py list` (nach dem letzten Artikel eines Bereichs der
-nächste Bereich), der Hinweis auf die Quelle und der Ko-fi-Knopf. Den Knopf
-(`kofi-button.png`, englisch `kofi-button-en.png` für die README) zeichnet `kofi-button.py` im Stil des
-Ko-fi-Widgets, mit Text und Farbe als Argumenten. Aufbereiten:
+nächste Bereich), der Hinweis auf die Quelle; davor der Ko-fi-Block (Tabelle mit einer zentrierten Spalte:
+`kofi-block.png` mit Frage und Knopf, darunter der Link). Die Bilder (`kofi-block.png`, `kofi-button.png`, englisch
+`kofi-button-en.png` für die README) zeichnet `kofi-button.py` im Stil des Ko-fi-Widgets, mit Text, Farbe und Frage
+als Argumenten. Aufbereiten:
 ```bash
 docs/handbuch/render.py list
 docs/handbuch/render.py render docs/handbuch/01-konzept/02-architektur.md

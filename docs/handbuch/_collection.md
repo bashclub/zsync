@@ -37,11 +37,10 @@ ist ein Konto bei code.bashclub.org nötig, die Anmeldung geht auch mit einem Gi
 Thorsten Spille, [spille-it.de](https://spille-it.de), [kontakt@spille-it.de](mailto:kontakt@spille-it.de)
 
 **Unterstützen**
-Gefällt dir bashclub-zsync?
 
-![Unterstütze die Entwicklung](https://code.bashclub.org/bashclub/zsync/raw/branch/main/docs/handbuch/kofi-button.png)
-
-[ko-fi.com/A0A1J73JR](https://ko-fi.com/A0A1J73JR)
+| ![](https://code.bashclub.org/bashclub/zsync/raw/branch/main/docs/handbuch/kofi-block.png) |
+|:---:|
+| [ko-fi.com/thorakel](https://ko-fi.com/A0A1J73JR) |
 
 Die Artikel entstehen im Repository unter `docs/handbuch` und werden von dort hierher veröffentlicht. Korrekturen bitte
 als Issue oder Pull Request.
