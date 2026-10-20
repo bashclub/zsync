@@ -1,5 +1,7 @@
 # zsync
 
+[Deutsch](README.de.md)
+
 > Development takes place at https://code.bashclub.org/bashclub/zsync
 >
 > Handbook (German, no login required): https://docs.bashclub.org/s/bashclub-zsync
@@ -106,7 +108,7 @@ chmod +x /usr/local/bin/bashclub-zsync /usr/local/bin/remote-snapshot-manager
 ~~~
 
 ## Documentation
-Handbook (German, readable without login): https://docs.bashclub.org/s/bashclub-zsync. Overview in German: [DOCUMENTATION_DE.md](DOCUMENTATION_DE.md).
+Handbook (German, readable without login): https://docs.bashclub.org/s/bashclub-zsync. In German: [README.de.md](README.de.md).
 
 
 ## Guided setup
@@ -521,7 +523,7 @@ Create the configuration of the disk first, its target has to be in the pool of 
 ~~~
 bashclub-zsync-disk create /dev/disk/by-id/usb-... usb-backup1 --luks --passphrase --config usb-backup1
 ~~~
-The udev rule `/etc/udev/rules.d/90-zsync-autorun-<label>.rules` matches the UUID of this disk only. A configuration with `trigger=autorun` gets no timer and no age check in the monitoring. The manual steps are in [notizen-luks](notizen-luks).
+The udev rule `/etc/udev/rules.d/90-zsync-autorun-<label>.rules` matches the UUID of this disk only. A configuration with `trigger=autorun` gets no timer and no age check in the monitoring.
 
 ### Define a cronjob
 #### cron.d example

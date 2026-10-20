@@ -1,5 +1,7 @@
 # bashclub-zsync
 
+[English](README.md)
+
 Pull-Replikation von ZFS-Datasets auf einen Backupserver: inkrementell, auch verschlüsselt (raw), fortsetzbar, mit
 Snapshots, Aufbewahrung, Checkmk-Monitoring und Restore. Der Backupserver holt die Daten von der Quelle; die Quelle hat
 keinen Zugriff auf das Backup.
