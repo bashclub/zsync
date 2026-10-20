@@ -11,7 +11,7 @@ Namen auf der Quelle, `<replikat>` für das Dataset auf dem Backupserver.
 - **`[WARN]`** braucht Aufmerksamkeit, aber die Replikation selbst ist gelungen; der Exit-Code bleibt 0. Wichtige
   Warnungen meldet auch Checkmk.
 
-Fehlerbilder mit ausführlicher Abhilfe stehen im Bereich Fehlerbehebung.
+Fehlerbilder mit ausführlicher Abhilfe stehen in [Typische Fehler](../07-fehlerbehebung/02-typische-fehler.md).
 
 ## Start des Laufs
 **`[ERROR] Another run with configuration … is still active (pid …). Skipping this run.`**
