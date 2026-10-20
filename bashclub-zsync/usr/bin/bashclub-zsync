@@ -951,6 +951,12 @@ for zvol in $tagged; do
     if [[ $source == "local" ]] && { [[ $name == "$target" ]] || [[ $name == "$target/"* ]]; }; then
         continue
     fi
+    # cascade: old chains after a rollback on the source (<replica>.zsync-branch-<date>, from bashclub-zsync on a backup
+    # server) are not replicated; this replication keeps its own old chain when it sees the rollback
+    if [[ $name =~ \.zsync-branch-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}(/|$) ]]; then
+        exclude_list="${exclude_list}\t${name} (old chain after a rollback on the source)\n"
+        continue
+    fi
     if [[ $value == "subvols" ]] || [[ $value == "all" ]]; then
         if [[ $property_source == "local" ]]; then selected_roots+=("$name"); fi
     fi
@@ -993,12 +999,24 @@ done <<< "$(remote "zfs list -Hp -o name,type,refquota -t filesystem,volume")"
 # original values of the properties the replication changes or leaves out (mountpoint, canmount, auto-snapshot,
 # refquota, tag) and where they come from, saved on the replica for a restore (save_source_props):
 # bashclub:zsync-source.<property>=<local|inherited|default|received|->:<value>
-declare -A source_props
+declare -A source_props source_replicas
 while IFS=$'\t' read -r dataset property value property_source; do
     if [[ -z $dataset ]]; then continue; fi
+    # cascade: the source dataset is a replica of bashclub-zsync 2.0 or its target (mark of the target, inherited)
+    if [[ $property == bashclub:zsync-target ]]; then
+        if [[ $property_source == "local" ]] || [[ $property_source == inherited* ]]; then source_replicas[$dataset]=1; fi
+        continue
+    fi
     if [[ $property_source == inherited* ]]; then property_source=inherited; fi
     source_props[$dataset]+="bashclub:zsync-source.$property=$property_source:$value"$'\n'
-done <<< "$(remote "zfs get -H -o name,property,value,source -t filesystem,volume mountpoint,canmount,com.sun:auto-snapshot,refquota,$tag 2>/dev/null")"
+done <<< "$(remote "zfs get -H -o name,property,value,source -t filesystem,volume mountpoint,canmount,com.sun:auto-snapshot,refquota,$tag,bashclub:zsync-target 2>/dev/null")"
+if [ $zfs_auto_snapshot_keep -gt 1 ] && [[ $zfs_auto_snapshot_engine == "internal" ]]; then
+    cascade_count=0
+    for n in "${syncvols[@]}"; do [[ -n ${source_replicas[$n]} ]] && cascade_count=$((cascade_count + 1)); done
+    if [ $cascade_count -gt 0 ]; then
+        log "[WARN] $cascade_count selected datasets on the source are replicas of bashclub-zsync (cascade): no snapshots are created on them, their next replication would see them as a rollback. The replication uses their own snapshots, source_bookmark=1 keeps the chain. Set zfs_auto_snapshot_keep=0 in this configuration."
+    fi
+fi
 log "$include_list"
 log "$exclude_list"
 log "$checkzfs_headline\ncheckzfs_filter=$checkzfs_filter\n"
@@ -1052,6 +1070,10 @@ else
     if [[ $(zfs get -H -o value,source com.sun:auto-snapshot $target) != "false	local" ]]; then
         zfs set com.sun:auto-snapshot=false $target
     fi
+fi
+# mark of the target, inherited by all replicas: a cascade (a second stage replicating these replicas) recognizes them
+if [[ $(zfs get -H -o value,source bashclub:zsync-target $target 2>/dev/null) != "$target	local" ]]; then
+    zfs set bashclub:zsync-target=$target $target || log "[WARN] marking the target $target failed (bashclub:zsync-target)."
 fi
 
 #### snapshots to keep per label (snapshot_filter="hourly|daily=30"): label=N keeps the N newest snapshots of the label on
@@ -1253,7 +1275,7 @@ for name in "${syncvols[@]}"; do
         cm=
     fi
 
-    if [ $zfs_auto_snapshot_keep -gt 1 ]; then
+    if [ $zfs_auto_snapshot_keep -gt 1 ] && [[ -z ${source_replicas[$name]} ]]; then
         if [[ $zfs_auto_snapshot_engine == "internal" ]]; then
             debug "Running remote-snapshot-manager"
             status snapshot "$name"

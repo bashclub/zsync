@@ -16,6 +16,18 @@ Es gibt zwei Wege, die sich kombinieren lassen:
   Snapshot mit dem Label `zfs_auto_snapshot_label` (Standard `backup`) an und behält auf der Quelle so viele davon.
   Das Label wird automatisch mit übertragen.
 
+### Eigene Snapshots je Ziel
+Die Snapshots der Quelle rotiert ein anderes Werkzeug nach seinem eigenen Zeitplan. Läuft eine Replikation seltener als
+diese Rotation, etwa offsite einmal pro Woche, oder fällt sie ein paar Tage aus, ist ihr letzter Snapshot auf der
+Quelle weg, und die Kette reißt. Die Snapshots von zsync verhindern das: Mit einem eigenen Label je Ziel
+(z. B. `zsync-backup1`, `zsync-offsite`, `zsync-pve2`) löscht jede Replikation nur ihre eigenen Snapshots, und der
+letzte übertragene bleibt auf der Quelle, bis sie wieder läuft. Für Offsite-Replikationen, Wechseldatenträger und
+Failover-Replikate auf einem zweiten Proxmox ist das die Grundlage. `bashclub-zsync-setup` schlägt deshalb
+`zsync-<backupserver>` vor.
+
+Eine Ausnahme ist die [Kaskade](../03-szenarien/06-kaskade.md): Die zweite Stufe kann auf den Replikaten des ersten
+Backupservers keine eigenen Snapshots anlegen; dort hält ein Bookmark die Kette.
+
 ## Snapshot-Engines
 Die Snapshots von zsync legt eine von zwei Engines an (`zfs_auto_snapshot_engine`). `zas` steht für
 `zfs-auto-snapshot`: zsync ruft dieses Programm auf der Quelle auf. `internal` ist der `remote-snapshot-manager`, den

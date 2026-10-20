@@ -89,6 +89,11 @@ conf=/etc/bashclub/zsync.conf
 bashclub-zsync -c "$conf"
 ```
 
+**Kaskade** (ein zweiter Backupserver oder ein Wechseldatenträger holt von den Replikaten des ersten): erst die zweite
+Stufe aktualisieren, dann den ersten Backupserver, oder beide zusammen. Nach einem Rollback auf der Quelle legt 2.0 auf
+dem ersten Backupserver unter dem alten Namen eine neue Kette an; eine zweite Stufe mit 1.0 bricht dann für dieses
+Dataset dauerhaft ab, 2.0 legt dort ebenfalls eine neue Kette an. Siehe [Kaskade](../03-szenarien/06-kaskade.md).
+
 ## Prüfung danach
 Der Zustand aller Configs, so wie ihn Checkmk sieht (Exit-Code 0 OK, 1 WARN, 2 CRIT):
 ```bash

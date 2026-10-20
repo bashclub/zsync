@@ -83,6 +83,15 @@ Ab 2.0. `apt install pv` auf dem Backupserver.
 Ab 2.0. Die Engine `zas` braucht `zfs-auto-snapshot` auf der Quelle. Dort installieren oder auf die Engine `internal`
 wechseln, siehe [Snapshot-Engine und Label-Abgleich](../02-installation/06-snapshot-engine-und-labels.md).
 
+**`[WARN] marking the target … failed (bashclub:zsync-target).`**
+Ab 2.0. Das Target ist nicht markiert; eine [Kaskade](../03-szenarien/06-kaskade.md) erkennt seine Replikate dann
+nicht. Ohne root fehlt meist das Recht `userprop` am Target (siehe [Betrieb ohne root](../02-installation/05-betrieb-ohne-root.md)).
+
+**`[WARN] … selected datasets on the source are replicas of bashclub-zsync (cascade): no snapshots are created on them …`**
+Ab 2.0. Diese Config holt von den Replikaten eines anderen Backupservers ([Kaskade](../03-szenarien/06-kaskade.md)) und
+hat eigene Snapshots eingeschaltet. Auf den Replikaten legt sie keine an, weil der andere Backupserver sie beim nächsten
+Lauf als Rollback sähe. `zfs_auto_snapshot_keep=0` in der Config setzen; `source_bookmark=1` hält die Kette.
+
 ## Je Dataset: Snapshots und Übertragung
 **`[WARN] <dataset> - snapshots on the source contain the label …, but do not match the name scheme of the snapshot engine … (e.g. left over after switching the engine). …`**
 Ab 2.0. Altlasten auf der Quelle, meist nach einem Wechsel der Engine. Die Meldung nennt sie mit Namen; löschen, wie in
