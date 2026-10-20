@@ -1,7 +1,8 @@
 ---
 title: Restore vom Wechseldatenträger
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/restore-vom-wechseldatentrager-eJPwM06mRw
+outline_id: 3c9be128-6a2a-4d07-969b-b5e8a8896f70
 ---
 Ab 2.0. Die Platte eines [Wechseldatenträgers](../03-szenarien/03-wechseldatentraeger.md) lässt sich am Backupserver
 auslesen oder an jedem anderen Host mit ZFS, z. B. an einem frisch installierten Proxmox, wenn der Backupserver selbst
