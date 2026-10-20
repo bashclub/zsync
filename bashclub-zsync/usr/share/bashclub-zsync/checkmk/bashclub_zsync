@@ -44,6 +44,10 @@ RUN_DIR=${ZSYNC_RUN_DIR:-/run/bashclub-zsync}
 LIB_DIR=${ZSYNC_LIB_DIR:-/var/lib/bashclub-zsync}
 CHECK_DIR=${ZSYNC_CHECK_DIR:-$LIB_DIR/$(id -un)}
 only_id=
+# --age-limits: for the internal check of bashclub-zsync only the thresholds for the age of the last successful run of
+# one configuration: "<warn> <crit> <learning>" in seconds, "-" without an age check (no service, no state change)
+limits_mode=0
+if [[ $1 == "--age-limits" ]]; then limits_mode=1; shift; fi
 if [[ $1 == "--config" ]] && [[ -n $2 ]]; then only_id=$(readlink -m "$2" | tr '/' '_'); fi
 PROC=${ZSYNC_PROC:-/proc}
 SYSTEMCTL=${ZSYNC_SYSTEMCTL:-systemctl}
@@ -64,6 +68,87 @@ learn_intervals=5       # start intervals needed before the age check can become
 orphan_grace=86400      # replicas without source / not selected anymore: WARN after 1 day (renaming, migration)
 CONF_FILE=${ZSYNC_CHECK_CONF:-/etc/bashclub/zsync-checkmk.conf}
 if [ -r "$CONF_FILE" ]; then . "$CONF_FILE"; fi
+
+# thresholds for the age of the last successful run of a configuration (also for the internal check of bashclub-zsync,
+# --age-limits): sets warn_at and crit_at (empty while nothing is learned yet), learning and source_text; age_skip is
+# the reason when there is no age check, age_note a hint on an invalid monitor_max_age
+function age_limits() {
+    age_note= age_skip= warn_at= crit_at= learning=0 source_text= interval= grace=
+    max_age=$(conf_value "$conf" monitor_max_age)
+    if [[ -n $max_age ]] && ! [[ $max_age =~ ^[0-9]+[dhms]?$ ]]; then
+        age_note="invalid monitor_max_age=$max_age ignored"
+        max_age=
+    fi
+    # removable disk (trigger=autorun or used by zsync-autorun@): runs only when the disk is connected
+    autorun=$(conf_value "$conf" trigger)
+    if [[ $autorun != "autorun" ]]; then
+        for link in "$DEFAULT_DIR"/zsync-autorun@*; do
+            if [[ -e $link ]] && [[ $(readlink -f "$link") == "$(readlink -f "$conf")" ]]; then autorun=autorun; fi
+        done
+    fi
+    if [[ $max_age == 0 ]]; then
+        age_skip="age check disabled (monitor_max_age=0)"; return
+    elif [[ -z $max_age ]] && [[ $autorun == "autorun" ]]; then
+        age_skip="no age check for a removable disk (autorun), set monitor_max_age for one"; return
+    elif [[ -z ${last[ok_end]} ]]; then
+        age_skip="no successful run yet"; return
+    fi
+    ok_duration=${last[ok_duration]:-0}
+    # an active run that takes longer than the last one is watched by the phase, progress and D state checks
+    if [ $running -eq 1 ] && [ $((NOW - ${st[run_start]})) -gt $ok_duration ]; then
+        ok_duration=$((NOW - ${st[run_start]}))
+    fi
+    learning=0
+    # systemd timer of this configuration (bashclub-zsync@<name>.timer): interval from its last and next start
+    # (last and next instead of the schedule: a schedule like weekdays 6-22 every 15 min has a pause at night)
+    timer_interval=
+    if [[ $(dirname "$conf") == "$CONF_DIR" ]] && command -v "$SYSTEMCTL" > /dev/null \
+        && "$SYSTEMCTL" is-active --quiet "bashclub-zsync@$name.timer" 2>/dev/null; then
+        timer_last=$("$SYSTEMCTL" show -p LastTriggerUSec --value "bashclub-zsync@$name.timer" 2>/dev/null)
+        timer_next=$("$SYSTEMCTL" show -p NextElapseUSecRealtime --value "bashclub-zsync@$name.timer" 2>/dev/null)
+        if [[ -n $timer_last && $timer_last != n/a ]]; then timer_last=$(date -d "$timer_last" +%s 2>/dev/null); else timer_last=; fi
+        if [[ -n $timer_next && $timer_next != n/a ]]; then timer_next=$(date -d "$timer_next" +%s 2>/dev/null); else timer_next=; fi
+        # timer not triggered yet (e.g. started by hand): the last successful run is the last start
+        if [[ -z $timer_last ]]; then timer_last=${last[ok_start]}; fi
+        if [[ -n $timer_last && -n $timer_next ]] && [ $timer_next -gt $timer_last ]; then
+            timer_interval=$((timer_next - timer_last))
+        fi
+    fi
+    if [[ -n $max_age ]]; then
+        warn_at=$(seconds "$max_age")
+        crit_at=$((warn_at * 3))
+        source_text="monitor_max_age=$max_age"
+    elif [[ -n $timer_interval ]]; then
+        interval=$timer_interval
+        grace=$((interval / 5))
+        if [ $grace -lt 300 ]; then grace=300; fi
+        warn_at=$((interval + grace + ok_duration))
+        crit_at=$((3 * interval + ok_duration))
+        if [ $crit_at -le $warn_at ]; then crit_at=$((warn_at + grace)); fi
+        source_text="interval $(duration $interval) from bashclub-zsync@$name.timer"
+    else
+        # median of the intervals between the start times
+        intervals=$(sort -n "$lib_d/$id.history" 2>/dev/null | awk 'NR > 1 && $1 > p { print $1 - p } { p = $1 }' | sort -n)
+        count=$(grep -c . <<< "$intervals")
+        if [ $count -eq 0 ]; then
+            warn_at=
+            source_text="learning 0/$learn_intervals"
+        else
+            interval=$(awk '{ a[NR] = $1 } END { print (NR % 2) ? a[(NR + 1) / 2] : int((a[NR / 2] + a[NR / 2 + 1]) / 2) }' <<< "$intervals")
+            grace=$((interval / 5))
+            if [ $grace -lt 300 ]; then grace=300; fi
+            warn_at=$((interval + grace + ok_duration))
+            crit_at=$((3 * interval + ok_duration))
+            if [ $crit_at -le $warn_at ]; then crit_at=$((warn_at + grace)); fi
+            if [ $count -lt $learn_intervals ]; then
+                learning=1
+                source_text="learning $count/$learn_intervals, preliminary interval $(duration $interval)"
+            else
+                source_text="interval $(duration $interval) from $count runs"
+            fi
+        fi
+    fi
+}
 
 # 3725 -> 1h 2m
 function duration() {
@@ -224,6 +309,12 @@ for id in $ids; do
         fi
     fi
 
+    if [ $limits_mode -eq 1 ]; then
+        age_limits
+        if [[ -n $age_skip ]] || [[ -z $warn_at ]]; then echo "-"; else echo "$warn_at $crit_at $learning"; fi
+        continue
+    fi
+
     if [ $running -eq 1 ]; then
         phase=${st[phase]}
         phase_age=$((NOW - ${st[phase_since]:-NOW}))
@@ -355,81 +446,12 @@ for id in $ids; do
     if [ $nosnap -gt 0 ]; then state_text+=("$nosnap datasets without matching snapshots"); fi
 
     #### age of the last successful run
-    max_age=$(conf_value "$conf" monitor_max_age)
-    if [[ -n $max_age ]] && ! [[ $max_age =~ ^[0-9]+[dhms]?$ ]]; then
-        state_text+=("invalid monitor_max_age=$max_age ignored")
-        max_age=
-    fi
-    # removable disk (trigger=autorun or used by zsync-autorun@): runs only when the disk is connected
-    autorun=$(conf_value "$conf" trigger)
-    if [[ $autorun != "autorun" ]]; then
-        for link in "$DEFAULT_DIR"/zsync-autorun@*; do
-            if [[ -e $link ]] && [[ $(readlink -f "$link") == "$(readlink -f "$conf")" ]]; then autorun=autorun; fi
-        done
-    fi
-    if [[ $max_age == 0 ]]; then
-        state_text+=("age check disabled (monitor_max_age=0)")
-    elif [[ -z $max_age ]] && [[ $autorun == "autorun" ]]; then
-        state_text+=("no age check for a removable disk (autorun), set monitor_max_age for one")
-    elif [[ -z ${last[ok_end]} ]]; then
-        state_text+=("no successful run yet")
+    age_limits
+    if [[ -n $age_note ]]; then state_text+=("$age_note"); fi
+    if [[ -n $age_skip ]]; then
+        state_text+=("$age_skip")
     else
         age=$((NOW - ${last[ok_end]}))
-        ok_duration=${last[ok_duration]:-0}
-        # an active run that takes longer than the last one is watched by the phase, progress and D state checks
-        if [ $running -eq 1 ] && [ $((NOW - ${st[run_start]})) -gt $ok_duration ]; then
-            ok_duration=$((NOW - ${st[run_start]}))
-        fi
-        learning=0
-        # systemd timer of this configuration (bashclub-zsync@<name>.timer): interval from its last and next start
-        # (last and next instead of the schedule: a schedule like weekdays 6-22 every 15 min has a pause at night)
-        timer_interval=
-        if [[ $(dirname "$conf") == "$CONF_DIR" ]] && command -v "$SYSTEMCTL" > /dev/null \
-            && "$SYSTEMCTL" is-active --quiet "bashclub-zsync@$name.timer" 2>/dev/null; then
-            timer_last=$("$SYSTEMCTL" show -p LastTriggerUSec --value "bashclub-zsync@$name.timer" 2>/dev/null)
-            timer_next=$("$SYSTEMCTL" show -p NextElapseUSecRealtime --value "bashclub-zsync@$name.timer" 2>/dev/null)
-            if [[ -n $timer_last && $timer_last != n/a ]]; then timer_last=$(date -d "$timer_last" +%s 2>/dev/null); else timer_last=; fi
-            if [[ -n $timer_next && $timer_next != n/a ]]; then timer_next=$(date -d "$timer_next" +%s 2>/dev/null); else timer_next=; fi
-            # timer not triggered yet (e.g. started by hand): the last successful run is the last start
-            if [[ -z $timer_last ]]; then timer_last=${last[ok_start]}; fi
-            if [[ -n $timer_last && -n $timer_next ]] && [ $timer_next -gt $timer_last ]; then
-                timer_interval=$((timer_next - timer_last))
-            fi
-        fi
-        if [[ -n $max_age ]]; then
-            warn_at=$(seconds "$max_age")
-            crit_at=$((warn_at * 3))
-            source_text="monitor_max_age=$max_age"
-        elif [[ -n $timer_interval ]]; then
-            interval=$timer_interval
-            grace=$((interval / 5))
-            if [ $grace -lt 300 ]; then grace=300; fi
-            warn_at=$((interval + grace + ok_duration))
-            crit_at=$((3 * interval + ok_duration))
-            if [ $crit_at -le $warn_at ]; then crit_at=$((warn_at + grace)); fi
-            source_text="interval $(duration $interval) from bashclub-zsync@$name.timer"
-        else
-            # median of the intervals between the start times
-            intervals=$(sort -n "$lib_d/$id.history" 2>/dev/null | awk 'NR > 1 && $1 > p { print $1 - p } { p = $1 }' | sort -n)
-            count=$(grep -c . <<< "$intervals")
-            if [ $count -eq 0 ]; then
-                warn_at=
-                source_text="learning 0/$learn_intervals"
-            else
-                interval=$(awk '{ a[NR] = $1 } END { print (NR % 2) ? a[(NR + 1) / 2] : int((a[NR / 2] + a[NR / 2 + 1]) / 2) }' <<< "$intervals")
-                grace=$((interval / 5))
-                if [ $grace -lt 300 ]; then grace=300; fi
-                warn_at=$((interval + grace + ok_duration))
-                crit_at=$((3 * interval + ok_duration))
-                if [ $crit_at -le $warn_at ]; then crit_at=$((warn_at + grace)); fi
-                if [ $count -lt $learn_intervals ]; then
-                    learning=1
-                    source_text="learning $count/$learn_intervals, preliminary interval $(duration $interval)"
-                else
-                    source_text="interval $(duration $interval) from $count runs"
-                fi
-            fi
-        fi
         text="last successful run $(duration $age) ago ($source_text)"
         if [[ -n $warn_at ]]; then
             metrics=("last_success_age=$age;$warn_at;$crit_at" "${metrics[@]}")
