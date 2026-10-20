@@ -11,6 +11,8 @@ in Outline endet mit einem Link auf ihre Datei hier.
 - Ein Ordner je Bereich (`01-konzept`, `02-installation`, …), die Nummer bestimmt die Reihenfolge.
 - `_index.md` im Ordner ist die Seite des Bereichs in Outline, die Artikel des Ordners hängen darunter.
 - Artikel heißen `NN-name.md`, die Nummer bestimmt die Reihenfolge im Bereich.
+- `_collection.md` ist die Beschreibung der Collection (Startseite des Handbuchs mit der Liste der Kapitel). Ein neuer
+  Bereich kommt dort dazu.
 
 Jede Datei beginnt mit einem Kopf:
 ```
@@ -68,7 +70,18 @@ docs/handbuch/render.py list
 docs/handbuch/render.py render docs/handbuch/01-konzept/02-architektur.md
 ```
 Ein neuer Artikel wird zuerst angelegt und seine Adresse in `outline:` eingetragen, danach werden Links auf ihn
-aufgelöst. Links auf noch nicht veröffentlichte Artikel bricht `render` ab (`--allow-missing` lässt nur den Text
+aufgelöst. `_collection.md` geht ohne den Hinweis am Ende in die Beschreibung der Collection.
+
+Reihenfolge: Outline setzt neue Seiten an eine beliebige Stelle ihrer Ebene (meist an den Anfang). Nach dem Anlegen
+deshalb **alle** Seiten des betroffenen Bereichs und den Bereich selbst an ihre Position schieben, nicht nur die neue
+Seite; eine Seite in der Mitte verschiebt die folgenden. `render.py list` liefert dafür je Zeile in Spalte 5 die
+Position (0-basiert, `index` von `move_document`), in Spalte 6 die eigene ID und in Spalte 7 die ID des Elternteils
+(für einen Bereich die Collection, sonst die `_index.md` des Bereichs):
+```bash
+docs/handbuch/render.py list | awk -F'\t' '{ print $5, $6, $7, $1 }'
+```
+Die Positionen in aufsteigender Reihenfolge setzen (erst 0, dann 1, …). Zum Schluss mit `list_collection_documents`
+gegen `render.py list` prüfen. Links auf noch nicht veröffentlichte Artikel bricht `render` ab (`--allow-missing` lässt nur den Text
 stehen).
 
 ## Prüfung
