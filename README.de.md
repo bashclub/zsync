@@ -18,7 +18,7 @@ Die Quelle liegt im Repository unter [`docs/handbuch`](docs/handbuch), das Handb
 
 | Kapitel | Inhalt |
 |---|---|
-| Konzept und Grundlagen | Pull statt Push, Kette und gemeinsamer Snapshot, Backup statt Spiegel, Monitoring |
+| Konzept und Grundlagen | Pull statt Push, Kette und gemeinsamer Snapshot, Spiegel oder Backup, Monitoring |
 | Installation, Upgrade und Migration | Paketquelle, Einrichtung mit `bashclub-zsync-setup`, Update von 1.0, neue Funktionen einschalten |
 | Szenarien | LAN, lokal, Wechseldatenträger, Offsite, Kaskade, Cluster, TrueNAS u. a., je Schritt für Schritt |
 | Betrieb, Monitoring und Wartung | Zustände in Checkmk und was zu tun ist, Entscheidungen mit `bashclub-zsync-maintenance` |
