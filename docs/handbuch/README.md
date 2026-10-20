@@ -63,14 +63,16 @@ Das Handbuch beschreibt 2.0 und alles danach. Eine Historie zu 1.0 gibt es nicht
 - Auf Tickets mit voller Adresse, nur wenn sie dem Leser weiterhelfen.
 
 ## Veröffentlichen
-`render.py` bereitet eine Datei für Outline auf (Kopf entfernt, Links auf Outline-Adressen, Hinweis auf die Quelle
-am Ende):
+`render.py` bereitet eine Datei für Outline auf: Kopf entfernt, Links auf Outline-Adressen, am Ende ein Link
+„Weiter“ auf den nächsten Artikel in der Reihenfolge von `render.py list` (nach dem letzten Artikel eines Bereichs der
+nächste Bereich), der Hinweis auf die Quelle und der Link auf Ko-fi:
 ```bash
 docs/handbuch/render.py list
 docs/handbuch/render.py render docs/handbuch/01-konzept/02-architektur.md
 ```
 Ein neuer Artikel wird zuerst angelegt und seine Adresse in `outline:` eingetragen, danach werden Links auf ihn
-aufgelöst. `_collection.md` geht ohne den Hinweis am Ende in die Beschreibung der Collection.
+aufgelöst. `_collection.md` geht ohne den Hinweis am Ende in die Beschreibung der Collection. Ein neuer, verschobener
+oder umbenannter Artikel ändert den Link „Weiter“ seines Vorgängers: den Vorgänger mit veröffentlichen.
 
 Reihenfolge: Outline setzt neue Seiten an eine beliebige Stelle ihrer Ebene (meist an den Anfang). Nach dem Anlegen
 deshalb **alle** Seiten des betroffenen Bereichs und den Bereich selbst an ihre Position schieben, nicht nur die neue
