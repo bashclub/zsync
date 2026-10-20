@@ -1,9 +1,23 @@
 name: bashclub-zsync
+# reine Doku-Änderungen bauen und veröffentlichen kein Paket (#132); greift nur, wenn alle geänderten Dateien darunter
+# fallen. CHANGELOG.md liegt im Paket und baut weiter; Tags prüfen keine Pfade und bauen immer.
 on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - "DOCUMENTATION_DE.md"
+      - "CONTRIBUTING.md"
+      - "notizen-luks"
   pull_request:
+    paths-ignore:
+      - "docs/**"
+      - "README.md"
+      - "DOCUMENTATION_DE.md"
+      - "CONTRIBUTING.md"
+      - "notizen-luks"
   # manuell neu bauen (z. B. nach Änderungen an ci-tools oder Secrets)
   workflow_dispatch:
 
