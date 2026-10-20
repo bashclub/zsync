@@ -18,7 +18,7 @@
 #   /var/lib/bashclub-zsync/<user>/<config>.last    result of the last run and of the last successful run
 #   /var/lib/bashclub-zsync/<user>/<config>.history start times of the last runs
 #   /var/lib/bashclub-zsync/<user>/<config>.skipped times of runs skipped because of an active run
-#   /var/lib/bashclub-zsync/<user>/<config>.datasets state per dataset: dataset, state, since, detail
+#   /var/lib/bashclub-zsync/<user>/<config>.datasets state per dataset (also excluded): dataset, state, since, detail
 #   /var/lib/bashclub-zsync/<user>/<config>.check   state of this check (transfer progress, blocked processes),
 #                                                   in the folder of the user that runs the check
 #
@@ -392,7 +392,7 @@ for id in $ids; do
 
     #### state per dataset (written by the last run)
     declare -a ds_crit=() ds_risk=() ds_div=() ds_orphan=() ds_failed=() ds_blocked=() ds_branch=()
-    kept=0; nosnap=0; orphan_new=0; branched=(); branch_kept=0
+    kept=0; nosnap=0; orphan_new=0; branched=(); branch_kept=0; excluded=()
     if [[ -f $lib_d/$id.datasets ]]; then
         while IFS=$'\t' read -r ds dstate since detail; do
             since=$(number "$since")
@@ -414,6 +414,7 @@ for id in $ids; do
                 branch) ds_branch+=("$ds ($detail)") ;;
                 branch_kept) ((branch_kept++)) ;;
                 no_snapshots) ((nosnap++)) ;;
+                excluded) excluded+=("$ds") ;;
             esac
         done < "$lib_d/$id.datasets"
     fi
@@ -444,6 +445,7 @@ for id in $ids; do
     if [ ${#branched[@]} -gt 0 ]; then state_text+=("new chain after a rollback on the source: $(shortlist "${branched[@]}")"); fi
     if [ $branch_kept -gt 0 ]; then state_text+=("$branch_kept old chains kept"); fi
     if [ $nosnap -gt 0 ]; then state_text+=("$nosnap datasets without matching snapshots"); fi
+    if [ ${#excluded[@]} -gt 0 ]; then state_text+=("excluded: $(shortlist "${excluded[@]}")"); fi
 
     #### age of the last successful run
     age_limits
