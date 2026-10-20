@@ -192,5 +192,17 @@ unset ZSYNC_SYSTEMCTL ZSYNC_CONF_DIR
 reset; last 0 $((T - 1800)) $((T - 1800)) 120; history 3600 6
 out=$(run); ((count++)); if [[ $out == **"last_success_age=1800;4440;10920|last_duration=120|datasets_failed=0 "* ]]; then echo "ok   Metriken"; else echo "FAIL Metriken: $out"; ((failed++)); fi
 
+# --age-limits (für die eingebaute Prüfung von bashclub-zsync): nur die Schwellen des Alters, kein Service
+limits() {
+  local out; out=$(ZSYNC_NOW=$T bash "$check" --age-limits --config "$conf"); ((count++))
+  if [[ $out == "$2" ]]; then echo "ok   $1"; else echo "FAIL $1: erwartet '$2', erhalten '$out'"; ((failed++)); fi
+}
+reset; last 0 $((T - 1800)) $((T - 1800)) 120; history 3600 6; limits "Schwellen: Intervall aus 5 Läufen" "4440 10920 0"
+reset; last 0 $((T - 1800)); history 3600 3; limits "Schwellen: Lernphase" "4380 10860 1"
+reset 'monitor_max_age=26h'; last 0 $((T - 1800)); limits "Schwellen: monitor_max_age" "93600 280800 0"
+reset 'monitor_max_age=0'; last 0 $((T - 1800)); limits "Schwellen: Altersprüfung aus" "-"
+reset; last 1 $((T - 60)) ""; limits "Schwellen: noch kein Erfolg" "-"
+reset; last 0 $((T - 60)); limits "Schwellen: noch kein Abstand" "-"
+
 echo "$((count - failed))/$count bestanden"
 [ $failed -eq 0 ]

@@ -81,8 +81,18 @@ ab, weil auf der Quelle oder dem Backupserver ein Bookmark existiert. Abhilfe: `
 [Neue Funktionen einschalten](../02-installation/07-neue-funktionen-einschalten.md).
 
 - **Kein Replikat gefunden:** Das Dataset ist ausgewählt, aber noch nicht repliziert, meist vor der Erstreplikation.
-- **Neuester Snapshot des Replikats fehlt auf der Quelle (CRIT):** Rollback auf der Quelle; siehe oben, alte Kette.
+- **Neuester Snapshot des Replikats fehlt auf der Quelle:** Rollback auf der Quelle; siehe oben, alte Kette (mit
+  checkzfs CRIT, eingebaut WARN).
 - **Kein gemeinsamer Snapshot (CRIT, nur `monitor_engine=internal`):** Kette gerissen, siehe oben.
+- **Nicht repliziert seit … (nur eingebaut):** Die Läufe gelingen, aber dieses Dataset wurde länger nicht übertragen.
+  Im Log des letzten Laufs nach dem Dataset suchen (`[ERROR]` oder `[WARN]`).
+- **Die Quelle legt keine neuen Snapshots an (nur eingebaut):** Repliziert wird, aber der neueste gemeinsame Snapshot
+  ist alt. Snapshot-Engine bzw. `zfs-auto-snapshot` auf der Quelle prüfen.
+- **Mehr Snapshots auf dem Replikat als erwartet (nur eingebaut):** meist blockierte Rotation oder Snapshots in fremdem
+  Namensschema; siehe oben.
+- **`com.sun:auto-snapshot` am Replikat nicht `false` (CRIT, nur eingebaut):** `zfs-auto-snapshot` auf dem Backupserver
+  würde Snapshots der Replikate anlegen und die Ketten stören. Am Target `zfs set com.sun:auto-snapshot=false` setzen
+  und an den Replikaten lokale Werte entfernen (`zfs inherit`).
 - **Alter des neuesten Snapshots zu hoch:** Für dieses Dataset kam länger nichts an. Zusammen mit einem Problem im
   Service der Config ansehen.
 - **Zu viele Snapshots:** Die Aufbewahrung behält mehr, als `checkzfs_max_snapshot_count` erlaubt, oder die Rotation

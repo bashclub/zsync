@@ -43,7 +43,7 @@ Debian 12 (one-line format, `/etc/apt/sources.list`):
 sed -i -E '/^deb .*debian\.org/{/ contrib( |$)/!s/$/ contrib/}' /etc/apt/sources.list
 ~~~
 
-`bashclub-checkzfs` (monitoring, see [checkzfs](https://code.bashclub.org/bashclub/checkzfs)) comes from the bashclub repository itself.
+`bashclub-checkzfs` (see [checkzfs](https://code.bashclub.org/bashclub/checkzfs)) comes from the bashclub repository itself; it is only recommended since 2.0, because `bashclub-zsync` checks the snapshots per dataset itself (`monitor_engine=internal`).
 
 #### 2. Add the bashclub repository and install
 The release codename (`bookworm`, `trixie`, `noble` or `resolute`) is read from `/etc/os-release`, so the commands can be copied as they are.
@@ -85,9 +85,7 @@ dir=$(zfs get -H -o value mountpoint "$pool")/scripts/bashclub-zsync
 mkdir -p "$dir" && cd "$dir"
 curl -fsSL -o bashclub-zsync https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/bashclub-zsync
 curl -fsSL -o remote-snapshot-manager https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/remote-snapshot-manager
-# optional: checkzfs for monitoring
-curl -fsSL -o checkzfs https://code.bashclub.org/bashclub/checkzfs/raw/branch/main/bashclub-checkzfs/usr/bin/checkzfs
-chmod +x bashclub-zsync remote-snapshot-manager checkzfs
+chmod +x bashclub-zsync remote-snapshot-manager
 
 # creates zsync.conf on first run, adjust it afterwards
 ./bashclub-zsync -c "$dir/zsync.conf"
@@ -95,7 +93,7 @@ chmod +x bashclub-zsync remote-snapshot-manager checkzfs
 # prints the command for the cron job
 echo "$dir/bashclub-zsync -c $dir/zsync.conf >> $dir/bashclub-zsync.log 2>&1"
 ~~~
-`bashclub-zsync` finds `remote-snapshot-manager` and `checkzfs` in its own directory. Create the cron job in the web UI under *System → Advanced Settings → Cron Jobs* with the command printed by the last line.
+`bashclub-zsync` finds `remote-snapshot-manager` in its own directory; the new configuration checks the snapshots per dataset itself (`monitor_engine=internal`), checkzfs is not needed. Create the cron job in the web UI under *System → Advanced Settings → Cron Jobs* with the command printed by the last line.
 The log is not covered by logrotate there, so `bashclub-zsync` rotates it itself at 10 MiB and keeps 4 compressed old logs (`bashclub-zsync.log.1.gz` … `.4.gz`).
 
 `zfs-auto-snapshot` is not available on TrueNAS, keep `zfs_auto_snapshot_engine="internal"`.
@@ -105,11 +103,6 @@ The log is not covered by logrotate there, so `bashclub-zsync` rotates it itself
 wget -q --no-cache -O /usr/local/bin/bashclub-zsync https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/bashclub-zsync
 wget -q --no-cache -O /usr/local/bin/remote-snapshot-manager https://code.bashclub.org/bashclub/zsync/raw/branch/main/bashclub-zsync/usr/bin/remote-snapshot-manager
 chmod +x /usr/local/bin/bashclub-zsync /usr/local/bin/remote-snapshot-manager
-
-# optional: download checkzfs for monitoring (requires python3)
-wget -q --no-cache -O /usr/local/bin/checkzfs https://code.bashclub.org/bashclub/checkzfs/raw/branch/main/bashclub-checkzfs/usr/bin/checkzfs
-chmod +x /usr/local/bin/checkzfs
-checkzfs --help
 ~~~
 
 ## Documentation
@@ -194,6 +187,11 @@ source_hold=1
 # stopped in the next run instead of starting again; 1 = on, 0 = off
 # existing configurations without this setting keep 0, new configurations get 1
 transfer_resume=1
+
+# check of the snapshots per dataset (services <checkzfs_prefix>:<source>#<dataset>): checkzfs (package
+# bashclub-checkzfs) or internal (built in, from the snapshots of the replicated datasets at the end of the run, same
+# services and thresholds checkzfs_*); empty = checkzfs if installed, otherwise internal; new configs get internal
+monitor_engine=internal
 
 # disable checkzfs with value > 0
 checkzfs_disabled=0
@@ -294,7 +292,21 @@ The evaluation reads only status files of `bashclub-zsync` and `/proc`, it never
 
 The interval is the median of the start intervals of the last 10 runs, so it needs no configuration and manual runs do not change it. Until 5 intervals are known (learning phase) the age check is at most WARN. `monitor_max_age` in the configuration sets the maximum age instead (WARN, CRIT at 3 times the value), `monitor_max_age=0` disables the age check, e.g. for removable disks. All other checks are active from the first run. The thresholds can be changed in `/etc/bashclub/zsync-checkmk.conf`, e.g. `stall_crit=3600` (variables at the top of the check).
 
-The age of the replicated snapshots per dataset is still checked by checkzfs.
+#### Services per dataset
+The services `<checkzfs_prefix>:<source>:<port>#<dataset>` come from checkzfs or, since 2.0, from `bashclub-zsync` itself (`monitor_engine=internal`, default of new configurations; without the setting checkzfs if installed, otherwise internal). Names and thresholds (`checkzfs_*`) are the same, switching needs no new service discovery. The internal check reads only the replicated datasets, counts only snapshots of `snapshot_filter` and the label of zsync for age and rollback, writes one line per dataset and is not disturbed by bookmarks (checkzfs 4.14 stops at them):
+
+| Check | State |
+|---|---|
+| age of the newest common snapshot | WARN/CRIT after `checkzfs_max_age` (minutes) |
+| time since the last successful replication of the dataset | WARN/CRIT with the thresholds of the age check above |
+| snapshots on the source | WARN/CRIT after `checkzfs_max_snapshot_count` |
+| snapshots on the replica | WARN from expected + 5, CRIT from expected + 10 (`label=N`: N, otherwise the count on the source, at least `min_keep`) |
+| newest replica snapshot of the filter missing on the source (rollback) | WARN |
+| no common snapshot | CRIT |
+| `com.sun:auto-snapshot` of the replica not `false` | CRIT |
+| no replica yet | WARN |
+
+Metrics: `age`, `creation`, `file_size`, `fs_used`, `file_count` (snapshots of the replica; checkzfs counted both sides), `source_count`, `replication_age`. Datasets deselected below a selected one (e.g. `bashclub:zsync=false`) are listed as `excluded`. `-s` shows a table per dataset.
 
 ### State of the datasets
 `bashclub-zsync` records a state per dataset in `/var/lib/bashclub-zsync/<user>/<config>.datasets` and logs a copyable fix:
