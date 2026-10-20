@@ -19,6 +19,7 @@ import sys
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPO_URL = "https://code.bashclub.org/bashclub/zsync/src/branch/main/docs/handbuch/"
 KOFI_URL = "https://ko-fi.com/A0A1J73JR"
+KOFI_NAME = "ko-fi.com/thorakel"
 # the Ko-fi button (kofi-button.py) from the repository: readers load nothing from ko-fi.com; Outline cannot link an
 # image, so the address follows below it
 KOFI_BUTTON = "https://code.bashclub.org/bashclub/zsync/raw/branch/main/docs/handbuch/kofi-block.png"
@@ -117,9 +118,10 @@ def render(path, allow_missing):
         head_next = read(nxt)[0]
         if head_next.get("outline"):
             following = f"**Weiter:** [{head_next['title']}]({head_next['outline']})\n\n"
-    # end of the page: the Ko-fi block (question and button in one picture, Outline centers it; no alt text, Outline
-    # would show it as a caption), the next article, the note on the source
-    kofi = f"![]({KOFI_BUTTON})\n\n[{KOFI_URL.removeprefix('https://')}]({KOFI_URL})\n\n"
+    # end of the page: the Ko-fi block, a table of one centered column (question and button in one picture, no alt
+    # text, Outline would show it as a caption; below it the link) between empty paragraphs (\\ in Outline), the next
+    # article, the note on the source
+    kofi = f"\\\n\n| ![]({KOFI_BUTTON}) |\n|:---:|\n| [{KOFI_NAME}]({KOFI_URL}) |\n\n\\\n\n"
     note = (f"---\n\n*Quelle dieser Seite: [{rel(path)}]({REPO_URL}{rel(path)}) im Repository von bashclub-zsync. "
             "Änderungen bitte dort, diese Seite wird daraus erzeugt.*\n")
     return text.rstrip("\n") + "\n\n" + kofi + following + note
