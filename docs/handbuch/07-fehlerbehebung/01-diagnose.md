@@ -10,7 +10,9 @@ Der Weg von „Checkmk meldet etwas“ zur Ursache, in dieser Reihenfolge. Alle 
 ```bash
 bashclub-zsync -s
 ```
-Ab 2.0. Eine Zeile je Config und je Dataset, vorne `OK`, `WARN` oder `CRIT`, mit der Ursache im Text. `-s` repliziert
+Ab 2.0. Eine Zeile je Config und je Dataset, vorne `OK`, `WARN` oder `CRIT`, mit der Ursache im Text. Mit
+`monitor_engine=internal` folgt eine Tabelle je Dataset (gemeinsamer Snapshot, Alter, letzte Replikation, Anzahl auf
+Quelle und Replikat) und die Liste der ausgeschlossenen Datasets. `-s` repliziert
 nichts; es schreibt die Spool-Datei neu und fragt die Quelle nur nach den Snapshots für die Services je Dataset. Läuft
 eine Config ohne root, führt root die Prüfung als ihr Benutzer aus.
 

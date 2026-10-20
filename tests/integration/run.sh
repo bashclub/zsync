@@ -885,30 +885,55 @@ case_permissions() {
   check "Status von root in seinem Ordner" test -f "/var/lib/bashclub-zsync/root/$id.last"
   check "keine Status-Datei im Basisordner" test -z "$(find /var/lib/bashclub-zsync /run/bashclub-zsync -maxdepth 1 -type f)"
 }
-# eingebaute Prüfung je Dataset (monitor_engine=internal, #63): Services wie checkzfs, eine Zeile je Dataset, Bookmarks
+# eingebaute Prüfung je Dataset (monitor_engine=internal, #63, #135): Services wie checkzfs, eine Zeile je Dataset, nur die
+# ausgewählten Datasets, Snapshots nach snapshot_filter, Quelle und Replikat getrennt gezählt, Bookmarks stören nicht
 case_monitor_internal() {
-  local spool=/var/lib/check_mk_agent/spool/87000_zci-mon line out
+  local spool=/var/lib/check_mk_agent/spool/87000_zci-mon line out cmds R=$ZCI_POOL_DST/monitor_internal/$ZCI_POOL_SRC
   zfs create "$ZCI_POOL_SRC/data"; zfs create "$ZCI_POOL_SRC/data/a"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  zfs create "$ZCI_POOL_SRC/data/x"; zfs set bashclub:zsync=false "$ZCI_POOL_SRC/data/x"
+  zfs create "$ZCI_POOL_SRC/other"; zfs snapshot "$ZCI_POOL_SRC/other@zfs-auto-snap_daily-01"
   snap "$ZCI_POOL_SRC/data" 01; zfs snapshot "$ZCI_POOL_SRC/data/a@zfs-auto-snap_daily-01"
   config monitor_internal "checkzfs_disabled=0
 checkzfs_prefix=zci-mon
 monitor_engine=internal
+monitor_max_age=1h
 source_bookmark=1"
-  zsync
+  echo "===== $(date +%T) bashclub-zsync -d -c $conf" >> "$log"
+  bashclub-zsync -d -c "$conf" >> "$log" 2>&1; rc=$?
   equal "Exit-Code" 0 "$rc"
   check "Bookmark auf der Quelle" test -n "$(zfs list -H -t bookmark -o name "$ZCI_POOL_SRC/data")"
   check "Log nennt die Engine" grep -q 'check of the snapshots per dataset: internal' <(last_run_log)
   check "kein Python-Fehler" not grep -qE 'Traceback|add_snapshot' <(last_run_log)
+  cmds=$(grep -oE 'zfs list -Hp -(t snapshot -o name,guid,creation,written -s createtxg|o name,used)[^"]*' <(last_run_log) | sort -u)
+  check "Quelle: nur die ausgewählten Datasets ($cmds)" grep -q "createtxg $ZCI_POOL_SRC/data $ZCI_POOL_SRC/data/a *$" <<< "$cmds"
+  check "Quelle: kein anderes Dataset" not grep -qE "other|data/x" <<< "$cmds"
   line=$(grep "zci-mon:root@localhost:22#$ZCI_POOL_SRC/data " $spool)
-  check "Service wie checkzfs ($line)" grep -qE "^0 zci-mon:root@localhost:22#$ZCI_POOL_SRC/data age=[0-9]+;90000;360000\|creation=[0-9]+;;\|file_size=[0-9]+;;\|fs_used=[0-9]+;;\|file_count=1;150;165 $ZCI_POOL_DST/monitor_internal/$ZCI_POOL_SRC/data - OK$" <<< "$line"
-  equal "eine Zeile je Dataset" 2 "$(grep -c '^[0-3] zci-mon:' $spool)"
-  # Rollback auf der Quelle und Anzahl über der Schwelle: -s zeigt CRIT und WARN, ohne zu replizieren
+  check "Service wie checkzfs ($line)" grep -qE "^0 zci-mon:root@localhost:22#$ZCI_POOL_SRC/data age=[0-9]+;90000;360000\|creation=[0-9]+;;\|file_size=[0-9]+;;\|fs_used=[0-9]+;;\|file_count=1;6;11\|source_count=1;150;165(\|replication_age=[0-9;]+)? $R/data - OK; source 1, replica 1 \(expected 1\)$" <<< "$line"
+  equal "eine Zeile je Dataset, ausgeschlossene ohne Service" 2 "$(grep -c '^[0-3] zci-mon:' $spool)"
+  check "Zeit der Replikation je Dataset" grep -qE "^$ZCI_POOL_SRC/data/a	[0-9]+$" /var/lib/bashclub-zsync/root/"$id".replicated
+  check "ausgeschlossen im Zustand" grep -qE "^$ZCI_POOL_SRC/data/x	excluded	" /var/lib/bashclub-zsync/root/"$id".datasets
+  out=$(bashclub-zsync -c "$conf" -s 2>&1)
+  check "-s: Tabelle ($out)" grep -qE "^OK +$ZCI_POOL_SRC/data/a +zfs-auto-snap_daily-01 " <<< "$out"
+  check "-s: ausgeschlossene Datasets" grep -qx "excluded: $ZCI_POOL_SRC/data/x" <<< "$out"
+  # Snapshot außerhalb von snapshot_filter auf der Quelle: kein Befund
+  zfs snapshot "$ZCI_POOL_SRC/data/a@manual-1"
+  check "-s: ungefilterter Snapshot ohne Befund" grep -qE "^OK +zci-mon:root@localhost:22#$ZCI_POOL_SRC/data/a .*source 2, replica 1" <<< "$(bashclub-zsync -c "$conf" -s 2>&1)"
+  # com.sun:auto-snapshot am Replikat nicht false: CRIT, auch geerbt
+  zfs set com.sun:auto-snapshot=true "$R/data"
+  check "-s: auto-snapshot am Replikat CRIT" grep -qE "^CRIT +zci-mon:root@localhost:22#$ZCI_POOL_SRC/data/a .*com.sun:auto-snapshot" <<< "$(bashclub-zsync -c "$conf" -s 2>&1)"
+  zfs inherit com.sun:auto-snapshot "$R/data"
+  # Rollback auf der Quelle, Anzahl über der Schwelle der Quelle, Replikat über erwartet + 5
   snap "$ZCI_POOL_SRC/data" 02; zsync
   zfs rollback -r "$ZCI_POOL_SRC/data@zfs-auto-snap_daily-01"
+  for i in 1 2 3 4 5 6; do zfs snapshot "$R/data/a@extra-$i"; done
   set_conf "$conf" checkzfs_max_snapshot_count 0,5
   out=$(bashclub-zsync -c "$conf" -s 2>&1)
-  check "-s: Rollback CRIT ($out)" grep -qE "^CRIT +zci-mon:root@localhost:22#$ZCI_POOL_SRC/data .*rollback" <<< "$out"
-  check "-s: zu viele Snapshots WARN" grep -qE "^WARN +zci-mon:root@localhost:22#$ZCI_POOL_SRC/data/a .*too many snapshots on the replica" <<< "$out"
+  check "-s: Rollback WARN ($out)" grep -qE "^WARN +zci-mon:root@localhost:22#$ZCI_POOL_SRC/data .*missing on the source \(rollback\)" <<< "$out"
+  check "-s: zu viele Snapshots auf der Quelle" grep -qE "^WARN +zci-mon:root@localhost:22#$ZCI_POOL_SRC/data/a .*too many snapshots on the source" <<< "$out"
+  check "-s: Replikat über erwartet + 5" grep -qE "zci-mon:root@localhost:22#$ZCI_POOL_SRC/data/a .*more snapshots on the replica than expected" <<< "$out"
+  # Replikation alt (monitor_max_age=1h): CRIT
+  sed -i -E "s/\t[0-9]+$/\t$(( $(date +%s) - 20000 ))/" /var/lib/bashclub-zsync/root/"$id".replicated
+  check "-s: Replikation alt CRIT" grep -qE "^CRIT +zci-mon:root@localhost:22#$ZCI_POOL_SRC/data .*not replicated for 5h" <<< "$(bashclub-zsync -c "$conf" -s 2>&1)"
   # ohne monitor_engine: checkzfs, wenn installiert (wie vor 2.0), sonst intern
   sed -i '/^monitor_engine=/d' "$conf"; set_conf "$conf" source_bookmark 0
   zsync

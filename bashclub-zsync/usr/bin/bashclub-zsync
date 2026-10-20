@@ -461,6 +461,10 @@ EOF
     usage 0
 fi
 
+# snapshot_filter as configured (label=N included): the internal check needs it also with -s, which ends before the
+# replication parses it
+monitor_filter=$snapshot_filter
+
 # run status from here on (not for -h and not when the initial config file was created)
 run_start=$(date +%s)
 datasets_total=0
@@ -570,68 +574,158 @@ function run_checkzfs() {
         printf '%s\n' "$checkzfs_lines" > "$checkzfs_cache.tmp" && mv -f "$checkzfs_cache.tmp" "$checkzfs_cache"
     fi
 }
-# internal check of the snapshots per dataset (monitor_engine=internal), instead of checkzfs: one service per replicated
-# dataset with the name and the thresholds of checkzfs (checkzfs_prefix, checkzfs_max_age in minutes,
-# checkzfs_max_snapshot_count), the worse state of source and replica in one line; bookmarks are not snapshots here.
-# Two lists: all datasets and snapshots of the source (one ssh call, allowed for job users) and the target.
-# run_internal_check [file]: with a file name the output is also copied there
+# internal check of the snapshots per dataset (monitor_engine=internal, #63, #135), instead of checkzfs: one service per
+# replicated dataset, named like checkzfs (<checkzfs_prefix>:<source>:<port>#<dataset>) with its metrics, the worse
+# state of source and replica in one line. Only the replicated datasets are read: their snapshots on the source (in
+# blocks, forms allowed for job users) and the target. Snapshots count for age and rollback only if they match
+# snapshot_filter or the label of zsync, as in the replication; bookmarks are not snapshots here.
+#   age              newest common snapshot (same guid on both sides), checkzfs_max_age in minutes
+#   replication_age  last successful replication of the dataset (<config>.replicated), thresholds of the age check of
+#                    the service of the configuration (bashclub_zsync --age-limits)
+#   source_count     all snapshots of the dataset on the source, checkzfs_max_snapshot_count
+#   file_count       all snapshots of the replica; expected: label=N keeps N, other labels the count on the source (at
+#                    least min_keep); WARN from expected + 5, CRIT from expected + 10
+#   CRIT             replica without a common snapshot, com.sun:auto-snapshot of the replica not false
+#   WARN             replica missing, newest replica snapshot of the filter missing on the source (rollback)
+# Sets monitor_table (one line per dataset for -s). run_internal_check [file]: with a file name the output is also
+# copied there
+monitor_table=
 function run_internal_check() {
-    local source_list target_list service_source=
-    source_list=$(remote "zfs list -Hp -t filesystem,volume,snapshot -o name,guid,creation,written,used -s createtxg")
-    if [ $? -ne 0 ]; then
-        log "[WARN] listing the snapshots of $source failed, no check of the snapshots per dataset."
-        return 1
+    local service_source= source_list= source_used= target_list out chunk i entry label keep scheme labels limits=-
+    local -a entries=() vols=()
+    local -A keep_of=() regex_of=()
+    # labels as the replication uses them: snapshot_filter as configured, plus the label of zsync
+    IFS='|' read -ra entries <<< "$monitor_filter"
+    for entry in "${entries[@]}"; do
+        label=${entry%%=*}
+        if [[ -z $label ]]; then continue; fi
+        keep=0
+        if [[ $entry == *=* ]] && [[ ${entry#*=} =~ ^[0-9]+$ ]]; then keep=${entry#*=}; fi
+        keep_of[$label]=$keep
+        regex_of[$label]="@.*$label"
+    done
+    if [ $zfs_auto_snapshot_keep -gt 1 ]; then
+        if [[ -z ${keep_of[$zfs_auto_snapshot_label]+x} ]]; then keep_of[$zfs_auto_snapshot_label]=0; fi
+        if [[ $zfs_auto_snapshot_label_match == "strict" ]]; then
+            if [[ $zfs_auto_snapshot_engine == "zas" ]]; then scheme="zfs-auto-snap_$zfs_auto_snapshot_label"
+            else scheme=$zfs_auto_snapshot_label; fi
+            regex_of[$zfs_auto_snapshot_label]="@$scheme-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}\$"
+        else
+            regex_of[$zfs_auto_snapshot_label]="@.*$zfs_auto_snapshot_label"
+        fi
     fi
-    target_list=$(zfs list -Hp -t filesystem,volume,snapshot -o name,guid,creation,written,used,com.sun:auto-snapshot -s createtxg -r "$target" 2>/dev/null)
+    # source: only the replicated datasets, 100 per call
+    vols=("${syncvols[@]}")
+    for ((i = 0; i < ${#vols[@]}; i += 100)); do
+        chunk=$(printf '%s ' "${vols[@]:i:100}")
+        debug "Command: zfs list -Hp -t snapshot -o name,guid,creation,written -s createtxg $chunk"
+        if ! out=$(remote "zfs list -Hp -t snapshot -o name,guid,creation,written -s createtxg $chunk"); then
+            log "[WARN] listing the snapshots of $source failed, no check of the snapshots per dataset."
+            return 1
+        fi
+        source_list+=$out$'\n'
+        source_used+=$(remote "zfs list -Hp -o name,used $chunk")$'\n'
+    done
+    target_list=$(zfs list -Hp -r -t filesystem,volume,snapshot -o name,guid,creation,written,used,com.sun:auto-snapshot -s createtxg "$target" 2>/dev/null)
+    if [[ -x $status_check ]] && [[ ! -e /etc/bashclub/zsync-checkmk.disabled ]]; then
+        limits=$("$status_check" --age-limits --config "$conf_path" 2>/dev/null | head -1)
+        if ! [[ $limits =~ ^[0-9]+\ [0-9]+\ [01]$ ]]; then limits=-; fi
+    fi
     if [[ $checkzfs_local -eq 0 ]]; then service_source="$source:$sshport#"; fi
-    checkzfs_lines=$(
-        { sed 's/^/S\t/' <<< "$source_list"; sed 's/^/T\t/' <<< "$target_list"
-          if [ ${#syncvols[@]} -gt 0 ]; then printf 'V\t%s\n' "${syncvols[@]}"; fi; } |
+    out=$(
+        { sed '/^$/d; s/^/S\t/' <<< "$source_list"; sed '/^$/d; s/^/D\t/' <<< "$source_used"
+          sed '/^$/d; s/^/T\t/' <<< "$target_list"
+          names=$( { cut -f1 <<< "$source_list"; cut -f1 <<< "$target_list"; } | grep @)
+          for label in "${!keep_of[@]}"; do
+              printf 'K\t%s\t%s\n' "$label" "${keep_of[$label]}"
+              grep -E "${regex_of[$label]}" <<< "$names" | sed "s/^/L\t$label\t/"
+          done
+          if [ ${#vols[@]} -gt 0 ]; then printf 'V\t%s\n' "${vols[@]}"; fi
+          if [[ -f $status_lib.replicated ]]; then sed 's/^/R\t/' "$status_lib.replicated"; fi; } |
         awk -F'\t' -v now="$(date +%s)" -v target="$target" -v prefix="${checkzfs_prefix// /_}:$service_source" \
-            -v max_age="$checkzfs_max_age" -v max_count="$checkzfs_max_snapshot_count" '
+            -v max_age="$checkzfs_max_age" -v max_count="$checkzfs_max_snapshot_count" -v min_keep="${min_keep:-0}" \
+            -v limits="$limits" '
         function problem(level, text) { if (level > st) st = level; msg = msg (msg == "" ? "" : "; ") text }
         function threshold(value, limits, text,    l) {
             split(limits, l, ",")
-            if (l[2] != "" && value > l[2] + 0) problem(2, text)
-            else if (l[1] != "" && value > l[1] + 0) problem(1, text)
+            if (l[2] != "" && value > l[2] + 0) { problem(2, text); return 2 }
+            if (l[1] != "" && value > l[1] + 0) { problem(1, text); return 1 }
+            return 0
         }
-        $1 == "S" && index($2, "@") { ds = substr($2, 1, index($2, "@") - 1); sguid[ds, $3] = 1; scount[ds]++
-                                      screation[ds] = $4; swritten[ds] = $5; next }
-        $1 == "S" { sused[$2] = $6; next }
+        function dur(s) {
+            if (s >= 86400) return int(s / 86400) "d " int(s % 86400 / 3600) "h"
+            if (s >= 3600) return int(s / 3600) "h " int(s % 3600 / 60) "m"
+            if (s >= 60) return int(s / 60) "m"
+            return s "s"
+        }
+        $1 == "S" { ds = substr($2, 1, index($2, "@") - 1); n = ++scount[ds]; sguid[ds, $3] = 1; issource[$2] = ds
+                    snewest[ds] = $2; screation[ds] = $4; swritten[ds] = $5; next }
+        $1 == "D" { sused[$2] = $3; next }
         $1 == "T" && index($2, "@") { ds = substr($2, 1, index($2, "@") - 1); n = ++tcount[ds]
-                                      tguid[ds, n] = $3; tcreation[ds, n] = $4; twritten[ds, n] = $5
-                                      if (substr($2, index($2, "@") + 1) ~ /^zfs-auto-snap_/) tzas[ds] = 1; next }
+                                      tname[ds, n] = $2; tguid[ds, n] = $3; tcreation[ds, n] = $4; twritten[ds, n] = $5; next }
         $1 == "T" { texists[$2] = 1; tused[$2] = $6; tauto[$2] = $7; next }
-        $1 == "V" { vols[++nv] = $2 }
+        $1 == "K" { keep[$2] = $3; next }
+        $1 == "L" { filtered[$3] = 1; if ($3 in issource) slabel[issource[$3], $2]++; next }
+        $1 == "V" { vols[++nv] = $2; next }
+        $1 == "R" { replicated[$2] = $3; next }
         END {
-            split(max_age, a, ","); split(max_count, c, ",")
+            split(max_age, a, ","); split(max_count, c, ","); split(limits, lim, " ")
             for (v = 1; v <= nv; v++) {
-                d = vols[v]; r = target "/" d; st = 0; msg = ""
+                d = vols[v]; r = target "/" d; st = 0; msg = ""; common = 0; newest_f = 0; cname = "-"
                 # without snapshots on the source no service, as with checkzfs (the service of the config shows it)
                 if (scount[d] == 0) continue
+                expected = 0
+                for (k in keep) expected += keep[k] > 0 ? keep[k] : (slabel[d, k] > min_keep ? slabel[d, k] : min_keep)
+                count = tcount[r] + 0
                 if (!(r in texists)) {
                     problem(1, "no replica found")
-                    replica = ""; creation = screation[d]; written = swritten[d]; used = sused[d]; count = scount[d]
+                    creation = screation[d]; written = swritten[d]; used = sused[d]
                 } else {
-                    replica = r; used = tused[r]; count = tcount[r] + 0; common = 0
-                    for (i = tcount[r]; i >= 1; i--) if ((d, tguid[r, i]) in sguid) { common = i; break }
+                    used = tused[r]; creation = 0; written = 0
+                    for (i = tcount[r]; i >= 1; i--) {
+                        if (!(tname[r, i] in filtered)) continue
+                        if (!newest_f) newest_f = i
+                        if ((d, tguid[r, i]) in sguid) { common = i; break }
+                    }
                     if (common == 0) {
-                        problem(2, "no snapshot in common with the source"); creation = 0; written = 0
+                        problem(2, "no snapshot in common with the source")
                     } else {
                         creation = tcreation[r, common]; written = twritten[r, common]
-                        if (common != tcount[r]) problem(2, "the newest snapshot of the replica does not exist on the source anymore (rollback)")
+                        cname = substr(tname[r, common], index(tname[r, common], "@") + 1)
+                        if (newest_f != common) {
+                            nf = tname[r, newest_f]
+                            problem(1, "newest snapshot " substr(nf, index(nf, "@") + 1) " of the replica is missing on the source (rollback), old chain: bashclub-zsync-maintenance")
+                        }
                     }
-                    if (tzas[r] && tauto[r] != "false") problem(tauto[r] == "true" ? 2 : 1, "com.sun:auto-snapshot is not false on the replica")
-                    threshold(count, max_count, "too many snapshots on the replica")
+                    if (tauto[r] != "false") problem(2, "com.sun:auto-snapshot of the replica is " tauto[r] ", not false")
+                    if (count >= expected + 10) problem(2, "more snapshots on the replica than expected")
+                    else if (count >= expected + 5) problem(1, "more snapshots on the replica than expected")
                 }
-                age = creation > 0 ? now - creation : 0
-                if (creation > 0) threshold(age / 60, max_age, "the newest snapshot is too old")
                 threshold(scount[d], max_count, "too many snapshots on the source")
-                printf "%d %s%s age=%d;%s;%s|creation=%d;;|file_size=%d;;|fs_used=%d;;|file_count=%d;%s;%s %s - %s\n", \
+                age = creation > 0 ? now - creation : 0
+                age_level = creation > 0 ? threshold(age / 60, max_age, "newest common snapshot " dur(age) " old") : 0
+                rep_metric = ""; rep_text = "-"
+                if (d in replicated) {
+                    rep_age = now - replicated[d]; rep_text = dur(rep_age) " ago"
+                    if (lim[1] != "" && lim[1] != "-") {
+                        rep_metric = rep_age ";" lim[1] ";" lim[2]
+                        if (rep_age >= lim[2] + 0 && lim[3] == 0) problem(2, "not replicated for " dur(rep_age))
+                        else if (rep_age >= lim[1] + 0) problem(1, "not replicated for " dur(rep_age))
+                        else if (age_level > 0) problem(age_level, "replicated " dur(rep_age) " ago, the source creates no new snapshots")
+                    } else rep_metric = rep_age
+                }
+                counts = "source " scount[d] ", replica " count " (expected " expected ")"
+                text = (msg == "" ? "OK" : msg) "; " counts
+                printf "%d %s%s age=%d;%s;%s|creation=%d;;|file_size=%d;;|fs_used=%d;;|file_count=%d;%d;%d|source_count=%d;%s;%s%s %s - %s\n", \
                     st, prefix, d, age, (a[1] != "" ? a[1] * 60 : ""), (a[2] != "" ? a[2] * 60 : ""), creation, written, used, \
-                    count, c[1], c[2], replica, (msg == "" ? "OK" : msg)
+                    count, expected + 5, expected + 10, scount[d], c[1], c[2], \
+                    (rep_metric != "" ? "|replication_age=" rep_metric : ""), (r in texists ? r : ""), text
+                printf "TABLE\t%s\t%s\t%s\t%s\t%s\t%s/%s (%s)\t%s\n", (st == 0 ? "OK" : st == 1 ? "WARN" : "CRIT"), d, cname, \
+                    (creation > 0 ? dur(age) : "-"), rep_text, scount[d], count, expected, (msg == "" ? "OK" : msg) > "/dev/stderr"
             }
-        }')
+        }' 2>&1 )
+    checkzfs_lines=$(grep -v '^TABLE' <<< "$out")
+    monitor_table=$(sed -n 's/^TABLE\t//p' <<< "$out")
     if [[ -n $1 ]]; then printf '%s\n' "$checkzfs_lines" > "$1"; fi
     if [[ -n $checkzfs_lines ]] && [[ -d $status_lib_dir ]] && [[ -O $status_lib_dir ]]; then
         printf '%s\n' "$checkzfs_lines" > "$checkzfs_cache.tmp" && mv -f "$checkzfs_cache.tmp" "$checkzfs_cache"
@@ -833,6 +927,8 @@ include_list="[INFO] Included datasets:\n"
 exclude_list="[INFO] Excluded datasets:\n"
 checkzfs_headline="[INFO] checkzfs filter:"
 checkzfs_filter=
+selected_roots=()
+excluded_vols=()
 # critical: without the list of the source nothing can be replicated (ssh failed or zfs failed on the source)
 tagged=$(remote "zfs get -H -o name,value,source -t filesystem,volume $tag")
 remote_rc=$?
@@ -855,6 +951,9 @@ for zvol in $tagged; do
     if [[ $source == "local" ]] && { [[ $name == "$target" ]] || [[ $name == "$target/"* ]]; }; then
         continue
     fi
+    if [[ $value == "subvols" ]] || [[ $value == "all" ]]; then
+        if [[ $property_source == "local" ]]; then selected_roots+=("$name"); fi
+    fi
     if [[ $value == "subvols" ]]; then
         if [[ $property_source != "local" ]] && [[ $property_source != "received" ]]; then
             include_list="${include_list}\t${name}\n"
@@ -872,6 +971,12 @@ for zvol in $tagged; do
         fi
     else
         exclude_list="${exclude_list}\t${name}\n"
+        # deselected on purpose below a selected dataset (e.g. bashclub:zsync=false): listed by the monitoring
+        if [[ $property_source == "local" ]] && [[ $value != "-" ]]; then
+            for root in "${selected_roots[@]}"; do
+                if [[ $name == "$root/"* ]]; then excluded_vols+=("$name"); break; fi
+            done
+        fi
     fi
 done
 if [[ -n $checkzfs_filter ]]; then checkzfs_filter=${checkzfs_filter::-1}; fi
@@ -926,6 +1031,15 @@ if [ $status_mode -eq 1 ]; then
         printf '%-5s %-40s %s\n' "$(case $state in 0) echo OK ;; 1) echo WARN ;; 2) echo CRIT ;; *) echo UNKN ;; esac)" "$service" "$text"
     done < "$shown"
     rm -f "$shown"
+    # for people: the internal check per dataset as a table, and the datasets deselected below selected ones
+    if [[ $status_format != "checkmk" ]]; then
+        if [[ -n $monitor_table ]]; then
+            echo
+            { printf 'STATE\tDATASET\tCOMMON SNAPSHOT\tAGE\tREPLICATED\tSOURCE/REPLICA (EXPECTED)\tTEXT\n'; echo "$monitor_table"; } \
+                | awk -F'\t' '{ printf "%-5s %-40s %-32s %-8s %-11s %-25s %s\n", $1, $2, $3, $4, $5, $6, $7 }'
+        fi
+        if [ ${#excluded_vols[@]} -gt 0 ]; then echo; echo "excluded: $(printf '%s, ' "${excluded_vols[@]}" | sed 's/, $//')"; fi
+    fi
     exit $worst
 fi
 
@@ -1489,9 +1603,26 @@ if [[ -n $status_file ]]; then
     if [[ -f $status_lib.datasets ]]; then
         while IFS=$'\t' read -r n st t _; do since["$n|$st"]=$t; done < "$status_lib.datasets"
     fi
+    for n in "${excluded_vols[@]}"; do
+        if [[ -z ${ds_state[$n]} ]]; then ds_state[$n]=excluded; fi
+    done
     for n in "${!ds_state[@]}"; do
         printf '%s\t%s\t%s\t%s\n' "$n" "${ds_state[$n]}" "${since["$n|${ds_state[$n]}"]:-$run_start}" "${ds_detail[$n]}"
     done | sort > "$status_lib.datasets.tmp" && mv -f "$status_lib.datasets.tmp" "$status_lib.datasets"
+    # last successful replication of each dataset (<config>.replicated: dataset, time), kept across failed runs, for
+    # the internal check (replication_age)
+    declare -A replicated=()
+    if [[ -f $status_lib.replicated ]]; then
+        while IFS=$'\t' read -r n t; do replicated[$n]=$t; done < "$status_lib.replicated"
+    fi
+    replicated_at=$(date +%s)
+    for n in "${!ds_state[@]}"; do
+        case ${ds_state[$n]} in
+            ok|branched|cleanup_blocked) printf '%s\t%s\n' "$n" "$replicated_at" ;;
+            excluded|orphan_*|branch|branch_kept) ;;
+            *) if [[ -n ${replicated[$n]} ]]; then printf '%s\t%s\n' "$n" "${replicated[$n]}"; fi ;;
+        esac
+    done | sort > "$status_lib.replicated.tmp" && mv -f "$status_lib.replicated.tmp" "$status_lib.replicated"
 fi
 
 #### open decisions for bashclub-zsync-maintenance as user property of the replica, so it reads all of them with one

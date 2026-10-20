@@ -23,6 +23,41 @@ Services je Dataset; der Service der Config meldet weiter. Ab 2.0 prüft zsync d
 `monitor_engine=internal` setzen, oder `source_bookmark=0` lassen.
 :::
 
+## Services je Dataset
+Ab 2.0 mit `monitor_engine=internal` (Default neuer Configs) erzeugt zsync sie selbst, am Ende jedes Laufs und mit `-s`.
+Gelesen werden nur die replizierten Datasets: ihre Snapshots auf der Quelle und das Target. Für Alter und Rollback zählen
+nur Snapshots aus `snapshot_filter` und dem Label von zsync, wie bei der Replikation; Bookmarks stören nicht.
+
+| Prüfung | Status |
+|---|---|
+| Alter des neuesten gemeinsamen Snapshots (gleiche GUID auf beiden Seiten) | WARN, CRIT nach `checkzfs_max_age` (Minuten) |
+| Zeit seit der letzten erfolgreichen Replikation des Datasets | WARN, CRIT mit den Schwellen des Services der Config (Intervall oder `monitor_max_age`); in der Lernphase höchstens WARN |
+| Alter hoch, Replikation aber aktuell | Text: die Quelle legt keine neuen Snapshots an |
+| Anzahl der Snapshots auf der Quelle | WARN, CRIT nach `checkzfs_max_snapshot_count` |
+| Anzahl der Snapshots auf dem Replikat | WARN ab erwartet + 5, CRIT ab erwartet + 10 |
+| neuester Snapshot des Replikats aus dem Filter fehlt auf der Quelle (Rollback) | WARN, mit Hinweis auf `bashclub-zsync-maintenance` |
+| kein gemeinsamer Snapshot | CRIT |
+| `com.sun:auto-snapshot` am Replikat nicht `false`, auch geerbt | CRIT |
+| Replikat fehlt noch | WARN |
+
+Erwartete Anzahl auf dem Replikat: je Label in `snapshot_filter` (mit dem Label von zsync) die feste Zahl (`daily=30`),
+sonst die Zahl dieses Labels auf der Quelle, mindestens `min_keep`. Der Text nennt beide Zahlen, z. B.
+`source 52, replica 61 (expected 58)`.
+
+Messwerte: `age` (Sekunden), `creation`, `file_size` (geschrieben im gemeinsamen Snapshot), `fs_used`, `file_count`
+(Snapshots des Replikats), `source_count` (Snapshots der Quelle), `replication_age` (Sekunden seit der letzten
+Replikation).
+
+:::info
+**Anders als bei checkzfs:** checkzfs schreibt je Dataset zwei Zeilen unter demselben Namen und zählt in `file_count`
+Quelle und Replikat zusammen. Die eingebaute Prüfung schreibt eine Zeile, `file_count` ist die Zahl auf dem Replikat;
+Graphen zeigen beim Umstellen einen Sprung. `checkzfs_max_snapshot_count` gilt nur noch für die Quelle. Replikate ohne
+gemeinsamen Snapshot ließ checkzfs aus, die eingebaute Prüfung meldet sie mit CRIT.
+:::
+
+Datasets, die unter einem ausgewählten Dataset abgewählt sind (z. B. `bashclub:zsync=false`), bekommen keinen
+Service; der Service der Config und `-s` nennen sie als `excluded`.
+
 ## Zustände des Services der Config
 | Zustand | Erkennung | Status |
 |---|---|---|

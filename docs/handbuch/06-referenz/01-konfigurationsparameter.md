@@ -177,13 +177,16 @@ Altersprüfung. Ein ungültiger Wert wird mit Hinweis im Service ignoriert.
 
 ### `monitor_engine`
 Ab 2.0. Wer die Services je Dataset (`<checkzfs_prefix>:<source>:<port>#<dataset>`) erzeugt:
-- `internal`: zsync selbst, aus einer Liste der Snapshots von Quelle und Backupserver am Ende des Laufs. Eine Zeile je
-  Dataset mit dem schlechteren Zustand von Quelle und Replikat; Bookmarks stören nicht.
+- `internal`: zsync selbst, am Ende des Laufs aus den Snapshots der replizierten Datasets auf Quelle und Backupserver.
+  Eine Zeile je Dataset mit dem schlechteren Zustand von Quelle und Replikat; Bookmarks stören nicht. Prüft zusätzlich
+  die Zeit seit der letzten Replikation des Datasets und die Anzahl auf dem Replikat gegen die erwartete, siehe
+  [Checkmk-Services](09-checkmk.md).
 - `checkzfs`: das Programm checkzfs (Paket `bashclub-checkzfs`), wie bis 1.0.19. Ist es nicht installiert, nimmt zsync
   `internal` und warnt.
 - leer: `checkzfs`, wenn installiert, sonst `internal`.
 
-Beide nutzen dieselben Namen und Schwellwerte (`checkzfs_*`), ein Wechsel braucht keine neue Service-Erkennung. Siehe
+Beide nutzen dieselben Namen und Schwellwerte (`checkzfs_*`), ein Wechsel braucht keine neue Service-Erkennung. Mit
+`internal` ist `file_count` die Zahl der Snapshots auf dem Replikat (bei checkzfs Quelle und Replikat zusammen). Siehe
 [Neue Funktionen einschalten](../02-installation/07-neue-funktionen-einschalten.md).
 
 ### `checkzfs_disabled`
@@ -202,10 +205,12 @@ des Services der Config (`<checkzfs_prefix> <config>`). **Jede Replikation brauc
 Datei, und ihre Services kollidieren in Checkmk. Das Setup setzt es nicht.
 
 ### `checkzfs_max_age`
-Alter des neuesten gemeinsamen Snapshots je Dataset in Minuten, `warn,crit`.
+Alter des neuesten gemeinsamen Snapshots je Dataset in Minuten, `warn,crit`. Mit `monitor_engine=internal` zählen nur
+Snapshots aus `snapshot_filter` und dem Label von zsync.
 
 ### `checkzfs_max_snapshot_count`
-Anzahl der Snapshots je Dataset, `warn,crit`.
+Anzahl der Snapshots je Dataset, `warn,crit`. Mit `monitor_engine=internal` nur die Snapshots auf der Quelle; das
+Replikat prüft zsync gegen die erwartete Anzahl aus `snapshot_filter` (siehe [Checkmk-Services](09-checkmk.md)).
 
 ### `checkzfs_spool`
 Wohin die Spool-Datei geht: `0` Backupserver, `1` Quelle.

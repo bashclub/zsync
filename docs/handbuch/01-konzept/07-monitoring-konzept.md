@@ -10,10 +10,12 @@ ob die Backups aktuell sind.
 ## Zwei Arten von Services
 **Die Services je Dataset** vergleichen nach jedem Lauf die Snapshots der Quelle mit denen des Replikats: Alter des
 neuesten gemeinsamen Snapshots (`checkzfs_max_age`), Anzahl der Snapshots (`checkzfs_max_snapshot_count`), ob das
-Replikat fehlt oder sein neuester Snapshot auf der Quelle nicht mehr existiert. Sie heißen
+Replikat fehlt oder sein neuester Snapshot auf der Quelle nicht mehr existiert. Die eingebaute Prüfung meldet
+zusätzlich, wenn ein Dataset länger nicht repliziert wurde, obwohl die Läufe gelingen, und wenn das Replikat mehr
+Snapshots hat als erwartet. Sie heißen
 `<checkzfs_prefix>:<source>:<port>#<dataset>`. Wer sie erzeugt, bestimmt `monitor_engine`:
-- `internal` (ab 2.0, Default neuer Configs): zsync selbst, aus einer Liste der Snapshots von Quelle und Backupserver am
-  Ende des Laufs; eine Zeile je Dataset
+- `internal` (ab 2.0, Default neuer Configs): zsync selbst, aus den Snapshots der replizierten Datasets auf Quelle und
+  Backupserver am Ende des Laufs; eine Zeile je Dataset
 - `checkzfs`: das Programm checkzfs (Paket `bashclub-checkzfs`), wie bis 1.0.19; je Dataset eine Zeile für die Quelle
   und eine für das Replikat unter demselben Namen
 

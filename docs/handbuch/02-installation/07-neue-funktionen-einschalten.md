@@ -30,7 +30,10 @@ Sofort prüfen, ohne zu replizieren: `bashclub-zsync -c "$conf" -s` zeigt die Se
 Spool neu.
 
 Unterschied zu checkzfs: eine Zeile je Dataset statt zwei (Quelle und Replikat unter demselben Namen); sie zeigt den
-schlechteren Zustand beider. Ohne den Eintrag nimmt zsync checkzfs, wenn es installiert ist, sonst die eingebaute
+schlechteren Zustand beider. Dazu kommen Prüfungen, die checkzfs nicht hat (Zeit seit der letzten Replikation, erwartete
+Anzahl auf dem Replikat, `com.sun:auto-snapshot` am Replikat), siehe [Checkmk-Services](../06-referenz/09-checkmk.md).
+`file_count` ist die Zahl auf dem Replikat, Graphen zeigen beim Umstellen einen Sprung; `checkzfs_max_snapshot_count`
+gilt nur noch für die Quelle. Ohne den Eintrag nimmt zsync checkzfs, wenn es installiert ist, sonst die eingebaute
 Prüfung. Rückweg: `monitor_engine=checkzfs`, vorher die Bookmarks ausschalten (unten).
 
 ## Bookmark, Hold und Resume
