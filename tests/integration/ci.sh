@@ -11,6 +11,8 @@ exec 9> /run/lock/zsync-ci.lock
 flock 9
 export ZCI_LOCK_HELD=1
 dpkg -i dist/*.deb > /dev/null
+# 1.0.19 für die Kaskade beim Update (case_cascade_upgrade)
+mkdir -p tests/integration/legacy && git show v1.0.19:bashclub-zsync/usr/bin/bashclub-zsync > tests/integration/legacy/bashclub-zsync-1.0.19 && chmod +x tests/integration/legacy/bashclub-zsync-1.0.19
 # Tests ohne ZFS: command=-Wrapper, Checkmk-Check, Vollständigkeit der Referenz im Handbuch
 tests/remote.sh | tail -1
 tests/restore-remote.sh | tail -1

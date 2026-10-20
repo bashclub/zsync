@@ -16,5 +16,8 @@ done
 ssh "$host" 'rm -rf /root/zsync-ci && mkdir -p /root/zsync-ci'
 scp -q "$dist"/*.deb "$host":/root/zsync-ci/
 scp -qr "$repo/tests/integration" "$host":/root/zsync-ci/
+# 1.0.19 für die Kaskade beim Update (case_cascade_upgrade)
+ssh "$host" mkdir -p /root/zsync-ci/integration/legacy
+git -C "$repo" show v1.0.19:bashclub-zsync/usr/bin/bashclub-zsync | ssh "$host" "cat > /root/zsync-ci/integration/legacy/bashclub-zsync-1.0.19 && chmod +x /root/zsync-ci/integration/legacy/bashclub-zsync-1.0.19"
 # Sperre vor dem Installieren: ein laufender CI-Job testet sonst mit diesen Paketen
 ssh "$host" "exec 9> /run/lock/zsync-ci.lock; flock 9; export ZCI_LOCK_HELD=1; dpkg -i /root/zsync-ci/*.deb > /dev/null && /root/zsync-ci/integration/run.sh $*"

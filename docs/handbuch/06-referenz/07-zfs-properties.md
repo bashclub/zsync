@@ -21,6 +21,7 @@ zfs get -t filesystem,volume -o name,value,source bashclub:zsync
 | Property | Wo | Bedeutung |
 |---|---|---|
 | `com.sun:auto-snapshot=false` | Target | zsync setzt sie, damit kein `zfs-auto-snapshot` auf dem Backupserver Snapshots der Replikate anlegt |
+| `bashclub:zsync-target=<target>` | Target | ab 2.0: Markierung des Targets, an alle Replikate vererbt. In einer [Kaskade](../03-szenarien/06-kaskade.md) erkennt die zweite Stufe daran, dass ihre Quelle ein Replikat ist, und legt dort keine Snapshots an |
 | `bashclub:zsync-source.<property>` | Replikat | ab 2.0: Wert einer Property auf der Quelle, die die Replikation ändert oder weglässt, als `<local\|inherited\|default\|received>:<wert>`; betrifft `mountpoint`, `canmount`, `com.sun:auto-snapshot`, `refquota`, das Tag und ohne root alle Properties, die der Benutzer nicht setzen darf |
 | `bashclub:zsync-orphan=keep` | Replikat | ab 2.0: Replikat ohne Quelle als Archiv behalten, ohne Warnung; gesetzt von `bashclub-zsync-maintenance` (`keep`) |
 | `bashclub:zsync-branch` | alte Kette | ab 2.0: `<datum>;<grund>` an `<replikat>.zsync-branch-<datum>`, der alten Kette nach einem Rollback auf der Quelle |

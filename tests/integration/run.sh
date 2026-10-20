@@ -1461,7 +1461,121 @@ case_result_busy() {
   rm -f $lockconf
 }
 
-all_cases=(replication engine_internal engine_switch rotation nothing_selected refquota rollback broken_chain orphans local_mode monitor_internal bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_removable restore_server hooks result_busy)
+# Kaskade: Quelle -> backup1 ($ZCI_POOL_DST/b1) -> Stufe 2 (zci-casc/b2, Pool auf einer zvol der Quelle).
+# cascade_env <Wert des Tags am Target von backup1> [Zeilen für beide Configs]; setzt c1 c2 B1 B2 R (Replikate von backup1
+# auf Stufe 2), log
+CASC=zci-casc
+LEGACY=$here/legacy/bashclub-zsync-1.0.19
+cascade_env() {
+  B1=$ZCI_POOL_DST/b1 B2=$CASC/b2
+  zfs create -V 384M "$ZCI_POOL_SRC/cascdisk"; udevadm settle
+  zpool create -f -o ashift=12 -O mountpoint=none -O com.sun:auto-snapshot=false $CASC "/dev/zvol/$ZCI_POOL_SRC/cascdisk"
+  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  zfs create "$ZCI_POOL_SRC/data/ct"; zfs create -V 16M "$ZCI_POOL_SRC/data/vm"
+  local i; for i in 01 02 03; do write "$ZCI_POOL_SRC/data/ct"; snap "$ZCI_POOL_SRC/data/ct" $i; snap "$ZCI_POOL_SRC/data/vm" $i; done
+  config b1 "${2:-}"; c1=$conf; set_conf $c1 target $B1
+  config b2 "${2:-}"; c2=$conf; set_conf $c2 target $B2; set_conf $c2 tag bashclub:zsync-offsite
+  R=$B2/$B1/$ZCI_POOL_SRC/data
+  log=/var/log/zsync-ci/$CASCADE_CASE.log
+  CASCADE_TAG=$1
+}
+# stage <new|old> <config>: ein Lauf mit 2.0 (Paket) oder 1.0.19; setzt rc
+stage() {
+  local bin=bashclub-zsync; [[ $1 == old ]] && bin=$LEGACY
+  echo "===== $(date +%T) $1 $2" >> "$log"
+  $bin -c "$2" >> "$log" 2>&1 < /dev/null; rc=$?
+}
+# erst Stufe 1, dann das Tag von Stufe 2 am Target von backup1, dann Stufe 2
+cascade_init() { stage "$1" $c1; zfs set bashclub:zsync-offsite=$CASCADE_TAG $B1; stage "$2" $c2; }
+# gleicher Snapshot (GUID) auf der Quelle und auf Stufe 2
+on_stage2() { [[ -n $(guid "$ZCI_POOL_SRC/data/$1@zfs-auto-snap_daily-$2") ]] && [[ $(guid "$ZCI_POOL_SRC/data/$1@zfs-auto-snap_daily-$2") == "$(guid "$R/$1@zfs-auto-snap_daily-$2")" ]]; }
+last_log() { awk '/^===== /{ buf = "" } { buf = buf $0 "\n" } END { printf "%s", buf }' "$log"; }
+
+case_cascade() {
+  CASCADE_CASE=cascade
+  cascade_env subvols $'source_bookmark=1\nsource_hold=1\ntransfer_resume=1'
+  # Stufe 2 mit eigener Snapshot-Engine: auf Replikaten von bashclub-zsync legt sie nichts an
+  set_conf $c2 zfs_auto_snapshot_keep 3; set_conf $c2 zfs_auto_snapshot_label zsync-b2; set_conf $c2 snapshot_filter '"daily|zsync-b2"'
+  cascade_init new new
+  equal "Erstreplikation Stufe 2" 0 "$rc"
+  check "Stufe 2: ct@03" on_stage2 ct 03
+  check "Stufe 2: vm@03" on_stage2 vm 03
+  equal "keine Snapshots von Stufe 2 auf den Replikaten von backup1" 0 "$(zfs list -H -o name -t snapshot -r $B1/$ZCI_POOL_SRC/data | grep -c zsync-b2)"
+  check "Warnung: Replikate als Quelle (Kaskade)" grep -q "replicas of bashclub-zsync (cascade)" <<< "$(last_log)"
+  write "$ZCI_POOL_SRC/data/ct"; snap "$ZCI_POOL_SRC/data/ct" 04; snap "$ZCI_POOL_SRC/data/vm" 04
+  stage new $c1; equal "Stufe 1 nach einem Lauf von Stufe 2: keine neue Kette" 0 "$(zfs list -H -o name -r $B1 | grep -c zsync-branch)"
+  stage new $c2; check "inkrementell: ct@04 auf Stufe 2" on_stage2 ct 04
+  # Rollback auf der Quelle: backup1 legt eine neue Kette an; Stufe 2 ebenso, die alte Kette von backup1 holt sie nicht
+  zfs rollback -r "$ZCI_POOL_SRC/data/ct@zfs-auto-snap_daily-03"; write "$ZCI_POOL_SRC/data/ct"
+  snap "$ZCI_POOL_SRC/data/ct" 05; snap "$ZCI_POOL_SRC/data/vm" 05
+  stage new $c1; equal "Rollback: backup1 rc" 0 "$rc"
+  check "Rollback: alte Kette auf backup1" grep -q zsync-branch <<< "$(zfs list -H -o name -r $B1)"
+  sleep 61   # anderer Zeitstempel als die alte Kette von backup1
+  stage new $c2; equal "Rollback: Stufe 2 rc" 0 "$rc"
+  check "Rollback: ct@05 auf Stufe 2" on_stage2 ct 05
+  local branches; branches=$(zfs list -H -o name -r $B2 | grep zsync-branch)
+  equal "Rollback: genau eine alte Kette auf Stufe 2 ($branches)" 1 "$(grep -c . <<< "$branches")"
+  equal "Rollback: die alte Kette auf Stufe 2 ist ihre eigene" local "$(zfs get -H -o source bashclub:zsync-branch "$branches" 2>/dev/null)"
+  check "Rollback: alte Kette von backup1 nicht ausgewählt" grep -q "old chain after a rollback on the source)" <<< "$(last_log)"
+  # Rotation auf backup1, bevor Stufe 2 holt: der Bookmark auf backup1 hält die Kette
+  local i; snap "$ZCI_POOL_SRC/data/vm" 06; snap "$ZCI_POOL_SRC/data/vm" 07; stage new $c1
+  for i in 01 02 03 04 05 06; do zfs destroy "$ZCI_POOL_SRC/data/vm@zfs-auto-snap_daily-$i"; done
+  snap "$ZCI_POOL_SRC/data/vm" 08; stage new $c1
+  check "Rotation: Basis von Stufe 2 auf backup1 gelöscht" not exists "$B1/$ZCI_POOL_SRC/data/vm@zfs-auto-snap_daily-05"
+  check "Rotation: Bookmark von Stufe 2 auf backup1" grep -q "#zsync_" <<< "$(zfs list -H -o name -t bookmark -r $B1/$ZCI_POOL_SRC/data/vm)"
+  stage new $c2; equal "Rotation: Stufe 2 rc" 0 "$rc"
+  check "Rotation: vm@08 inkrementell auf Stufe 2" on_stage2 vm 08
+  equal "keine Holds auf backup1" 0 "$(zfs holds -H -r $B1 2>/dev/null | grep -c .)"
+}
+
+case_cascade_local() {
+  CASCADE_CASE=cascade_local
+  # Wechseldatenträger am backup1: Stufe 2 lokal, Tag all, Configs ohne die neuen Einträge (wie aus 1.0)
+  cascade_env all
+  set_conf $c2 source local
+  cascade_init new new
+  equal "Erstreplikation lokal" 0 "$rc"
+  check "lokal: vm@03" on_stage2 vm 03
+  zfs rollback -r "$ZCI_POOL_SRC/data/ct@zfs-auto-snap_daily-02"; write "$ZCI_POOL_SRC/data/ct"
+  snap "$ZCI_POOL_SRC/data/ct" 04; snap "$ZCI_POOL_SRC/data/vm" 04
+  stage new $c1; sleep 61; stage new $c2
+  equal "Rollback lokal: Stufe 2 rc" 0 "$rc"
+  check "Rollback lokal: ct@04 auf Stufe 2" on_stage2 ct 04
+  # ohne Bookmark: rotiert backup1 die Basis von Stufe 2 weg, reißt die Kette auf Stufe 2 (Fehler, nichts gelöscht)
+  local i; snap "$ZCI_POOL_SRC/data/vm" 05; stage new $c1
+  for i in 01 02 03 04; do zfs destroy "$ZCI_POOL_SRC/data/vm@zfs-auto-snap_daily-$i"; done
+  snap "$ZCI_POOL_SRC/data/vm" 06; stage new $c1; stage new $c2
+  equal "Rotation ohne Bookmark: Stufe 2 meldet den Fehler" 1 "$rc"
+  check "Rotation ohne Bookmark: Replikat auf Stufe 2 bleibt" exists "$R/vm@zfs-auto-snap_daily-04"
+}
+
+case_cascade_upgrade() {
+  CASCADE_CASE=cascade_upgrade
+  [[ -x $LEGACY ]] || { skip "1.0.19 fehlt ($LEGACY)"; return; }
+  cascade_env subvols
+  # vor dem Update: beide Stufen 1.0.19
+  cascade_init old old
+  equal "1.0.19: Erstreplikation" 0 "$rc"
+  write "$ZCI_POOL_SRC/data/ct"; snap "$ZCI_POOL_SRC/data/ct" 04; snap "$ZCI_POOL_SRC/data/vm" 04
+  stage old $c1; stage old $c2; check "1.0.19: ct@04 auf Stufe 2" on_stage2 ct 04
+  # Stufe 2 zuerst auf 2.0
+  snap "$ZCI_POOL_SRC/data/ct" 05; snap "$ZCI_POOL_SRC/data/vm" 05
+  stage old $c1; stage new $c2; equal "Stufe 2 aktualisiert: rc" 0 "$rc"
+  check "Stufe 2 aktualisiert: ct@05" on_stage2 ct 05
+  # dann backup1: beide 2.0, ein Rollback auf der Quelle kommt bis Stufe 2 an
+  zfs rollback -r "$ZCI_POOL_SRC/data/ct@zfs-auto-snap_daily-04"; write "$ZCI_POOL_SRC/data/ct"
+  snap "$ZCI_POOL_SRC/data/ct" 06; snap "$ZCI_POOL_SRC/data/vm" 06
+  stage new $c1; equal "beide 2.0: Rollback auf backup1 rc" 0 "$rc"
+  sleep 61; stage new $c2; equal "beide 2.0: Rollback auf Stufe 2 rc" 0 "$rc"
+  check "beide 2.0: ct@06 auf Stufe 2" on_stage2 ct 06
+  # falsche Reihenfolge (backup1 2.0, Stufe 2 noch 1.0.19): nach einem Rollback bricht Stufe 2 für das Dataset ab
+  zfs rollback -r "$ZCI_POOL_SRC/data/ct@zfs-auto-snap_daily-04"; write "$ZCI_POOL_SRC/data/ct"; snap "$ZCI_POOL_SRC/data/ct" 07
+  stage new $c1; sleep 61; stage old $c2
+  equal "backup1 vor Stufe 2 aktualisiert: 1.0.19 auf Stufe 2 bricht ab" 1 "$rc"
+  check "backup1 vor Stufe 2 aktualisiert: ct@07 fehlt auf Stufe 2" not on_stage2 ct 07
+}
+
+all_cases=(replication engine_internal engine_switch rotation nothing_selected refquota rollback broken_chain orphans local_mode monitor_internal bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_removable restore_server hooks result_busy cascade cascade_local cascade_upgrade)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten, Pools und die installierten Pakete): ein zweiter wartet;
