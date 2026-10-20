@@ -18,7 +18,10 @@ import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPO_URL = "https://code.bashclub.org/bashclub/zsync/src/branch/main/docs/handbuch/"
-KOFI_URL = "https://ko-fi.com/thorakel"
+KOFI_URL = "https://ko-fi.com/A0A1J73JR"
+# the Ko-fi button (kofi-button.py) from the repository: readers load nothing from ko-fi.com; Outline cannot link an
+# image, so the address follows below it
+KOFI_BUTTON = "https://code.bashclub.org/bashclub/zsync/raw/branch/main/docs/handbuch/kofi-button.png"
 LINK = re.compile(r"\]\((?!https?://|#|mailto:)([^)#\s]+\.md)(#[^)\s]*)?\)")
 
 
@@ -32,7 +35,10 @@ def read(path):
     head = {}
     for line in m.group(1).splitlines():
         key, _, value = line.partition(":")
-        head[key.strip()] = value.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        head[key.strip()] = value
     if not head.get("title"):
         sys.exit(f"{path}: no title")
     return head, content[m.end():].lstrip("\n")
@@ -113,7 +119,8 @@ def render(path, allow_missing):
             following = f"\n\n**Weiter:** [{head_next['title']}]({head_next['outline']})"
     note = (f"\n\n---\n\n*Quelle dieser Seite: [{rel(path)}]({REPO_URL}{rel(path)}) im Repository von bashclub-zsync. "
             "Änderungen bitte dort, diese Seite wird daraus erzeugt.*\n\n"
-            f"*Gefällt dir bashclub-zsync? [Unterstütze die Entwicklung auf Ko-fi]({KOFI_URL}).*\n")
+            f"Gefällt dir bashclub-zsync?\n\n![Unterstütze die Entwicklung]({KOFI_BUTTON})\n\n"
+            f"[{KOFI_URL.removeprefix('https://')}]({KOFI_URL})\n")
     return text.rstrip("\n") + following + note
 
 
