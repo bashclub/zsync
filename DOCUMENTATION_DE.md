@@ -1,87 +1,38 @@
-> Das ausführliche Handbuch (ohne Login lesbar): https://docs.bashclub.org/s/bashclub-zsync
+# bashclub-zsync
 
-# Konfiguration auf dem Zielserver
+Pull-Replikation von ZFS-Datasets auf einen Backupserver: inkrementell, auch verschlüsselt (raw), fortsetzbar, mit
+Snapshots, Aufbewahrung, Checkmk-Monitoring und Restore. Der Backupserver holt die Daten von der Quelle; die Quelle hat
+keinen Zugriff auf das Backup.
 
-1. Öffnen Sie eine SSH-Verbindung zum Zielserver, entweder über die Befehlszeile oder ein SSH-Tool wie PuTTY.
+## Handbuch
 
-2. Stellen Sie sicher, dass der Zielserver die erforderlichen Voraussetzungen erfüllt. Dazu gehören das Vorhandensein der benötigten Befehle (`zfs`, `ssh`, `grep`) und die korrekte Konfiguration der Pfade (`PATH`-Variable im Script).
+Das vollständige Handbuch, ohne Login lesbar: **https://docs.bashclub.org/s/bashclub-zsync**
 
-3. Erstellen Sie eine Konfigurationsdatei für das Script. Standardmäßig wird die Datei `/etc/bashclub/zsync.conf` verwendet. Sie können jedoch einen anderen Pfad angeben, indem Sie den Parameter `-c` beim Aufruf des Scripts verwenden. Zusätzlich können Sie weitere Konfigurationsdateien erstellen, um unterschiedliche Replikationen einzurichten. Zum Beispiel: `/usr/bin/bashclub-zsync -c /pfad/zur/konfiguration1.conf`, `/usr/bin/bashclub-zsync -c /pfad/zur/konfiguration2.conf`
+Die Quelle liegt im Repository unter [`docs/handbuch`](docs/handbuch), das Handbuch wird daraus erzeugt.
 
-4. Öffnen Sie die Konfigurationsdatei mit einem Texteditor und passen Sie die folgenden Einstellungen an:
+| Kapitel | Inhalt |
+|---|---|
+| Konzept und Grundlagen | Pull statt Push, Kette und gemeinsamer Snapshot, Backup statt Spiegel, Monitoring |
+| Installation, Upgrade und Migration | Paketquelle, Einrichtung mit `bashclub-zsync-setup`, Update von 1.0, neue Funktionen einschalten |
+| Szenarien | LAN, lokal, Wechseldatenträger, Offsite, Kaskade, Cluster, TrueNAS u. a., je Schritt für Schritt |
+| Betrieb, Monitoring und Wartung | Zustände in Checkmk und was zu tun ist, Entscheidungen mit `bashclub-zsync-maintenance` |
+| Restore und Notfall | einzelne Dateien, Dataset oder VM-Disk, ganzer Server, Wechseldatenträger, Ransomware |
+| Referenz | alle Parameter, Befehle, Dateien, Meldungen und Checkmk-Services |
+| Fehlerbehebung und FAQ | Diagnose in fünf Schritten, typische Fehler, häufige Fragen |
 
-   - Zeitsteuerung per systemd-Timer statt Cron (`bashclub-zsync@<name>.timer`, Werkzeug `bashclub-zsync-timer` mit `enable`, `list`, `migrate --dry-run`): README, Abschnitt „Run with systemd timers“.
-   - Betrieb ohne root (Backupserver und Quelle mit `zfs allow`): README, Abschnitt „Running without root“, mit kopierbaren Befehlen.
-   - `source`: Geben Sie den SSH-Adresse des Quellservers an, von dem die Daten repliziert werden sollen. Beispiel: `source=user@host`. `source=local` repliziert Datasets desselben Hosts ohne SSH (z. B. von `rpool` in einen Backup-Pool).
-   - `target`: Geben Sie die Pfad des Ziel-ZFS-Dateisystems auf dem Zielserver an, zu dem die Daten repliziert werden sollen. Beispiel: `target=pool/dataset`
-   - `sshport`: Geben Sie den SSH-Port des Quellservers an. Standardmäßig ist dies `22`, aber Sie können ihn entsprechend anpassen.
-   - `tag`: Geben Sie den ZFS-Tag an, der verwendet werden soll, um die zu replizierenden Dateisysteme oder Volumes zu identifizieren. Beispiel: `tag=bashclub:zsync`
-   - `snapshot_filter`: Pipe-separierte Liste der Labels, die repliziert werden, je mit der Anzahl Snapshots, die auf dem Backupserver bleiben. Beispiel: `snapshot_filter="hourly=24|daily=30|weekly=8|monthly=12"`: Die 30 neuesten `daily`-Snapshots bleiben auf dem Backupserver, egal was auf der Quelle gelöscht wird. Ein Label allein oder `label=source` folgt der Quelle wie bisher (gelöscht wird, was die Quelle gelöscht hat, mindestens `min_keep` bleiben).
-   - `min_keep`: veraltet, entfällt in einer späteren Version. Mindestanzahl Snapshots pro Label für Labels mit `source`. Stattdessen eine Anzahl in `snapshot_filter` angeben.
-   - `zfs_auto_snapshot_keep`: Aktiviert das erzeugen eines Snapshots auf der Quelle vor der Replikation, gibt die Anzahl der Snapshots an, die behalten werden sollen. Beispiel: `zfs_auto_snapshot_keep=0` => Deaktiviert die Funktion, `zfs_auto_snapshot_keep=7` behält 7 Snapshots. 
-   - `zfs_auto_snapshot_label`: Definniert das Label des Snapshots, Default-Wert ist `backup` (ergibt: zfs-auto-snap_backup-YYYY-MM-dd-hhmm). Beispiel: `zfs_auto_snapshot_label=backup`
-   - `bandwidth_limit`: Bandbreitenlimit der Übertragung in Bytes pro Sekunde mit Einheit `k`, `m`, `g` (1024er-Basis), z. B. `10m` = 10 MiB/s (ca. 84 Mbit/s). Wird auf dem Backupserver mit `pv` umgesetzt (`apt install pv`); ohne `pv` ohne Limit mit Warnung im Log. Leer = kein Limit.
-   - `source_bookmark`: `1` = auf der Quelle ein Bookmark des zuletzt replizierten Snapshots behalten (pro Backupserver und Ziel). Löscht die Rotation diesen Snapshot vor der nächsten Replikation, wird aus dem Bookmark angefügt statt neu zu replizieren. Neue Konfigurationen nutzen `1`, bestehende ohne diese Einstellung bleiben bei `0`.
-   - `source_hold`: `1` = während ein Dataset repliziert wird, sind Basis und alle noch zu sendenden Snapshots auf der Quelle per `zfs hold` geschützt (Rotation oder Admin können sie nicht löschen), danach freigegeben. Neue Konfigurationen nutzen `1`, bestehende ohne diese Einstellung bleiben bei `0`.
-   - `transfer_resume`: `1` = Übertragungen sind fortsetzbar (`zfs receive -s`): bricht eine Übertragung ab (Netz, Neustart), setzt der nächste Lauf sie an der Abbruchstelle fort, statt neu zu beginnen. Neue Konfigurationen nutzen `1`, bestehende ohne diese Einstellung bleiben bei `0`.
-   - Rollback auf der Quelle: Fehlen die neuesten Snapshots des Replikats auf der Quelle, repliziert bashclub-zsync auf einer neuen Kette ab dem neuesten gemeinsamen Snapshot weiter (Klon). Die alte Kette bleibt vollständig als `<replikat>.zsync-branch-<datum>` erhalten, gelöscht wird nichts. Behalten oder löschen entscheidet der Admin mit `bashclub-zsync-maintenance`. Details: README, Abschnitt „Rollback on the source“.
-   - `monitor_max_age`: maximales Alter des letzten erfolgreichen Laufs für den Checkmk-Check `bashclub_zsync`, z. B. `26h`, `90m` oder Sekunden. Leer = aus den Startzeiten der letzten Läufe ermittelt, `0` = keine Altersprüfung (z. B. Wechseldatenträger). Details: README, Abschnitt „Monitoring with Checkmk“.
-   - `zfs_auto_snapshot_label_match`: `strict` = zum Label gehören nur Snapshots im Namensschema der Snapshot-Engine (`internal`: `<label>-YYYY-MM-DD-HHMM`, `zas`: `zfs-auto-snap_<label>-YYYY-MM-DD-HHMM`), `legacy` = jeder Snapshot, dessen Name das Label enthält. Neue Konfigurationen nutzen `strict`, bestehende ohne diese Einstellung bleiben bei `legacy`. Ein Label darf nicht im Label einer anderen Konfiguration derselben Quelle enthalten sein (z. B. `zsync` und `zsync-miyagi`). Details und Befehle zum Wechsel von `zas` auf `internal`: README, Abschnitt „Snapshot label and snapshot engine“.
+## Schnellstart
 
-   Wiederholen Sie diese Schritte für jede zusätzliche Konfigurationsdatei, um unterschiedliche Replikationen einzurichten.
+Auf dem Backupserver, nach dem Einbinden der Paketquelle (siehe Handbuch, Installation):
 
-5. Speichern Sie die Konfigurationsdateien.
+```bash
+apt install bashclub-zsync
+bashclub-zsync-setup
+```
 
-6. Überprüfen Sie, ob der Zielserver die erforderlichen ZFS-Datasets oder Volumes enthält, auf die die Daten repliziert werden sollen. Stellen Sie sicher, dass die Namen der Datasets/Volumes dem ZFS-Tag entsprechen, den Sie in den Konfigurationsdateien festgelegt haben.
+Das Setup fragt Quelle und Ziel ab, richtet über einen einmaligen SSH-Zugang die Quelle ein und legt Config und Timer
+an. Welche Datasets
+repliziert werden, bestimmt auf der Quelle die Property `bashclub:zsync` (`all`, `subvols` oder `exclude`).
 
-7. Um das Script automatisch auszuführen, erstellen Sie eine Cronjob-Konfigurationsdatei im Verzeichnis `/etc/cron.d/`. Öffnen Sie eine neue Datei mit einem Texteditor und geben Sie die gewünschte Ausführungszeit und den Befehl ein. Beispiel:
-
-   a) Erstellen Sie das Verzeichnis `/var/log/bashclub-zsync`, falls es noch nicht existiert. Verwenden Sie den Befehl: 
-   ```plaintext
-   sudo mkdir -p /var/log/bashclub-zsync
-   ```
-
-   b) Öffnen Sie die Cronjob-Konfigurationsdatei mit dem Befehl:
-   ```plaintext
-   sudo nano /etc/cron.d/bashclub-zsync-cronjob
-   ```
-
-   c) Fügen Sie den folgenden Inhalt in die Datei ein:
-   ```plaintext
-   SHELL=/bin/bash
-   PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
-   0 * * * * root /usr/bin/bashclub-zsync -c /etc/bashclub/zsync.conf >> /var/log/bashclub-zsync/zsync.log 2>&1
-   ```
-
-   In diesem Beispiel wird das Script einmal pro Stunde ausgeführt. Der Befehl `/usr/bin/bashclub-zsync -c /etc/bashclub/zsync.conf` wird als root-Benutzer ausgeführt, und die Ausgabe wird in die Datei `/var/log/bashclub-zsync/zsync.log` umgeleitet.
-
-   d) Speichern Sie die Datei und schließen Sie den Texteditor.
-
-Das Script wird nun automatisch gemäß dem angegebenen Intervall ausgeführt, und die Ausgabe wird im angegebenen Logfile gespeichert. Stellen Sie sicher, dass die Dateiberechtigungen für die Cronjob-Konfigurationsdatei korrekt sind, damit sie von Cron erkannt wird.
-
-# Konfiguration auf dem Quellserver
-
-Um ZFS-Dateisysteme und Volumes für die Replikation mit dem bashclub-zsync-Script zu markieren, verwenden Sie das ZFS-Attribut "bashclub:zsync" auf dem Quellserver. Dieses Attribut kann mit dem Parameter "value" konfiguriert werden, der die Werte "subvols", "all" oder "exclude" haben kann.
-
-Hier ist eine Anleitung zur Konfiguration auf dem Quellserver:
-
-1. Identifizieren Sie das ZFS-Dateisystem oder Volume, das Sie für die Replikation markieren möchten.
-
-2. Setzen Sie das ZFS-Attribut "bashclub:zsync" mit dem gewünschten Value-Parameter-Wert. Verwenden Sie den Befehl:
-   ```plaintext
-   zfs set bashclub:zsync=<value> <datensatz>
-   ```
-   Ersetzen Sie `<value>` durch einen der folgenden Werte: "subvols", "all" oder "exclude". Ersetzen Sie `<datensatz>` durch den Namen des ZFS-Datensatzes.
-
-   - "subvols": Markiert nur Volumes und Dateisysteme in der Hierarchie unterhalb des Datensatzes, für den das Attribut gesetzt ist (schließt den Wurzel-Datensatz aus).
-   - "all": Markiert alle Volumes und Dateisysteme im ZFS-Datensatz einschließlich des Wurzel-Datensatzes.
-   - "exclude": Schließt Volumes und Dateisysteme im ZFS-Datensatz aus, für den das Attribut gesetzt ist.
-
-   Durch die Markierung mit dem Attribut "bashclub:zsync" wird das betreffende ZFS-Dateisystem oder -Volume für die Replikation mit dem bashclub-zsync-Script berücksichtigt.
-
-Bitte beachten Sie, dass die genaue Syntax und Verwendung des Befehls je nach dem von Ihnen verwendeten Betriebssystem oder der ZFS-Version variieren kann. Stellen Sie sicher, dass Sie über ausreichende Berechtigungen verfügen, um die Konfiguration auf dem Quellserver vorzunehmen.
-Um mehrere Replikationen zu unterschiedlichen Hosts mit dem bashclub-zsync-Script auf dem Zielserver zu ermöglichen, können Sie den Namen des ZFS-Attributs "bashclub:zsync" in der Scriptkonfiguration mit dem Parameter "tag" anpassen. Dadurch können Sie verschiedene Replikationen zu unterschiedlichen Hosts einrichten und steuern. Öffnen Sie das bashclub-zsync-Script auf dem Zielserver, suchen Sie nach dem "tag"-Parameter und ändern Sie den Wert in den gewünschten Namen für das ZFS-Attribut. Speichern Sie das Script nach der Änderung. Stellen Sie sicher, dass Sie über ausreichende Berechtigungen verfügen, um das Script zu bearbeiten und die Konfiguration auf dem Zielserver vorzunehmen.
-
-# Lizenz
+## Lizenz
 
 Ab Version 2.0.0 steht bashclub-zsync unter der GNU General Public License, Version 3 oder später (`GPL-3.0-or-later`, Datei `LICENSE`). Versionen bis 1.0.19 wurden unter der MIT-Lizenz veröffentlicht; ihr Hinweis steht in der copyright-Datei der Pakete (`/usr/share/doc/bashclub-zsync/copyright`).

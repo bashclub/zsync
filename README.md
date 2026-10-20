@@ -106,7 +106,7 @@ chmod +x /usr/local/bin/bashclub-zsync /usr/local/bin/remote-snapshot-manager
 ~~~
 
 ## Documentation
-[DOCUMENTATION_DE.md](DOCUMENTATION_DE.md)
+Handbook (German, readable without login): https://docs.bashclub.org/s/bashclub-zsync. Overview in German: [DOCUMENTATION_DE.md](DOCUMENTATION_DE.md).
 
 
 ## Guided setup
