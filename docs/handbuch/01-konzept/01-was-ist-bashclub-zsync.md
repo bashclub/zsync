@@ -22,12 +22,18 @@ Replikation zugleich die Quelle ist.
 - Es löscht alte Snapshots auf dem Backupserver nach festen Regeln.
 - Es meldet den Zustand jedes Laufs und jedes Datasets an Checkmk.
 
-## Backup, kein Spiegel
-zsync macht ein **Backup**, keinen Spiegel der Quelle. Der Unterschied zählt im Ernstfall:
-- Was auf der Quelle gelöscht wird, verschwindet auf dem Backupserver nicht sofort. Ab 2.0 kann der Backupserver je
-  Snapshot-Typ eine feste Anzahl Snapshots behalten, egal was auf der Quelle passiert.
+## Spiegel oder Backup
+zsync kann beides, im Vordergrund steht das **Backup**:
+- **Spiegel:** Mit Labels ohne Zahl in `snapshot_filter` folgt der Backupserver der Quelle. Was sie an Snapshots
+  löscht, löscht er auch; er hat dieselben Stände wie die Quelle, z. B. für ein Failover-Replikat.
+- **Backup:** Ab 2.0 behält der Backupserver je Snapshot-Typ eine feste Anzahl Snapshots (`daily=30`), egal was auf
+  der Quelle passiert. Was auf der Quelle gelöscht wird, verschwindet auf dem Backupserver nicht.
+
+In beiden Fällen reißt die Quelle das Ziel nicht mit:
 - Ein Rollback oder ein verschlüsseltes Dataset auf der Quelle überschreibt das Backup nicht. Ab 2.0 bleibt die alte
   Kette erhalten, und der Admin entscheidet, was damit passiert.
+- Ein auf der Quelle gelöschtes Dataset bleibt auf dem Backupserver, bis der Admin es mit
+  `bashclub-zsync-maintenance` löscht.
 - Bei einer entfernten Quelle holt der Backupserver die Daten selbst ab, die Quelle hat keinen Zugang zu ihm. Bei
   lokaler Replikation auf einen Wechseldatenträger schützt die Trennung: zsync exportiert den Pool nach dem Lauf und
   schaltet die Platte ab.

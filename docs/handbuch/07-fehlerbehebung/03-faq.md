@@ -11,9 +11,10 @@ Backupserver selbst ist ab 2.0 auf der Quelle eingeschränkt: Sein Benutzer darf
 die ausgewählten Datasets lesen und nur von seiner Adresse aus. Mehr in [Architektur](../01-konzept/02-architektur.md)
 und [Sicherheitsmodell](../01-konzept/06-sicherheitsmodell.md).
 
-## Warum ist das Replikat kein Spiegel der Quelle?
-Ein Spiegel übernimmt jede Änderung, auch die schlechten: gelöschte Snapshots, ein Rollback, eine verschlüsselte Platte.
-zsync überträgt jeden Snapshot einzeln (`zfs send -i`), nicht den ganzen Stand der Quelle (`zfs send -R`), und löscht
+## Ist das Replikat ein Spiegel der Quelle?
+Nur so weit, wie es eingestellt ist. Ein reiner Spiegel übernähme jede Änderung, auch die schlechten: gelöschte
+Snapshots, ein Rollback, eine verschlüsselte Platte. zsync folgt beim Löschen von Snapshots der Quelle, wenn
+`snapshot_filter` Labels ohne Zahl hat; einen Rollback oder ein gelöschtes Dataset übernimmt es nie. zsync überträgt jeden Snapshot einzeln (`zfs send -i`), nicht den ganzen Stand der Quelle (`zfs send -R`), und löscht
 auf dem Backupserver nach eigenen Regeln (`snapshot_filter`). `zfs receive -F` setzt dabei nur das Replikat auf seinen
 eigenen neuesten Snapshot zurück, bevor der nächste ankommt; Snapshots, die es auf der Quelle nicht mehr gibt, löscht es
 nicht. Mit einer festen Anzahl je Label (`daily=30`, ab 2.0) bleiben die Snapshots auf dem Backupserver, egal was die

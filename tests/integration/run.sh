@@ -174,6 +174,26 @@ case_broken_chain() {
   equal "Zustand broken" broken "$(state_of "$ZCI_POOL_SRC/data")"
   check "Ursache Rotation im Log" grep -q 'deleted by the rotation on the source' <<< "$(last_run_log)"
   check "Checkmk: CRIT" grep -q '^2 ' <<< "$(check_output)"
+  # auf der Quelle gelöscht und unter demselben Namen neu angelegt: eigene Ursache; umbenennen in der Wartung, der
+  # nächste Lauf repliziert das neue Dataset, die alte Kette bleibt
+  local T=$ZCI_POOL_DST/broken_chain/$ZCI_POOL_SRC new old
+  zfs create "$ZCI_POOL_SRC/vm"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/vm"; write "$ZCI_POOL_SRC/vm" 1; snap "$ZCI_POOL_SRC/vm" 01
+  zsync
+  old=$(guid "$T/vm@zfs-auto-snap_daily-01")
+  zfs destroy -r "$ZCI_POOL_SRC/vm"; sleep 1.05; zfs create "$ZCI_POOL_SRC/vm"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/vm"
+  write "$ZCI_POOL_SRC/vm" 1; snap "$ZCI_POOL_SRC/vm" 01
+  new=$(guid "$ZCI_POOL_SRC/vm@zfs-auto-snap_daily-01")
+  zsync
+  equal "neu angelegt: Zustand broken" broken "$(state_of "$ZCI_POOL_SRC/vm")"
+  check "neu angelegt: Ursache im Log" grep -q "$ZCI_POOL_SRC/vm - no common snapshot with the source: the dataset was created again on the source" <<< "$(last_run_log)"
+  check "neu angelegt: Fall für die Wartung" grep -q '^broken;' <<< "$(zfs get -H -o value -s local bashclub:zsync-case "$T/vm")"
+  local case_id; case_id=$(ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-maintenance --list --tsv | awk -F'\t' -v r="$T/vm" '$3 == "broken" && $4 == r { print $1 }')
+  check "neu angelegt: Fall im Wartungswerkzeug" test -n "$case_id"
+  check "neu angelegt: umbenennen" env ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-maintenance --decide "$case_id" rename
+  zsync
+  equal "neu angelegt: Zustand danach" ok "$(state_of "$ZCI_POOL_SRC/vm")"
+  equal "neu angelegt: neues Dataset repliziert" "$new" "$(guid "$T/vm@zfs-auto-snap_daily-01")"
+  equal "neu angelegt: alte Kette behalten" "$old" "$(guid "$T/vm.broken-$(date +%Y-%m-%d)@zfs-auto-snap_daily-01")"
 }
 
 # Replikat ohne Quelle und quittiertes Replikat

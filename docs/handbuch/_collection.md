@@ -5,9 +5,9 @@ outline: https://docs.bashclub.org/collection/bashclub-zsync-MKfiJIBPou
 outline_id: af914add-61f3-42bd-bd03-32dcb155f1bb
 ---
 **bashclub-zsync** repliziert ZFS-Datasets und -Volumes von Pool zu Pool – von einer Quelle per SSH oder lokal zwischen
-Pools desselben Hosts, z. B. auf Wechseldatenträger. Es arbeitet als Backup, nicht als Spiegel: Der Backupserver holt
-die Daten selbst ab, behält Snapshots nach eigenen Regeln und schützt sie vor Löschung, Rollback und Verschlüsselung auf
-der Quelle. Dazu gehören Snapshots auf der Quelle, systemd-Timer, Betrieb ohne root, Monitoring in Checkmk und eine
+Pools desselben Hosts, z. B. auf Wechseldatenträger. Es kann die Snapshots der Quelle spiegeln oder als Backup mit
+eigener Aufbewahrung arbeiten; im Vordergrund steht das Backup: Der Backupserver holt die Daten selbst ab, behält
+Snapshots nach eigenen Regeln und schützt sie vor Löschung, Rollback und Verschlüsselung auf der Quelle. Dazu gehören Snapshots auf der Quelle, systemd-Timer, Betrieb ohne root, Monitoring in Checkmk und eine
 Toolbox für die Wiederherstellung. Freie Software unter GPL-3.0-or-later.
 
 Dieses Handbuch beschreibt Version 2.0. Funktionen, die mit 2.0 oder später kamen, nennen ihre Version („ab 2.0“).
