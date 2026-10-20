@@ -26,15 +26,17 @@ Neu hier: mit dem [Konzept](01-konzept/_index.md) anfangen, dann der
 [Standardfall](03-szenarien/01-standardfall.md). Von 1.0: [Upgrade auf 2.0](02-installation/03-upgrade-auf-2-0.md).
 
 ## Kontakt
-**Fehler, Fragen, Wünsche**
-Issues im Repository [code.bashclub.org/bashclub/zsync](https://code.bashclub.org/bashclub/zsync). Zum Kommentieren
-ist ein Konto bei code.bashclub.org nötig, die Anmeldung geht auch mit einem GitHub-Konto.
 
-**bashclub auf GitHub**
-[github.com/bashclub](https://github.com/bashclub)
+| ![](https://code.bashclub.org/bashclub/zsync/raw/branch/main/docs/handbuch/logo-spille-it.png) | ![](https://code.bashclub.org/bashclub/zsync/raw/branch/main/docs/handbuch/logo-bashclub.png) |
+|:---:|:---:|
+| **Spille IT Solutions** | **bashclub** |
+| Thorsten Spille, bashclub-Kernteam, Maintainer von bashclub-zsync | Community rund um Proxmox, ZFS und Linux, entstanden bei der sysops GmbH |
+| Kommerzieller Support, Einrichtung und Wartung | Videos: [YouTube-Kanal sysopstv](https://www.youtube.com/@sysopstv) |
+| [spille-it.de](https://spille-it.de) | [code.bashclub.org](https://code.bashclub.org/bashclub/zsync) |
+| [kontakt@spille-it.de](mailto:kontakt@spille-it.de) | [github.com/bashclub](https://github.com/bashclub) |
 
-**Kommerzieller Support**
-Thorsten Spille, [spille-it.de](https://spille-it.de), [kontakt@spille-it.de](mailto:kontakt@spille-it.de)
+**Fehler, Fragen, Wünsche:** Issues im Repository [code.bashclub.org/bashclub/zsync](https://code.bashclub.org/bashclub/zsync). Zum
+Kommentieren ist ein Konto bei code.bashclub.org nötig, die Anmeldung geht auch mit einem GitHub-Konto.
 
 **Unterstützen**
 
