@@ -11,6 +11,8 @@ in Outline endet mit einem Link auf ihre Datei hier.
 - Ein Ordner je Bereich (`01-konzept`, `02-installation`, …), die Nummer bestimmt die Reihenfolge.
 - `_index.md` im Ordner ist die Seite des Bereichs in Outline, die Artikel des Ordners hängen darunter.
 - Artikel heißen `NN-name.md`, die Nummer bestimmt die Reihenfolge im Bereich.
+- `_collection.md` ist die Beschreibung der Collection (Startseite des Handbuchs mit der Liste der Kapitel). Ein neuer
+  Bereich kommt dort dazu.
 
 Jede Datei beginnt mit einem Kopf:
 ```
@@ -68,7 +70,8 @@ docs/handbuch/render.py list
 docs/handbuch/render.py render docs/handbuch/01-konzept/02-architektur.md
 ```
 Ein neuer Artikel wird zuerst angelegt und seine Adresse in `outline:` eingetragen, danach werden Links auf ihn
-aufgelöst. Links auf noch nicht veröffentlichte Artikel bricht `render` ab (`--allow-missing` lässt nur den Text
+aufgelöst. In Outline steht er dann an derselben Stelle wie die Nummer im Repository: neue Seiten landen dort zunächst
+am Ende und werden verschoben. `_collection.md` geht ohne den Hinweis am Ende in die Beschreibung der Collection. Links auf noch nicht veröffentlichte Artikel bricht `render` ab (`--allow-missing` lässt nur den Text
 stehen).
 
 ## Prüfung
