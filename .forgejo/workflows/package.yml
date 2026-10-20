@@ -8,16 +8,14 @@ on:
     paths-ignore:
       - "docs/**"
       - "README.md"
-      - "DOCUMENTATION_DE.md"
+      - "README.de.md"
       - "CONTRIBUTING.md"
-      - "notizen-luks"
   pull_request:
     paths-ignore:
       - "docs/**"
       - "README.md"
-      - "DOCUMENTATION_DE.md"
+      - "README.de.md"
       - "CONTRIBUTING.md"
-      - "notizen-luks"
   # manuell neu bauen (z. B. nach Änderungen an ci-tools oder Secrets)
   workflow_dispatch:
 

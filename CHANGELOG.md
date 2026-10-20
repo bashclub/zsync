@@ -4,6 +4,7 @@
 
 ### Changed
 - the Checkmk check of the runs comes as service `<checkzfs_prefix> <config>` in the spool file of checkzfs (`<checkzfs_spool_maxage>_<checkzfs_prefix>`, one file per run with the checkzfs services) instead of a local check: written at the end of each run (also after errors), every 5 minutes during a run (watchdog, on the source only when the state changes) and with `-s`, locally or on the source like checkzfs (`checkzfs_spool`), so the services stay visible while the backup server is switched off between the runs; the package no longer links the local check and removes the link of the testing versions (#85)
+- documentation: the handbook (https://docs.bashclub.org/s/bashclub-zsync, source `docs/handbuch`) replaces `DOCUMENTATION_DE.md`; a German overview is in `README.de.md`; `notizen-luks` removed, `bashclub-zsync-disk` prepares removable disks
 - license: GPL-3.0-or-later instead of MIT from 2.0.0 on (both packages, SPDX headers in all files, DEP-5 copyright file `/usr/share/doc/<package>/copyright` with the MIT notice of the versions up to 1.0.19); contributions with Developer Certificate of Origin (`Signed-off-by`, CONTRIBUTING.md) (#72)
 
 ### Added
