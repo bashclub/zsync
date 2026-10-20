@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Prepare the handbook articles for Outline (Git is the source, Outline only shows them).
 
-  render.py list                         all articles in order: file, parent, title, Outline address
+  render.py list                         all articles in order: file, parent, title, Outline address, position
+                                         under the parent (0-based, the index of move_document), Outline id,
+                                         Outline id of the parent (the collection for a section)
   render.py render <file> [--allow-missing]
                                          the text for Outline: without header, links to other articles
                                          as Outline addresses, a note on the source file at the end
@@ -111,9 +113,17 @@ def blocks(path):
 
 def main():
     if len(sys.argv) >= 2 and sys.argv[1] == "list":
+        collection = read(os.path.join(ROOT, "_collection.md"))[0].get("outline_id") or "-"
+        position, sections = {}, 0
         for path, parent in articles():
             head = read(path)[0]
-            print("\t".join([rel(path), rel(parent) if parent else "-", head["title"], head.get("outline") or "-"]))
+            if parent:
+                position[parent] = position.get(parent, -1) + 1
+                index, parent_id = position[parent], read(parent)[0].get("outline_id") or "-"
+            else:
+                index, parent_id, sections = sections, collection, sections + 1
+            print("\t".join([rel(path), rel(parent) if parent else "-", head["title"], head.get("outline") or "-",
+                             str(index), head.get("outline_id") or "-", parent_id]))
     elif len(sys.argv) >= 3 and sys.argv[1] == "render":
         sys.stdout.write(render(os.path.abspath(sys.argv[2]), "--allow-missing" in sys.argv[3:]))
     elif len(sys.argv) >= 3 and sys.argv[1] == "blocks":
