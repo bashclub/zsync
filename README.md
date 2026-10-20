@@ -622,7 +622,7 @@ At the end the job checks each dataset against the plan and writes a report: OK,
 - the same snapshots by GUID;
 - the requested snapshot is the newest;
 - no partial receive is left;
-- the same `logicalreferenced`;
+- the same `logicalreferenced`, within 1 % or 1 MiB (metadata grows with the `ashift` of the pool);
 - the restored properties;
 - the key status of encrypted datasets.
 

@@ -75,7 +75,8 @@ Jeder Restore ist ein Job, der im Hintergrund läuft (systemd-Dienst `bashclub-z
 Fehlgeschlagene Übertragungen werden dreimal wiederholt (nach 30, 60, 120 Sekunden). Während des Jobs halten Holds die
 gesendeten Snapshots. Am Ende prüft der Job jedes Dataset (GUIDs, neuester Snapshot, kein angefangener Empfang,
 `logicalreferenced`, Properties, Schlüsselstatus) und schreibt einen Bericht mit OK, WARN oder ERROR. Exit-Code 0 nur,
-wenn alles OK ist.
+wenn alles OK ist. Bei `logicalreferenced` gilt eine Abweichung bis 1 % oder 1 MiB als OK mit Hinweis: Die Metadaten
+wachsen mit dem `ashift` des Pools, z. B. von einer USB-Platte mit ashift 14 auf ein System mit 12.
 
 ### Einzelne Dateien
 Auf dem Backupserver.

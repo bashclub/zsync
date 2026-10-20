@@ -835,7 +835,12 @@ function verify_item() {
     else level=ERROR; detail+=("snapshots differ from the plan ($(grep -c . <<< "$dst") of $(grep -c . <<< "$want"))"); fi
     if grep -q "^$(tail -1 <<< "$want" | cut -f1)"$'\t' <<< "$dst"; then
         lr=$(backup_zfs get -Hp -o value logicalreferenced "$r@$s"); ld=$(system_zfs get -Hp -o value logicalreferenced "$d@$s")
-        [[ $lr == "$ld" ]] || { [[ $level == OK ]] && level=WARN; detail+=("logicalreferenced $ld instead of $lr"); }
+        # metadata grows with the ashift of the pool: up to 1 % or 1 MiB is a different layout, not missing data
+        if [[ $lr != "$ld" ]]; then
+            local diff=$(( ld > lr ? ld - lr : lr - ld )) tol=$(( lr / 100 > 1048576 ? lr / 100 : 1048576 ))
+            if (( diff <= tol )); then detail+=("logicalreferenced $ld instead of $lr (metadata of a different pool layout)")
+            else [[ $level == OK ]] && level=WARN; detail+=("logicalreferenced $ld instead of $lr"); fi
+        fi
     fi
     if [[ $job_mode != reattach ]]; then
         while IFS='=' read -r p expected; do
