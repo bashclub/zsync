@@ -1,6 +1,6 @@
 # zsync
 
-[Deutsch](README.de.md)
+[Deutsch](README.de.md) · Support the development: [Ko-fi](https://ko-fi.com/thorakel)
 
 > Development takes place at https://code.bashclub.org/bashclub/zsync
 >

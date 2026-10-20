@@ -31,6 +31,8 @@ Neu hier: mit dem [Konzept](01-konzept/_index.md) anfangen, dann der
 - **bashclub auf GitHub:** [github.com/bashclub](https://github.com/bashclub)
 - **Kommerzieller Support:** Thorsten Spille, [spille-it.de](https://spille-it.de),
   [kontakt@spille-it.de](mailto:kontakt@spille-it.de)
+- **Unterstützen:** Gefällt dir bashclub-zsync? Ein Kaffee für die Entwicklung auf
+  [Ko-fi](https://ko-fi.com/thorakel).
 
 Die Artikel entstehen im Repository unter `docs/handbuch` und werden von dort hierher veröffentlicht. Korrekturen bitte
 als Issue oder Pull Request.

@@ -7,7 +7,8 @@
                                          Outline id of the parent (the collection for a section)
   render.py render <file> [--allow-missing]
                                          the text for Outline: without header, links to other articles
-                                         as Outline addresses, a note on the source file at the end
+                                         as Outline addresses; at the end a link to the next article (in the
+                                         order of list, if it is published), the source file and Ko-fi
   render.py blocks <file> [<n>]          the bash blocks of an article (numbered), or only block n, to run them
                                          word by word in a test container or on the test VM
 """
@@ -17,6 +18,7 @@ import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPO_URL = "https://code.bashclub.org/bashclub/zsync/src/branch/main/docs/handbuch/"
+KOFI_URL = "https://ko-fi.com/thorakel"
 LINK = re.compile(r"\]\((?!https?://|#|mailto:)([^)#\s]+\.md)(#[^)\s]*)?\)")
 
 
@@ -101,9 +103,18 @@ def render(path, allow_missing):
         sys.exit(f"{rel(path)}: links to articles that are not published yet: {', '.join(sorted(set(missing)))}")
     # links whose target is not published yet: only the text stays
     text = re.sub(r"\[([^\]]*)\]\(\)", r"\1", text)
+    # the next article in the order of the handbook (the next section after the last article of a section)
+    order = [p for p, _ in articles()]
+    following = ""
+    if path in order and order.index(path) + 1 < len(order):
+        nxt = order[order.index(path) + 1]
+        head_next = read(nxt)[0]
+        if head_next.get("outline"):
+            following = f"\n\n**Weiter:** [{head_next['title']}]({head_next['outline']})"
     note = (f"\n\n---\n\n*Quelle dieser Seite: [{rel(path)}]({REPO_URL}{rel(path)}) im Repository von bashclub-zsync. "
-            "Änderungen bitte dort, diese Seite wird daraus erzeugt.*\n")
-    return text.rstrip("\n") + note
+            "Änderungen bitte dort, diese Seite wird daraus erzeugt.*\n\n"
+            f"*Gefällt dir bashclub-zsync? [Unterstütze die Entwicklung auf Ko-fi]({KOFI_URL}).*\n")
+    return text.rstrip("\n") + following + note
 
 
 def blocks(path):

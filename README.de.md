@@ -1,6 +1,6 @@
 # bashclub-zsync
 
-[English](README.md)
+[English](README.md) · Unterstützen: [Ko-fi](https://ko-fi.com/thorakel)
 
 Pull-Replikation von ZFS-Datasets auf einen Backupserver: inkrementell, auch verschlüsselt (raw), fortsetzbar, mit
 Snapshots, Aufbewahrung, Checkmk-Monitoring und Restore. Der Backupserver holt die Daten von der Quelle; die Quelle hat
