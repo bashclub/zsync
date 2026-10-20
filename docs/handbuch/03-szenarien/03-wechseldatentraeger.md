@@ -102,7 +102,8 @@ label=usb-backup1
 cryptsetup open "$(blkid -t LABEL="$label" -o device | head -n1)" "$label" --key-file "/etc/bashclub/$label.key"
 zpool import "$label"
 ```
-Danach wie im Bereich Restore und Notfall beschrieben. Zum Schluss:
+Danach wie in [Restore und Notfall](../05-restore/_index.md) beschrieben, auf dem Backupserver ohne `--from` und `--to`.
+Zum Schluss:
 ```bash
 label=usb-backup1
 zpool export "$label"

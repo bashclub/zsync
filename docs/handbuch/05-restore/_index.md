@@ -1,7 +1,8 @@
 ---
 title: Restore und Notfall
 audience: Anwender, Admin
-outline:
+outline: https://docs.bashclub.org/doc/restore-und-notfall-yTXNsMeTmk
+outline_id: 3b71ae51-78d2-44c4-bff8-7fa4998ffdd2
 ---
 Daten aus dem Backup zurückholen, vom einzelnen Ordner bis zum ganzen Server, und was im Notfall zu tun ist. Die
 Werkzeuge kommen ab 2.0 mit dem Paket `bashclub-zsync-restore`; alle Befehle stehen in der

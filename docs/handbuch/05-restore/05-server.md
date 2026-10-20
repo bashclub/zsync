@@ -1,7 +1,8 @@
 ---
 title: Ganzen Server wiederherstellen
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/ganzen-server-wiederherstellen-F5p8PbFau2
+outline_id: 70bb3fc6-6bd3-4cf7-9684-ffc416f2b64d
 ---
 Ab 2.0. Stellt alle Replikate einer Config auf einem System wieder her, z. B. auf einem neu installierten Proxmox nach
 dem Verlust des alten. Eltern vor Kindern, mit den Properties der Quelle und der ganzen Snapshot-Kette. Danach kann

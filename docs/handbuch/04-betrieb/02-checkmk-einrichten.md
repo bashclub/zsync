@@ -69,4 +69,4 @@ Das Höchstalter des letzten Laufs je Config steht in der Config selbst (`monito
 
 ## Abschalten
 - Service der Config auf diesem Backupserver: `touch /etc/bashclub/zsync-checkmk.disabled`
-- checkzfs für eine Config: `checkzfs_disabled=1` in der Config
+- Services je Dataset einer Config: `checkzfs_disabled=1` in der Config

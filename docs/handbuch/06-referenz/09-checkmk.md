@@ -86,7 +86,7 @@ orphan_grace=172800
 | `learn_intervals` | `5` | Startabstände bis zum Ende der Lernphase |
 | `orphan_grace` | `86400` | Wartezeit für Replikate ohne Quelle |
 
-Abschalten des Services der Config: `touch /etc/bashclub/zsync-checkmk.disabled`. checkzfs abschalten:
+Abschalten des Services der Config: `touch /etc/bashclub/zsync-checkmk.disabled`. Services je Dataset abschalten:
 `checkzfs_disabled=1` in der Config.
 
 ## Von Hand prüfen

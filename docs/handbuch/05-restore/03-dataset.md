@@ -1,7 +1,8 @@
 ---
 title: Dataset oder VM-Disk wiederherstellen
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/dataset-oder-vm-disk-wiederherstellen-cqoK34N2uG
+outline_id: 952f50da-0977-4006-9e53-dbd21755f708
 ---
 Ab 2.0. Stellt ein Dataset oder die Disk einer VM mit ihrer ganzen Snapshot-Kette wieder her: auf der Quelle, auf einem
 neuen Server oder auf dem Backupserver in einen anderen Pool. Die Kette bleibt dieselbe; danach kann die Replikation

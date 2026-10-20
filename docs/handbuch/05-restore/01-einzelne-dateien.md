@@ -1,7 +1,8 @@
 ---
 title: Einzelne Dateien zurückholen
 audience: Anwender, Admin
-outline:
+outline: https://docs.bashclub.org/doc/einzelne-dateien-zuruckholen-E3x3lqFEa7
+outline_id: 52b41f7a-a766-4efb-b3ea-88b5c2f07580
 ---
 Ab 2.0, auf dem Backupserver. Eine gelöschte oder überschriebene Datei kommt aus einem Snapshot zurück, ohne das ganze
 Dataset wiederherzustellen. Der Snapshot wird dafür schreibgeschützt eingehängt; das Backup selbst bleibt unverändert.

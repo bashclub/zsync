@@ -49,8 +49,8 @@ Die Replikate auf `backup2` heißen `<target>/<target von backup1>/rpool/data/�
 
 ## Was zu beachten ist
 - **Rotation:** `backup2` bekommt nur Snapshots, die es auf `backup1` gibt, solange es sie gibt. Läuft `backup2` seltener,
-  als `backup1` die Snapshots behält, reißt die Kette. Bookmarks würden helfen, bleiben aber aus, solange checkzfs das
-  Monitoring macht.
+  als `backup1` die Snapshots behält, hält `source_bookmark=1` (Default neuer Configs) die Kette über einen Bookmark auf
+  `backup1`.
 - **Holds:** Während `backup2` überträgt, hält es die Snapshots auf `backup1`. Will die Rotation auf `backup1` einen davon
   löschen, scheitert das mit `dataset is busy` und gelingt im nächsten Lauf.
 - **Zeitplan:** `backup2` am besten zeitversetzt nach `backup1`, z. B. nachts.

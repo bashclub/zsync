@@ -1,7 +1,8 @@
 ---
 title: Disaster-Recovery-Plan und Restore-Übung
 audience: Admin
-outline:
+outline: https://docs.bashclub.org/doc/disaster-recovery-plan-und-restore-ubung-WCPByig2OB
+outline_id: bd0b5040-bb2d-47f5-9cb3-3af147e91278
 ---
 Ein Backup ist erst dann eins, wenn der Restore geübt ist. Dieser Artikel ist eine Vorlage für den eigenen Plan und
 eine Übung, die nichts an Quelle und Backup ändert.
