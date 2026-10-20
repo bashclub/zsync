@@ -122,6 +122,8 @@ def render(path, allow_missing):
     # text, Outline would show it as a caption; below it the link) between empty paragraphs (\\ in Outline), the next
     # article, the note on the source
     kofi = f"\\\n\n| ![]({KOFI_BUTTON}) |\n|:---:|\n| [{KOFI_NAME}]({KOFI_URL}) |\n\n\\\n\n"
+    if os.path.basename(path) == "_collection.md":
+        kofi = ""   # the start page has the block in its contact section
     note = (f"---\n\n*Quelle dieser Seite: [{rel(path)}]({REPO_URL}{rel(path)}) im Repository von bashclub-zsync. "
             "Änderungen bitte dort, diese Seite wird daraus erzeugt.*\n")
     return text.rstrip("\n") + "\n\n" + kofi + following + note
