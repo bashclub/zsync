@@ -13,13 +13,14 @@ Werkzeuge kommen ab 2.0 mit dem Paket `bashclub-zsync-restore`; alle Befehle ste
 
 **Für Admins**
 - [Zugang für eine Wiederherstellung](02-zugang.md): Pull oder Push
-- [Dataset oder VM-Disk wiederherstellen](03-dataset.md)
-- [Nach einem Rollback wieder anfügen](04-reattach.md)
-- [Ganzen Server wiederherstellen](05-server.md)
+- [Restore vom Wechseldatenträger](03-wechseldatentraeger.md): die USB-Platte am Backupserver oder an einem neuen Host
+- [Dataset oder VM-Disk wiederherstellen](04-dataset.md)
+- [Nach einem Rollback wieder anfügen](05-reattach.md)
+- [Ganzen Server wiederherstellen](06-server.md)
 
 **Notfall**
-- [Ransomware und Angriffe](06-ransomware.md)
-- [Disaster-Recovery-Plan und Restore-Übung](07-dr-plan.md)
+- [Ransomware und Angriffe](07-ransomware.md)
+- [Disaster-Recovery-Plan und Restore-Übung](08-dr-plan.md)
 
 Jeder Restore zeigt zuerst einen Plan und überschreibt nie ein vorhandenes Dataset. Ohne Bestätigung oder `--start`
 passiert nichts.

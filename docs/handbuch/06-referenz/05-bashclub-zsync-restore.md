@@ -10,7 +10,7 @@ Notfall; hier nur die Befehle.
 ## `bashclub-zsync-restore`
 ```
 bashclub-zsync-restore
-bashclub-zsync-restore <befehl> [--from <user>@<backupserver>[:<port>] | --to <system>[:<port>]] [--config <name>] …
+bashclub-zsync-restore <befehl> [--from <user>@<backupserver>[:<port>] | --to <system>[:<port>]] [--config <name> | --root <dataset>] …
 ```
 Ohne Befehl fragt es Schritt für Schritt (Weg, Config, was, Dataset, Snapshot, Name) und zeigt am Ende den
 vollständigen Befehl, bevor es ihn ausführt.
@@ -22,8 +22,11 @@ vollständigen Befehl, bevor es ihn ausführt.
 | `--to <system>` | Push: der Backupserver schreibt auf `root@<system>` mit dem Push-Schlüssel | auf dem Backupserver |
 | keine | beides auf diesem Host, z. B. in einen anderen Pool | auf dem Backupserver |
 | `--config <name>` | Replikate dieser Config; erlaubt Namen wie auf der Quelle | – |
+| `--root <dataset>` | ab 2.0: Replikate unter diesem Dataset, ohne Config, z. B. auf einem Wechseldatenträger an einem anderen Host; nicht mit `--from` | – |
 
-Ein Replikat heißt mit seinem vollen Namen auf dem Backupserver, mit `--config` auch mit seinem Namen auf der Quelle.
+Ein Replikat heißt mit seinem vollen Namen auf dem Backupserver, mit `--config` oder `--root` auch mit seinem Namen auf
+der Quelle. Auf einem nur lesend importierten Pool setzt der Restore keine Holds und nennt das im Log; siehe
+[Restore vom Wechseldatenträger](../05-restore/03-wechseldatentraeger.md).
 
 ### Ansehen
 | Befehl | Wirkung |
@@ -80,8 +83,11 @@ Auf dem Backupserver.
 | Befehl | Wirkung |
 |---|---|
 | `mount <replikat>@<snapshot>` | schreibgeschützter Klon in `<pool>/zsync-restore-clones`, eingehängt unter `/run/bashclub-zsync-restore/mnt/<klon>`; bei einem Volume seine Partitionen (ohne Journal-Replay) |
-| `mounts` | die Klone |
+| `mounts` | die Klone und die direkt eingehängten Snapshots |
 | `cleanup <klon>` oder `cleanup --all` | aushängen und löschen, nur Klone von `mount` |
+
+Auf einem nur lesend importierten Pool ist kein Klon möglich: `mount` hängt bei einem Dateisystem den Snapshot direkt
+ein (`mount -t zfs -o ro`), ein Volume lehnt es ab und nennt den Weg über `dataset --as` in einen beschreibbaren Pool.
 
 Solange ein Klon existiert, behält die Rotation seinen Snapshot.
 

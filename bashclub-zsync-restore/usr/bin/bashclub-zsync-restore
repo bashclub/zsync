@@ -28,6 +28,8 @@ usage: $prog                    guided restore: questions, then the command and 
   connection:     --from  pull: on the system to restore, read from the backup server as restore user
                   --to    push: on the backup server, write to root@<system> with the push key
                   neither: both on this host; --config <name>: the replicas of this configuration
+                  --root <dataset>: the replicas below this dataset, without a configuration (e.g. a removable
+                  disk on a new host: zpool import -o readonly=on <pool>, then --root <pool>/<target>)
   list            replicas with snapshots, newest snapshot, encryption and their state on the system
   show <replica>  snapshot chain compared with the system by GUID, and the restore command for it
   dataset <replica> [--recursive] [--snapshot <name>] [--as <dataset>] [--force] [--bwlimit <rate>] [--scrub]
@@ -408,7 +410,7 @@ function resolve_replica() {
     valid_dataset "$arg" || die "invalid dataset '$arg'"
     if [[ $direction == pull ]]; then
         [[ $arg == "$root" || $arg == "$root/"* ]] || arg=$root/$arg
-    elif [[ -n $config ]]; then
+    elif [[ -n $root ]]; then
         [[ $arg == "$root/"* ]] || arg=$root/$arg
     else
         config_of "$arg" || die "$arg is not below the target of a configuration in $conf_dir"
@@ -418,6 +420,12 @@ function resolve_replica() {
     echo "$arg"
 }
 # --config <name> (push, local): root = target of the configuration
+# --root <dataset> (push, local): root = this dataset, no configuration needed (e.g. a removable disk on another host)
+function use_root() {
+    valid_dataset "$1" || die "invalid --root '$1'"
+    backup_zfs list -H -o name "$1" > /dev/null 2>&1 || die "$1 does not exist on this host"
+    root=$1
+}
 function use_config() {
     need_zsync
     [[ $1 =~ ^[A-Za-z0-9_.-]+$ && -f $conf_dir/$1.conf ]] || die "no configuration $conf_dir/$1.conf"
@@ -471,6 +479,7 @@ function cmd_list() {
         case $1 in
             --from|--to) parse_connection "$1" "$2"; shift ;;
             --config) use_config "$2"; shift ;;
+            --root) [[ $direction != pull ]] || die "--root is for push or this host, pull uses the root of the restore user"; use_root "$2"; shift ;;
             *) usage ;;
         esac
         shift
@@ -510,6 +519,7 @@ function cmd_show() {
         case $1 in
             --from|--to) parse_connection "$1" "$2"; shift ;;
             --config) use_config "$2"; shift ;;
+            --root) [[ $direction != pull ]] || die "--root is for push or this host, pull uses the root of the restore user"; use_root "$2"; shift ;;
             -*) usage ;;
             *) arg=$1 ;;
         esac
@@ -734,7 +744,8 @@ function run_item() {
     mapfile -t snaps < <(chain_upto "$(chain_of_backup "$r")" "$s" | cut -f2 | sed "s|^|$r@|")
     if [ ${#snaps[@]} -gt 0 ]; then
         backup_zfs release "zsync-restore-$job_id" "${snaps[@]}" > /dev/null 2>&1
-        backup_zfs hold "zsync-restore-$job_id" "${snaps[@]}" && held=("${snaps[@]}")
+        if backup_zfs hold "zsync-restore-$job_id" "${snaps[@]}" 2> /dev/null; then held=("${snaps[@]}")
+        else log "no hold on the snapshots of $r (pool imported read-only?), they are not protected while the restore runs"; fi
     fi
     while [ $count -lt 100 ]; do
         ((count++))
@@ -1018,6 +1029,7 @@ function cmd_job() {
         case $1 in
             --from|--to) parse_connection "$1" "$2"; shift ;;
             --config) use_config "$2"; shift ;;
+            --root) [[ $direction != pull ]] || die "--root is for push or this host, pull uses the root of the restore user"; use_root "$2"; shift ;;
             --as) [[ $mode == dataset ]] || usage; valid_dataset "$2" || die "invalid --as '$2'"; as=$2; shift ;;
             --map)
                 [[ $mode == server && $2 == *=* ]] && valid_dataset "${2%%=*}" && valid_dataset "${2#*=}" || die "invalid --map '$2' (<dataset>=<dataset>)"
@@ -1040,7 +1052,7 @@ function cmd_job() {
     [[ -n $arg || $mode == server ]] || usage
     need_root; connect
     if [[ $mode == server ]]; then
-        [[ -n $root ]] || die "server: which replicas? --config <configuration> (push, on this host) or --from (pull)"
+        [[ -n $root ]] || die "server: which replicas? --config <configuration> or --root <dataset> (push, on this host) or --from (pull)"
         mapfile -t plan < <(server_items "$snap")
     else
         r=$(resolve_replica "$arg") || exit 1
@@ -1296,6 +1308,19 @@ function cmd_mount() {
     if [[ $keystatus == unavailable ]]; then
         die "$replica is encrypted and its key is not loaded on this host: zfs load-key $encroot (then mount again)"
     fi
+    # pool imported read-only (e.g. a removable disk on another host): no clone possible, a file system is mounted as
+    # snapshot directly, a volume only after a restore into a writable pool
+    if [[ $(zpool get -H -o value readonly "$pool" 2> /dev/null) == "on" ]]; then
+        [[ $type == filesystem ]] || die "$replica is a volume on the read-only pool $pool: restore it into a writable pool ($prog dataset --root <root> --as <pool>/<name> <replica>) and mount it there, or import $pool writable"
+        id=$(date +%Y%m%d-%H%M%S)
+        while [[ -e $run_dir/mnt/$id ]]; do sleep 1; id=$(date +%Y%m%d-%H%M%S); done
+        dir=$run_dir/mnt/$id
+        mkdir -p "$dir" && mount -t zfs -o ro "$snap" "$dir" || { rmdir "$dir" 2> /dev/null; die "mounting $snap failed"; }
+        printf '%s\t%s\n' "$id" "$snap" >> "$run_dir/snapshot-mounts"
+        echo "$snap (read only, pool $pool imported read-only): $dir"
+        echo "remove it: $prog cleanup $id"
+        return
+    fi
     container=$pool/zsync-restore-clones
     zfs list -H -o name "$container" > /dev/null 2>&1 || zfs create -o canmount=off -o mountpoint=none -o com.sun:auto-snapshot=false "$container" || die "cannot create $container"
     id=$(date +%Y%m%d-%H%M%S)
@@ -1329,6 +1354,9 @@ function cmd_mounts() {
     while IFS=$'\t' read -r name value; do
         printf '%-20s %-50s %s\n' "${name##*/}" "$value" "$( [[ $(zfs get -H -o value type "$name") == volume ]] && echo "/dev/zvol/$name" || zfs get -H -o value mountpoint "$name")"
     done < <(clones)
+    if [[ -f $run_dir/snapshot-mounts ]]; then
+        while IFS=$'\t' read -r name value; do printf '%-20s %-50s %s\n' "$name" "$value" "$run_dir/mnt/$name"; done < "$run_dir/snapshot-mounts"
+    fi
 }
 function cmd_cleanup() {
     local what=$1 name value id m
@@ -1344,6 +1372,20 @@ function cmd_cleanup() {
         rm -rf --one-file-system "${run_dir:?}/mnt/$id"
         echo "$name ($value) removed"
     done < <(clones)
+    # snapshots mounted directly (read-only pool)
+    if [[ -f $run_dir/snapshot-mounts ]]; then
+        : > "$run_dir/snapshot-mounts.new"
+        while IFS=$'\t' read -r id value; do
+            if [[ $what == --all || $what == "$id" ]]; then
+                umount "$run_dir/mnt/$id" || die "umount $run_dir/mnt/$id failed (in use?)"
+                rmdir "$run_dir/mnt/$id"
+                echo "$value unmounted"
+            else
+                printf '%s\t%s\n' "$id" "$value" >> "$run_dir/snapshot-mounts.new"
+            fi
+        done < "$run_dir/snapshot-mounts"
+        mv -f "$run_dir/snapshot-mounts.new" "$run_dir/snapshot-mounts"
+    fi
 }
 
 #### guided restore without parameters: questions, then the command (to copy and document) and confirmation
