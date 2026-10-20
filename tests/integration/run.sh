@@ -1284,6 +1284,50 @@ case_restore_mount() {
 
 # Full Restore eines Servers: alle Replikate der Config mit Umbenennung, Ausschluss und einem Zeitpunkt; fehlender
 # Pool im Plan abgewiesen; geführter Ablauf (Wizard) gibt den passenden Befehl aus
+# Restore vom Wechseldatenträger auf einem anderen Host (#137): Pool nur lesend importiert, keine zsync-Config, --root
+case_restore_removable() {
+  local U=$ZCI_POOL_DST/usb/$ZCI_POOL_SRC r=bashclub-zsync-restore out id dir job nocfg=/tmp/zci-noconf
+  zfs create "$ZCI_POOL_SRC/data"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/data"
+  echo "version 1" > /zci/src/data/doc.txt; snap "$ZCI_POOL_SRC/data" 01
+  zfs create -V 16M "$ZCI_POOL_SRC/vol"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/vol"; snap "$ZCI_POOL_SRC/vol" 01
+  config usb; zsync
+  check "Replikat auf der Platte" exists "$U/data@zfs-auto-snap_daily-01"
+  # die Platte an einem anderen Host: nur lesend importiert, keine Config von bashclub-zsync
+  zpool export "$ZCI_POOL_DST"
+  check "Import nur lesend" zpool import -o readonly=on -d "$(dirname "$ZCI_DISK_DST")" "$ZCI_POOL_DST"
+  mkdir -p $nocfg; rm -f $nocfg/*
+  out=$(ZSYNC_CONF_DIR=$nocfg $r list --root "$ZCI_POOL_DST/usb" 2>&1); echo "$out" >> "$log"
+  check "list --root ohne Config ($out)" grep -q "$ZCI_POOL_SRC/data" <<< "$out"
+  out=$(ZSYNC_CONF_DIR=$nocfg $r list --root "$ZCI_POOL_DST/gibtsnicht" 2>&1)
+  check "list --root: unbekannte Wurzel abgelehnt" grep -q "does not exist" <<< "$out"
+  out=$(ZSYNC_CONF_DIR=$nocfg $r list --from zsync-restore-x@127.0.0.1 --root "$ZCI_POOL_DST/usb" 2>&1)
+  check "--root mit --from abgelehnt" grep -q "root is for push or this host" <<< "$out"
+  # Dataset in einen beschreibbaren Pool, ohne Holds auf dem lesenden Pool
+  out=$(ZSYNC_CONF_DIR=$nocfg $r dataset --root "$ZCI_POOL_DST/usb" --as "$ZCI_POOL_SRC/restored" "$ZCI_POOL_SRC/data" --start < /dev/null 2>&1); echo "$out" >> "$log"
+  job=$(sed -n 's/^job \([0-9a-f-]*\) written.*/\1/p' <<< "$out"); wait_job "$job"
+  equal "dataset --root: Job fertig" done "$phase"
+  check "dataset --root: Bericht OK" grep -q "^OK	$ZCI_POOL_SRC/restored	" "/var/lib/bashclub-zsync-restore/jobs/$job.report"
+  check "dataset --root: Hinweis statt Holds" grep -q "no hold on the snapshots" "/var/lib/bashclub-zsync-restore/jobs/$job.log"
+  equal "dataset --root: Daten" "version 1" "$(cat "$(zfs get -H -o value mountpoint "$ZCI_POOL_SRC/restored")/doc.txt" 2>&1)"
+  # einzelne Dateien: Snapshot direkt eingehängt
+  out=$($r mount "$U/data@zfs-auto-snap_daily-01" 2>&1); echo "$out" >> "$log"
+  dir=$(sed -n 's/^.*imported read-only): //p' <<< "$out"); id=$(sed -n 's/^remove it: .* cleanup //p' <<< "$out")
+  equal "mount auf lesendem Pool ($out)" "version 1" "$(cat "$dir/doc.txt" 2>&1)"
+  check "mounts: Snapshot gelistet" grep -q "$U/data@zfs-auto-snap_daily-01" <<< "$($r mounts)"
+  out=$($r mount "$U/vol@zfs-auto-snap_daily-01" 2>&1)
+  check "Volume auf lesendem Pool: Hinweis ($out)" grep -q "volume on the read-only pool" <<< "$out"
+  check "cleanup Snapshot" $r cleanup "$id"
+  check "cleanup: ausgehängt" not grep -q "/run/bashclub-zsync-restore/mnt/$id" /proc/mounts
+  equal "keine Mounts mehr" "" "$($r mounts)"
+  # Server mit --map
+  out=$(ZSYNC_CONF_DIR=$nocfg $r server --root "$ZCI_POOL_DST/usb" --map "$ZCI_POOL_SRC/data=$ZCI_POOL_SRC/srv" --exclude "$ZCI_POOL_SRC/vol" --start < /dev/null 2>&1); echo "$out" >> "$log"
+  job=$(sed -n 's/^job \([0-9a-f-]*\) written.*/\1/p' <<< "$out"); wait_job "$job"
+  equal "server --root: Job fertig ($out)" done "$phase"
+  check "server --root: Dataset da" exists "$ZCI_POOL_SRC/srv@zfs-auto-snap_daily-01"
+  zpool export "$ZCI_POOL_DST"; zpool import -d "$(dirname "$ZCI_DISK_DST")" "$ZCI_POOL_DST"
+  rm -rf $nocfg
+}
+
 case_restore_server() {
   local R=$ZCI_POOL_DST/restore/$ZCI_POOL_SRC out n
   zfs create "$ZCI_POOL_SRC/data"; zfs create "$ZCI_POOL_SRC/data/child"; zfs create "$ZCI_POOL_SRC/other"
@@ -1417,7 +1461,7 @@ case_result_busy() {
   rm -f $lockconf
 }
 
-all_cases=(replication engine_internal engine_switch rotation nothing_selected refquota rollback broken_chain orphans local_mode monitor_internal bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_server hooks result_busy)
+all_cases=(replication engine_internal engine_switch rotation nothing_selected refquota rollback broken_chain orphans local_mode monitor_internal bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_removable restore_server hooks result_busy)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten, Pools und die installierten Pakete): ein zweiter wartet;

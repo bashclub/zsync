@@ -44,14 +44,14 @@ Einen Kandidaten ansehen, ohne etwas zu ändern: [einhängen](01-einzelne-dateie
 
 ## 4. Quelle wiederherstellen
 Die Quelle nicht weiterverwenden, sondern neu aufsetzen oder ein anderes System nehmen. Dann:
-- [Ganzen Server wiederherstellen](05-server.md) mit `--snapshot <letzter sauberer>`, oder
-- einzelne Datasets mit [Dataset wiederherstellen](03-dataset.md) und `--snapshot`.
+- [Ganzen Server wiederherstellen](06-server.md) mit `--snapshot <letzter sauberer>`, oder
+- einzelne Datasets mit [Dataset wiederherstellen](04-dataset.md) und `--snapshot`.
 
 Push von einem frischen System aus ist hier die sichere Wahl: Das System bekommt nur einen Schlüssel, der nach wenigen
 Tagen verfällt, und kann den Backupserver nie erreichen.
 
 Wird die alte Quelle doch weiterbenutzt (z. B. nur eine VM war betroffen): die Disk auf der Quelle auf einen sauberen
-Snapshot zurücksetzen oder per [Reattach](04-reattach.md) mit `--snapshot` und `--rollback` auf den letzten sauberen
+Snapshot zurücksetzen oder per [Reattach](05-reattach.md) mit `--snapshot` und `--rollback` auf den letzten sauberen
 Stand bringen.
 
 ## 5. Replikation wieder aufnehmen

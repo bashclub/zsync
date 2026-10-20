@@ -60,7 +60,7 @@ Auf der Quelle wurde zurückgerollt oder der neueste Snapshot gelöscht, und zsy
 **Alte Kette nach einem Rollback (WARN)**
 Nach einem Rollback auf der Quelle hat zsync auf einer neuen Kette weiterrepliziert und die alte behalten. Prüfen, ob
 der Rollback gewollt war. Dann mit `bashclub-zsync-maintenance` behalten (Archiv) oder löschen. War er nicht gewollt
-(Angriff), enthält die alte Kette die Stände vor dem Rollback; siehe [Ransomware und Angriffe](../05-restore/06-ransomware.md).
+(Angriff), enthält die alte Kette die Stände vor dem Rollback; siehe [Ransomware und Angriffe](../05-restore/07-ransomware.md).
 
 **Rotation am Ziel blockiert (WARN)**
 Der älteste Snapshot eines Labels auf der Quelle fehlt am Ziel; zsync löscht für dieses Label auf dem Backupserver

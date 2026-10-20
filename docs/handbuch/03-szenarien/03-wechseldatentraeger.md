@@ -90,23 +90,5 @@ Die Spool-Datei liegt auf dem Host; damit die Services erhalten bleiben, währen
 (9 Tage).
 
 ## Wiederherstellen von der Platte
-Damit beim Anschließen keine Replikation startet, den automatischen Lauf bis zum nächsten Neustart abschalten, dann die
-Platte anschließen, öffnen und den Pool importieren:
-```bash
-label=usb-backup1
-systemctl mask --runtime "zsync-autorun@$label.service"
-```
-Nach dem Anschließen:
-```bash
-label=usb-backup1
-cryptsetup open "$(blkid -t LABEL="$label" -o device | head -n1)" "$label" --key-file "/etc/bashclub/$label.key"
-zpool import "$label"
-```
-Danach wie in [Restore und Notfall](../05-restore/_index.md) beschrieben, auf dem Backupserver ohne `--from` und `--to`.
-Zum Schluss:
-```bash
-label=usb-backup1
-zpool export "$label"
-cryptsetup close "$label"
-systemctl unmask --runtime "zsync-autorun@$label.service"
-```
+Ab 2.0 nur lesend, am Backupserver oder an jedem anderen Host mit ZFS: siehe
+[Restore vom Wechseldatenträger](../05-restore/03-wechseldatentraeger.md).

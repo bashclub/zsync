@@ -38,7 +38,7 @@ Varianten:
 ## 3. Wiederherstellen
 Derselbe Befehl ohne `--dry-run`. Der Job läuft im Hintergrund, übersteht das Ende der SSH-Sitzung und setzt nach
 einem Abbruch mit `bashclub-zsync-restore resume <job>` fort; fertige Datasets überspringt er. Fortschritt und Bericht
-wie bei [Dataset wiederherstellen](03-dataset.md).
+wie bei [Dataset wiederherstellen](04-dataset.md).
 
 ## 4. Was danach zu prüfen ist
 Am Ende nennt das Werkzeug, was es nicht selbst ändert:
@@ -46,7 +46,7 @@ Am Ende nennt das Werkzeug, was es nicht selbst ändert:
   `/var/lib/pve-cluster/config.db` des Root-Dateisystems. Mit `--exclude rpool/ROOT` kommen sie nicht mit. Aus dem
   Replikat des Root-Dateisystems lässt sich die Datei holen ([Einzelne Dateien](01-einzelne-dateien.md)); wie
   Proxmox sie zurückspielt, beschreibt die Proxmox-Dokumentation zu pmxcfs. Einfacher ist eine eigene Kopie von
-  `/etc/pve`, siehe [Disaster-Recovery-Plan](07-dr-plan.md).
+  `/etc/pve`, siehe [Disaster-Recovery-Plan](08-dr-plan.md).
 - **Storages:** Bei anderen Pool-Namen die Einträge `zfspool` in `/etc/pve/storage.cfg` anpassen.
 - **Boot:** Wurde das Root-Dateisystem mit wiederhergestellt, `proxmox-boot-tool refresh`.
 - **Netz, Hostname, SSH-Schlüssel** des Systems.

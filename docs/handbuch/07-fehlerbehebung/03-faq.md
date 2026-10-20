@@ -23,11 +23,11 @@ Quelle löscht. Siehe [Snapshots und Aufbewahrung](../01-konzept/05-snapshots-un
 Ab 2.0 setzt zsync die Replikation auf einer neuen Kette fort und behält die alte als
 `<replikat>.zsync-branch-<datum>`. Checkmk warnt, bis der Admin mit `bashclub-zsync-maintenance` entscheidet: behalten
 (Archiv) oder löschen. War der Rollback nicht gewollt, enthält die alte Kette die Stände vor dem Rollback; siehe
-[Ransomware und Angriffe](../05-restore/06-ransomware.md). Bis 1.0.19 brach die Replikation des Datasets bei jedem Lauf
+[Ransomware und Angriffe](../05-restore/07-ransomware.md). Bis 1.0.19 brach die Replikation des Datasets bei jedem Lauf
 ab.
 
 Soll die Quelle nach einem versehentlichen Rollback die neueren Stände zurückbekommen, ohne dass eine neue Kette
-entsteht: [Nach einem Rollback wieder anfügen](../05-restore/04-reattach.md).
+entsteht: [Nach einem Rollback wieder anfügen](../05-restore/05-reattach.md).
 
 ## Was passiert, wenn auf der Quelle eine VM gelöscht wird?
 Nichts am Backup. Das Replikat bleibt mit allen Snapshots; nach einem Tag meldet Checkmk es als Replikat ohne Quelle.
