@@ -58,7 +58,7 @@ bashclub-zsync-timer migrate [--dry-run] [<name>]
 | `enable` | schreibt `trigger=systemd` und die angegebenen Werte in die Config, dann `sync`. Ohne Zeitplan bleibt der der Config, sonst `@daily` |
 | `disable` | schreibt `trigger=cron` in die Config, dann `sync` (der Timer stoppt) |
 | `sync` | liest alle Configs und startet, ändert oder stoppt ihre Timer |
-| `migrate` | übernimmt Cron-Jobs, die `bashclub-zsync -c /etc/bashclub/<name>.conf` aufrufen (auch in `/etc/cron.{hourly,daily,weekly,monthly}`): Zeitplan, Benutzer und Logdatei in die Config, Cron-Zeile auskommentiert, dann `sync` |
+| `migrate` | übernimmt Cron-Jobs, die `bashclub-zsync -c /etc/bashclub/<name>.conf` aufrufen, ohne `-c` die Config `zsync.conf` (auch in `/etc/cron.{hourly,daily,weekly,monthly}`): Zeitplan, Benutzer und Logdatei in die Config, Cron-Zeile auskommentiert, dann `sync` |
 
 Die Timer erzeugt der systemd-Generator `bashclub-zsync-generator` beim Booten und bei `systemctl daemon-reload` aus
 den Configs mit `trigger=systemd`. Ein Timer startet einen verpassten Lauf nach dem Booten nach (`Persistent=true`) und
