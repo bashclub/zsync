@@ -945,6 +945,13 @@ source_bookmark=1"
   out=$(bashclub-zsync -c "$conf" -s 2>&1)
   check "-s: Tabelle ($out)" grep -qE "^OK +$ZCI_POOL_SRC/data/a +zfs-auto-snap_daily-01 " <<< "$out"
   check "-s: ausgeschlossene Datasets" grep -qx "excluded: $ZCI_POOL_SRC/data/x" <<< "$out"
+  # viele Datasets (Ausgabe über 4 KiB): jede Zeile der Spool-Datei ein ganzer Service, keine Zeile der Tabelle von -s
+  for i in $(seq -w 1 30); do zfs create "$ZCI_POOL_SRC/data/m$i"; zfs snapshot "$ZCI_POOL_SRC/data/m$i@zfs-auto-snap_daily-01"; done
+  zsync
+  equal "viele Datasets: eine Zeile je Dataset" 32 "$(grep -cE "^[0-3] zci-mon:root@localhost:22#$ZCI_POOL_SRC/data(/a|/m[0-9]+)? age=.* - " $spool)"
+  check "viele Datasets: nur Services in der Spool-Datei" not grep -vE '^(<<<.*>>>|[0-3] )' $spool
+  check "viele Datasets: keine Zeile der Tabelle" not grep -q TABLE $spool
+  for i in $(seq -w 1 30); do zfs destroy -r "$ZCI_POOL_SRC/data/m$i"; zfs destroy -r "$R/data/m$i"; done
   # Snapshot außerhalb von snapshot_filter auf der Quelle: kein Befund
   zfs snapshot "$ZCI_POOL_SRC/data/a@manual-1"
   check "-s: ungefilterter Snapshot ohne Befund" grep -qE "^OK +zci-mon:root@localhost:22#$ZCI_POOL_SRC/data/a .*source 2, replica 1" <<< "$(bashclub-zsync -c "$conf" -s 2>&1)"

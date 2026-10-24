@@ -728,9 +728,9 @@ function run_internal_check() {
                     count, expected + 5, expected + 10, scount[d], c[1], c[2], \
                     (rep_metric != "" ? "|replication_age=" rep_metric : ""), (r in texists ? r : ""), text
                 printf "TABLE\t%s\t%s\t%s\t%s\t%s\t%s/%s (%s)\t%s\n", (st == 0 ? "OK" : st == 1 ? "WARN" : "CRIT"), d, cname, \
-                    (creation > 0 ? dur(age) : "-"), rep_text, scount[d], count, expected, (msg == "" ? "OK" : msg) > "/dev/stderr"
+                    (creation > 0 ? dur(age) : "-"), rep_text, scount[d], count, expected, (msg == "" ? "OK" : msg)
             }
-        }' 2>&1 )
+        }' )
     checkzfs_lines=$(grep -v '^TABLE' <<< "$out")
     monitor_table=$(sed -n 's/^TABLE\t//p' <<< "$out")
     if [[ -n $1 ]]; then printf '%s\n' "$checkzfs_lines" > "$1"; fi
