@@ -13,7 +13,7 @@ license: GPL-3.0-or-later
 depends:
   - openssh-server
   - udisks2
-  - zfsutils-linux
+  - zfsutils-linux | openzfs-zfsutils
 
 # bashclub-zsync-restore: Restore-Toolbox (Pull-Benutzer, Push, Wiederherstellung)
 # zfs-auto-snapshot: Snapshot-Engine zas, auf dem Backupserver nur im lokalen Modus nötig (sonst auf der Quelle);

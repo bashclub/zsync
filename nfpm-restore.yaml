@@ -14,7 +14,7 @@ license: GPL-3.0-or-later
 depends:
   - iproute2
   - openssh-client
-  - zfsutils-linux
+  - zfsutils-linux | openzfs-zfsutils
 
 # Pull: der Backupserver nimmt die Verbindung an; Push: das wiederherzustellende System
 recommends:

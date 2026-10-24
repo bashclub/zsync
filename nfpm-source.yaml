@@ -14,7 +14,7 @@ license: GPL-3.0-or-later
 depends:
   - openssh-server
   - sudo
-  - zfsutils-linux
+  - zfsutils-linux | openzfs-zfsutils
 
 # Snapshot-Engine zas (zfs_auto_snapshot_engine=zas) läuft auf der Quelle
 recommends:
