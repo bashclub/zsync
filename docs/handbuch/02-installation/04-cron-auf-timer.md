@@ -24,7 +24,8 @@ Die Config `/etc/bashclub/zsync.conf` läuft per Cron, z. B. aus `/etc/cron.d/ba
 
 ## Umstellen
 `bashclub-zsync-timer migrate` übernimmt Cron-Jobs, die `bashclub-zsync -c /etc/bashclub/<name>.conf` aufrufen, auch
-Skripte in `/etc/cron.{hourly,daily,weekly,monthly}`. Zeitplan, Benutzer und Logdatei gehen in die Config, die
+Skripte in `/etc/cron.{hourly,daily,weekly,monthly}`. Ein Cron-Job ohne `-c` läuft mit `/etc/bashclub/zsync.conf` und
+wird ab 2.0 ebenfalls übernommen (Timer `bashclub-zsync@zsync.timer`). Zeitplan, Benutzer und Logdatei gehen in die Config, die
 Cron-Zeile wird auskommentiert und der Timer gestartet.
 
 Erst ansehen, was passieren würde:

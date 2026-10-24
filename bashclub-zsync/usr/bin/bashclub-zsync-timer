@@ -31,7 +31,7 @@ usage: $prog list
     enable          writes trigger=systemd (and the given settings) into the configuration and runs sync
     disable         writes trigger=cron into the configuration and runs sync (the timer stops)
     sync            reads all configurations and starts, updates or stops their timers
-    migrate         take over cron jobs that run bashclub-zsync -c /etc/bashclub/<name>.conf (all configurations
+    migrate         take over cron jobs that run bashclub-zsync -c /etc/bashclub/<name>.conf, without -c zsync.conf (all configurations
                     or only <name>): schedule, user and log file into the configuration, comment out the cron line, sync
 EOF
     exit 1
@@ -179,14 +179,16 @@ cmd_sync() {
 #### cron jobs that run bashclub-zsync: file<TAB>line number<TAB>schedule<TAB>config<TAB>user<TAB>log file
 cron_jobs() {
     local file user n line rest schedule conf log
+    # the program itself, not bashclub-zsync-maintenance, -setup …
+    local command='(^|[[:space:]/;&|])bashclub-zsync([[:space:]]|$)'
     for file in $(find $cron_dirs -maxdepth 1 -type f 2>/dev/null); do
         n=0
         while IFS= read -r line || [[ -n $line ]]; do
             ((n++))
             [[ $line =~ ^[[:space:]]*# ]] && continue
-            [[ $line == *bashclub-zsync* ]] || continue
-            [[ $line =~ -c[[:space:]]+([^[:space:]]+) ]] || continue
-            conf=${BASH_REMATCH[1]}
+            [[ $line =~ $command ]] || continue
+            # without -c bashclub-zsync uses /etc/bashclub/zsync.conf
+            if [[ $line =~ -c[[:space:]]+([^[:space:]]+) ]]; then conf=${BASH_REMATCH[1]}; else conf=$conf_dir/zsync.conf; fi
             # scripts in /etc/cron.{hourly,daily,weekly,monthly}: times of run-parts in the Debian /etc/crontab
             if [[ $file =~ /cron\.hourly/ ]]; then schedule="17 * * * *"; rest=$line
             elif [[ $file =~ /cron\.daily/ ]]; then schedule="25 6 * * *"; rest=$line
@@ -225,6 +227,7 @@ cmd_migrate() {
         if [[ $(dirname "$conf") != "$conf_dir" ]]; then
             echo "skip  $file:$n: $conf is not in $conf_dir (the timer needs $conf_dir/<name>.conf)"; continue
         fi
+        if [[ ! -f $conf ]]; then echo "skip  $file:$n: configuration $conf not found"; continue; fi
         if [[ $(conf_trigger "$conf") == "autorun" || $(conf_trigger "$conf") == "external" ]]; then
             echo "skip  $file:$n: $conf has trigger=$(conf_trigger "$conf")"; continue
         fi

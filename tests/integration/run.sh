@@ -481,6 +481,13 @@ case_timer() {
   check "Probelauf: Cron-Zeitplan übernommen" grep -qF 'schedule="*/15 6-22 * * 1-5"' <<< "$plan"
   check "Probelauf: cron.daily mit Debian-Zeit" grep -qF 'schedule="25 6 * * *"' <<< "$plan"
   equal "Probelauf ändert nichts" "$before" "$(cat $crondir/cron.d/zsync $crondir/cron.daily/zsync "$tconf" | md5sum)"
+  # Cronjob ohne -c (Standard-Config zsync.conf) wird gefunden, andere Programme von bashclub-zsync nicht
+  echo "0 22 * * * root /usr/bin/bashclub-zsync > /var/log/bashclub-zsync/default.log 2>&1" > $crondir/cron.d/default
+  echo "0 3 * * * root /usr/bin/bashclub-zsync-maintenance -c $tconf" > $crondir/cron.d/maintenance
+  plan=$(ZSYNC_CRON_DIRS="$crondir/cron.d $crondir/cron.daily" bashclub-zsync-timer migrate --dry-run)
+  check "Probelauf: Cronjob ohne -c mit zsync.conf" grep -qE "cron.d/default:1(:| ->) .*/etc/bashclub/zsync.conf" <<< "$plan"
+  check "Probelauf: bashclub-zsync-maintenance nicht übernommen" not grep -qF "cron.d/maintenance" <<< "$plan"
+  rm -f $crondir/cron.d/default $crondir/cron.d/maintenance
   # Cronjob einer anderen Config bleibt, wenn nur diese übernommen wird
   echo "0 2 * * * root /usr/bin/bashclub-zsync -c $lconf" > $crondir/cron.d/legacy
   ZSYNC_CRON_DIRS="$crondir/cron.d $crondir/cron.daily" bashclub-zsync-timer migrate $name > /dev/null
