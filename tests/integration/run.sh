@@ -1658,7 +1658,90 @@ case_broken_rename() {
   check "zu wenig Platz: Checkmk CRIT" grep -q '^2 ' <<< "$(check_output)"
 }
 
-all_cases=(replication engine_internal engine_switch rotation nothing_selected refquota rollback broken_chain orphans local_mode monitor_internal bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_removable restore_server hooks result_busy cascade cascade_local cascade_upgrade broken_rename)
+# Schlüsselwechsel auf der Quelle (#168): transfer (bestehende Configs) schlüsselt um und warnt, block überträgt nicht
+# (CRIT, Entscheidung in der Wartung), rename behält die alte Kette mit dem alten Schlüssel und überträgt neu;
+# Kind erbt den Schlüssel, Kind mit eigenem Schlüssel bleibt unberührt, ohne Platz wie block
+case_key_change() {
+  local S=$ZCI_POOL_SRC T=$ZCI_POOL_DST/key_change/$ZCI_POOL_SRC old list case_id own
+  # opens <replikat> <passphrase>: prüft den Schlüssel, ohne ihn zu laden
+  opens() { echo "$2" | zfs load-key -n "$1" > /dev/null 2>&1; }
+  echo "passwort-1" | zfs create -o encryption=on -o keyformat=passphrase "$S/enc"; zfs set bashclub:zsync=all "$S/enc"
+  zfs create "$S/enc/a"
+  echo "passwort-own" | zfs create -o encryption=on -o keyformat=passphrase "$S/enc/own"
+  write "$S/enc" 1; write "$S/enc/a" 1; write "$S/enc/own" 1; zfs snapshot -r "$S/enc@zfs-auto-snap_daily-01"
+  config key_change; zsync
+  equal "Erstreplikation: Exit-Code" 0 "$rc"
+  check "Replikat öffnet mit dem Schlüssel der Quelle" opens "$T/enc" passwort-1
+  own=$(guid "$T/enc/own@zfs-auto-snap_daily-01")
+  # transfer (ohne Setting, bestehende Configs): umgeschlüsselt, Warnung
+  echo "passwort-2" | zfs change-key "$S/enc"; snap "$S/enc" 02; snap "$S/enc/a" 02
+  zsync
+  equal "transfer: Exit-Code" 0 "$rc"
+  check "transfer: neuer Schlüssel" opens "$T/enc" passwort-2
+  check "transfer: alter Schlüssel öffnet nicht mehr" not opens "$T/enc" passwort-1
+  equal "transfer: Zustand" key_transferred "$(state_of "$S/enc")"
+  check "transfer: Warnung im Log" grep -q "$S/enc - the key was changed on the source (zfs change-key): this transfer rewraps" <<< "$(last_run_log)"
+  check "transfer: Checkmk WARN" grep -q '^1 .*key changed on the source, the replica opens only with the new key' <<< "$(check_output)"
+  zsync
+  equal "transfer: nächster Lauf ok" ok "$(state_of "$S/enc")"
+  # block: nicht übertragen, CRIT; das Kind mit eigenem Schlüssel läuft weiter
+  set_conf "$conf" key_change block
+  echo "passwort-3" | zfs change-key "$S/enc"; snap "$S/enc" 03; snap "$S/enc/a" 03; snap "$S/enc/own" 03
+  zsync
+  equal "block: Exit-Code" 1 "$rc"
+  equal "block: Zustand" key_changed "$(state_of "$S/enc")"
+  equal "block: Kind mit geerbtem Schlüssel" key_changed "$(state_of "$S/enc/a")"
+  equal "block: Kind mit eigenem Schlüssel weiter" ok "$(state_of "$S/enc/own")"
+  check "block: nichts übertragen" not zfs list "$T/enc@zfs-auto-snap_daily-03"
+  check "block: Replikat öffnet weiter mit dem alten Schlüssel" opens "$T/enc" passwort-2
+  check "block: Checkmk CRIT" grep -q '^2 .*key changed on the source, not transferred' <<< "$(check_output)"
+  list=$(ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-maintenance --list --tsv)
+  case_id=$(awk -F'\t' -v r="$T/enc" '$3 == "key" && $4 == r { print $1 }' <<< "$list")
+  check "block: Fall in der Wartung ($list)" test -n "$case_id"
+  check "Wartung: übertragen" env ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-maintenance --decide "$case_id" transfer
+  zsync
+  equal "nach der Entscheidung: Exit-Code" 0 "$rc"
+  check "nach der Entscheidung: übertragen" zfs list "$T/enc/a@zfs-auto-snap_daily-03"
+  check "nach der Entscheidung: neuer Schlüssel" opens "$T/enc" passwort-3
+  check "nach der Entscheidung: Markierung entfernt" test -z "$(zfs get -H -o value -s local bashclub:zsync-key-accept "$T/enc" 2>/dev/null)"
+  # rename: alte Kette mit altem Schlüssel, neue Kette mit dem neuen, das Kind mit eigenem Schlüssel wieder darunter
+  set_conf "$conf" key_change rename
+  echo "passwort-4" | zfs change-key "$S/enc"; snap "$S/enc" 04; snap "$S/enc/a" 04; snap "$S/enc/own" 04
+  zsync
+  equal "rename: Exit-Code" 0 "$rc"
+  old=$(zfs list -H -o name -d 1 "$T" | grep -F "$T/enc.zsync-branch-" | head -1)
+  check "rename: alte Kette ($old)" test -n "$old"
+  check "rename: alte Kette öffnet mit dem alten Schlüssel" opens "$old" passwort-3
+  check "rename: alte Kette mit allen Snapshots" zfs list "$old@zfs-auto-snap_daily-01"
+  check "rename: Grund markiert" grep -q "key was changed" <<< "$(zfs get -H -o value -s local bashclub:zsync-branch "$old")"
+  check "rename: Kind mit geerbtem Schlüssel bleibt in der alten Kette" opens "$old/a" passwort-3
+  check "rename: neue Kette öffnet mit dem neuen Schlüssel" opens "$T/enc" passwort-4
+  check "rename: neue Kette mit der Historie" zfs list "$T/enc@zfs-auto-snap_daily-01"
+  check "rename: Kind neu übertragen, neuer Schlüssel" opens "$T/enc/a" passwort-4
+  equal "rename: Kind mit eigenem Schlüssel wieder unter der neuen Kette" "$own" "$(guid "$T/enc/own@zfs-auto-snap_daily-01")"
+  check "rename: Kind mit eigenem Schlüssel inkrementell weiter" zfs list "$T/enc/own@zfs-auto-snap_daily-04"
+  equal "rename: Zustand" branched "$(state_of "$S/enc")"
+  zsync
+  check "rename: Kind der alten Kette kein verwaistes Replikat" not grep -q "^${old#$ZCI_POOL_DST/key_change/}/a"$'\t' "$(status_path datasets)"
+  # rename ohne Platz: wie block; danach in der Wartung umbenennen
+  zfs destroy -r "$old"
+  zfs set quota=$(( $(zfs get -Hp -o value used "$ZCI_POOL_DST/key_change") + 262144 )) "$ZCI_POOL_DST/key_change"
+  echo "passwort-5" | zfs change-key "$S/enc"; snap "$S/enc" 05; snap "$S/enc/a" 05
+  zsync
+  equal "ohne Platz: Zustand" key_changed "$(state_of "$S/enc")"
+  check "ohne Platz: Hinweis im Log" grep -q "not enough space for a new replication" <<< "$(last_run_log)"
+  check "ohne Platz: Replikat öffnet weiter mit dem alten Schlüssel" opens "$T/enc" passwort-4
+  # der Fall ist schon markiert; ohne Quota würde der nächste Lauf selbst umbenennen
+  zfs set quota=none "$ZCI_POOL_DST/key_change"
+  case_id=$(ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-maintenance --list --tsv | awk -F'\t' -v r="$T/enc" '$3 == "key" && $4 == r { print $1 }')
+  check "Wartung: umbenennen" env ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-maintenance --decide "$case_id" rename
+  zsync
+  old=$(zfs list -H -o name -d 1 "$T" | grep -F "$T/enc.zsync-branch-" | head -1)
+  check "Wartung umbenannt: alte Kette mit altem Schlüssel" opens "$old" passwort-4
+  check "Wartung umbenannt: neue Kette mit neuem Schlüssel" opens "$T/enc" passwort-5
+}
+
+all_cases=(replication engine_internal engine_switch rotation nothing_selected refquota rollback broken_chain orphans local_mode monitor_internal bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_removable restore_server hooks result_busy cascade cascade_local cascade_upgrade broken_rename key_change)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten, Pools und die installierten Pakete): ein zweiter wartet;

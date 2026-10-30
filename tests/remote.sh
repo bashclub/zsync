@@ -34,6 +34,7 @@ deny() {
 # Befehle von bashclub-zsync, remote-snapshot-manager und checkzfs
 allow 'zfs get -H -o name,value,source -t filesystem,volume bashclub:zsync' 'zfs get -H -o name,value,source -t filesystem,volume bashclub:zsync'
 allow 'zfs list -Hp -o name,type,refquota -t filesystem,volume' 'zfs list -Hp -o name,type,refquota -t filesystem,volume'
+allow 'zfs get -Hp -o property,value keyformat,pbkdf2iters,pbkdf2salt rpool/enc' 'zfs get -Hp -o property,value keyformat,pbkdf2iters,pbkdf2salt rpool/enc'
 allow 'zfs list -H -o name,guid -s createtxg -t snapshot rpool/data/subvol-100-disk-0 2>/dev/null' 'zfs list -H -o name,guid -s createtxg -t snapshot rpool/data/subvol-100-disk-0'
 allow 'zfs send -w -p -v rpool/x@zfs-auto-snap_daily-2026-10-16-0625' 'zfs send -w -p -v rpool/x@zfs-auto-snap_daily-2026-10-16-0625'
 allow 'zfs send -w  -i rpool/x#zsync_backup_backup_pve1 rpool/x@daily-02' 'zfs send -w -i rpool/x#zsync_backup_backup_pve1 rpool/x@daily-02'

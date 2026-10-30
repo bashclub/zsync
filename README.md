@@ -201,6 +201,13 @@ transfer_resume=1
 # existing configurations without this setting keep 0, new configurations get 1
 broken_rename=1
 
+# key of an encrypted dataset changed on the source since the last transfer (zfs change-key): rename = keep the old
+# replica with the old key as <replica>.zsync-branch-<date> and replicate again (full), without enough space like block;
+# block = do not transfer, CRIT, decide with bashclub-zsync-maintenance; transfer = transfer it (the replica opens only
+# with the new key afterwards, also its old snapshots), with a warning
+# existing configurations without this setting keep transfer, new configurations get rename
+key_change=rename
+
 # check of the snapshots per dataset (services <checkzfs_prefix>:<source>#<dataset>): checkzfs (package
 # bashclub-checkzfs) or internal (built in, from the snapshots of the replicated datasets at the end of the run, same
 # services and thresholds checkzfs_*); empty = checkzfs if installed, otherwise internal; new configs get internal
@@ -274,6 +281,9 @@ Without root the user needs the permissions `clone`, `promote` and `rename` on i
 ### Broken chain
 No common snapshot with the source (all snapshots of the replica rotated out there, or the dataset was created again) or a replica without snapshots: with `broken_rename=1` (new configurations) the old replica stays complete as `<replica>.zsync-branch-<date>`, the dataset is replicated again in the same run and its children go back below it; the admin keeps or deletes the old one with `bashclub-zsync-maintenance`. Without enough space on the target nothing changes and the monitoring reports CRIT. Existing configurations without the setting report the error in every run until the admin decides.
 
+### Key change on the source
+`zfs change-key` on the source only rewraps the data key. The next raw transfer brings the new key to the replica, and afterwards only the new key opens it, with all its snapshots, also the old ones: an attacker with root on the source could lock the backup without deleting anything. A clone on the backup server does not help, it shares the encryption root of the replica. Before each transfer of an encrypted dataset `bashclub-zsync` therefore compares `keyformat`, `pbkdf2iters` and `pbkdf2salt` of source and replica (`pbkdf2salt` changes with every `change-key` of a passphrase; a key file exchanged for another one is not recognized). With `key_change=rename` (new configurations) the old replica stays as `<replica>.zsync-branch-<date>` with the old key and the dataset is replicated again in the same run; children that inherit the changed key stay in the old replica and are replicated again, children with an own unchanged key go back below the new one. Without enough space, or with `key_change=block`, the dataset is not transferred and the monitoring reports CRIT; the admin decides with `bashclub-zsync-maintenance` (`transfer` or `rename`). Existing configurations without the setting transfer it as before, with a warning.
+
 ### refquota
 The `refquota` of a filesystem is replicated with the initial replication only. If it is raised on the source later, the target keeps the old value and the replication fails with "quota exceeded" as soon as the data exceeds it. Before each incremental replication `bashclub-zsync` therefore raises the `refquota` on the target to the value of the source, or removes it if the source has none. It never lowers it, and `quota` is not changed.
 
@@ -304,6 +314,8 @@ The evaluation reads only status files of `bashclub-zsync` and `/proc`, it never
 | dataset without common snapshot with the source, or replica without snapshots (full replication needed) | CRIT, with cause |
 | replication of a dataset failed and its base is the oldest snapshot of its interval on the source (chain at risk) | WARN |
 | old chain after a rollback on the source (see [Rollback on the source](#rollback-on-the-source)) | WARN until kept or deleted |
+| key of an encrypted dataset changed on the source, not transferred (see [Key change on the source](#key-change-on-the-source)) | CRIT until decided |
+| key changed on the source and transferred (`key_change=transfer`) | WARN until the next run |
 | replica without source dataset, or source no longer selected (after 1 day) | WARN |
 
 The interval is the median of the start intervals of the last 10 runs, so it needs no configuration and manual runs do not change it. Until 5 intervals are known (learning phase) the age check is at most WARN. `monitor_max_age` in the configuration sets the maximum age instead (WARN, CRIT at 3 times the value), `monitor_max_age=0` disables the age check, e.g. for removable disks. All other checks are active from the first run. The thresholds can be changed in `/etc/bashclub/zsync-checkmk.conf`, e.g. `stall_crit=3600` (variables at the top of the check).
@@ -339,6 +351,7 @@ Metrics: `age`, `creation`, `file_size`, `fs_used`, `file_count` (snapshots of t
 | replica only on the target (orphan) | `keep` (`bashclub:zsync-orphan=keep`), `delete`, `later` |
 | no common snapshot with the source, or replica without snapshots | `rename` (the old replica stays, the next run replicates again), `delete` (the next run replicates again), `later` |
 | snapshots of the label in another name scheme on the target | `delete`, `later` |
+| key of an encrypted dataset changed on the source, not transferred (`key_change=block`) | `transfer` (the next run rewraps the replica), `rename` (the old replica stays with the old key, the next run replicates again), `later` |
 | old chain after a rollback on the source (`<replica>.zsync-branch-<date>`) | `keep` (archive, no warning anymore), `delete` (the replication already continues on the new chain), `later` |
 
 `bashclub-zsync` marks each case on the replica during its run (`bashclub:zsync-case=<type>;<since>;<config>;<detail>`) and removes the marking when the case is resolved. The tool reads all cases with one query and reads snapshots only for a decision. Cases of a run before the update appear after the next run of the configuration.

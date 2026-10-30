@@ -27,7 +27,8 @@ auf der Quelle, `--rollback`), `restore_pull_push` (Volume und raw-verschlüssel
 `restore_mount` (Clone eines Dateisystems und einer Partition im Volume, Rotation behält den Snapshot, cleanup),
 `restore_server` (Full Restore mit `--map`, `--exclude`, `--snapshot`, fehlender Pool, Wizard über ein Pseudo-Terminal),
 `hooks` (pre-run und post-run global und je Config, Umgebung, Fehler, nicht vertrauenswürdige Datei, Zeitlimit),
-`result_busy` (`--result`, `busy` mit `--wait`, Inhibitor während des Laufs, unterbrochener Transfer im Ergebnis).
+`result_busy` (`--result`, `busy` mit `--wait`, Inhibitor während des Laufs, unterbrochener Transfer im Ergebnis),
+`key_change` (Schlüsselwechsel auf der Quelle mit `transfer`, `block` samt Entscheidung, `rename` mit Kindern, ohne Platz).
 
 ## Test-VM einrichten
 Eine **VM** (kein LXC-Container: der teilt das ZFS-Modul des Hosts), Debian 13, zwei leere Platten

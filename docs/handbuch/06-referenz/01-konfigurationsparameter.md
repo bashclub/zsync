@@ -39,6 +39,7 @@ oder `|` stehen in Anführungszeichen. Die Vorlage mit allen Parametern und Komm
 | `source_hold` | `0` | `1` | `1` | 2.0 |
 | `transfer_resume` | `0` | `1` | `1` | 2.0 |
 | `broken_rename` | `0` | `1` | `1` | 2.0 |
+| `key_change` | `transfer` | `rename` | `rename` | 2.0 |
 | `monitor_engine` | leer (`checkzfs`, wenn installiert, sonst `internal`) | `internal` | `internal` | 2.0 |
 | `checkzfs_disabled` | `0` | `0` | `0` | 1.0 |
 | `checkzfs_local` | `0` | `0` | `0` | 1.0 |
@@ -177,6 +178,21 @@ oder einem Replikat ohne Snapshots passiert:
   `bashclub-zsync-maintenance` (behalten oder löschen). Reicht der Platz auf dem Backupserver für die Neuübertragung
   nicht (Belegung des Datasets auf der Quelle gegen den freien Platz des Targets), ändert zsync nichts und meldet CRIT.
 - `0`: Fehler bei jedem Lauf, bis der Admin mit `bashclub-zsync-maintenance` entscheidet (Verhalten von 1.0).
+
+### `key_change`
+Ab 2.0. Was passiert, wenn der Schlüssel eines verschlüsselten Datasets auf der Quelle seit der letzten Übertragung
+gewechselt wurde (`zfs change-key`). Die nächste raw-Übertragung würde das Replikat umschlüsseln: Danach öffnet nur
+noch der neue Schlüssel seine Snapshots, auch die alten. Siehe [Verschlüsselte Datasets](../03-szenarien/08-verschluesselung.md).
+- `rename`: zsync benennt das alte Replikat in `<replikat>.zsync-branch-<datum>` um (es bleibt mit dem alten Schlüssel
+  lesbar) und überträgt das Dataset im selben Lauf neu, mit allen Snapshots aus `snapshot_filter`. Kinder, die den
+  Schlüssel erben, bleiben in der alten Kette und werden ebenfalls neu übertragen; Kinder mit eigenem, unverändertem
+  Schlüssel kommen unter das neue Replikat zurück. Reicht der Platz nicht, wie `block`.
+- `block`: zsync überträgt das Dataset nicht und meldet CRIT. Entscheiden mit `bashclub-zsync-maintenance`: `transfer`
+  (der Wechsel war gewollt) oder `rename`.
+- `transfer`: übertragen wie in 1.0, mit Warnung im Log und WARN im Checkmk-Service bis zum nächsten Lauf.
+
+Erkannt wird der Wechsel an `keyformat`, `pbkdf2iters` und `pbkdf2salt` von Quelle und Replikat. Den Tausch einer
+Schlüsseldatei gegen eine andere (`keyformat=raw` oder `hex`) sieht zsync nicht. Ein unbekannter Wert gilt als `block`.
 
 ## Monitoring
 

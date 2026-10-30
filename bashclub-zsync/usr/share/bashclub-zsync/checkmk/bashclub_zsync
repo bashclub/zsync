@@ -391,7 +391,7 @@ for id in $ids; do
     fi
 
     #### state per dataset (written by the last run)
-    declare -a ds_crit=() ds_risk=() ds_div=() ds_orphan=() ds_failed=() ds_blocked=() ds_branch=()
+    declare -a ds_crit=() ds_risk=() ds_div=() ds_orphan=() ds_failed=() ds_blocked=() ds_branch=() ds_key=() ds_rewrapped=()
     kept=0; nosnap=0; orphan_new=0; branched=(); branch_kept=0; excluded=()
     if [[ -f $lib_d/$id.datasets ]]; then
         while IFS=$'\t' read -r ds dstate since detail; do
@@ -399,6 +399,8 @@ for id in $ids; do
             age_text=$(duration $((NOW - ${since:-NOW})))
             case $dstate in
                 broken|empty) ds_crit+=("$ds ($detail, since $age_text)") ;;
+                key_changed) ds_key+=("$ds (since $age_text)") ;;
+                key_transferred) ds_rewrapped+=("$ds") ;;
                 at_risk) ds_risk+=("$ds ($detail)") ;;
                 cleanup_blocked) ds_blocked+=("$ds ($detail, since $age_text)") ;;
                 diverged) ds_div+=("$ds ($detail, since $age_text)") ;;
@@ -421,6 +423,12 @@ for id in $ids; do
     if [ ${#ds_crit[@]} -gt 0 ]; then
         raise 2 "full replication needed for ${#ds_crit[@]} datasets: $(shortlist "${ds_crit[@]}")$(level_mark 2)"
     fi
+    if [ ${#ds_key[@]} -gt 0 ]; then
+        raise 2 "key changed on the source, not transferred (the replica would open only with the new key): $(shortlist "${ds_key[@]}")$(level_mark 2)"
+    fi
+    if [ ${#ds_rewrapped[@]} -gt 0 ]; then
+        raise 1 "key changed on the source, the replica opens only with the new key now (also its old snapshots): $(shortlist "${ds_rewrapped[@]}")$(level_mark 1)"
+    fi
     if [ ${#ds_risk[@]} -gt 0 ]; then
         raise 1 "chain at risk, the next rotation on the source breaks it: $(shortlist "${ds_risk[@]}")$(level_mark 1)"
     fi
@@ -436,7 +444,7 @@ for id in $ids; do
     if [ ${#ds_orphan[@]} -gt 0 ]; then
         raise 1 "${#ds_orphan[@]} datasets only on the target: $(shortlist "${ds_orphan[@]}")$(level_mark 1)"
     fi
-    if [ ${#ds_crit[@]} -gt 0 ] || [ ${#ds_orphan[@]} -gt 0 ] || [ ${#ds_branch[@]} -gt 0 ]; then
+    if [ ${#ds_crit[@]} -gt 0 ] || [ ${#ds_orphan[@]} -gt 0 ] || [ ${#ds_branch[@]} -gt 0 ] || [ ${#ds_key[@]} -gt 0 ]; then
         state_text+=("decide on the backup server: bashclub-zsync-maintenance")
     fi
     if [ ${#ds_failed[@]} -gt 0 ]; then state_text+=("failed: $(shortlist "${ds_failed[@]}")"); fi

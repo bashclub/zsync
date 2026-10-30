@@ -13,6 +13,10 @@
 #   leftovers  snapshots of the label in another name scheme on the target (#3)            delete / later
 #   branch     old chain after a rollback or a broken chain on the source (#65), the replication continues on the new chain
 #                                                    keep (bashclub:zsync-orphan=keep) / delete / later
+#   key        key of an encrypted dataset changed on the source, not transferred (key_change, #168)
+#                                                    transfer (the change was intended: the replica opens only with the
+#                                                    new key afterwards, also its old snapshots) / rename (the old
+#                                                    replica stays with the old key, the next run replicates again) / later
 
 PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
 prog=$(basename "$0")
@@ -20,7 +24,7 @@ conf_dir=${ZSYNC_CONF_DIR:-/etc/bashclub}
 lib_dir=${ZSYNC_LIB_DIR:-/var/lib/bashclub-zsync}
 log_file=${ZSYNC_MAINTENANCE_LOG:-/var/log/bashclub-zsync/maintenance.log}
 . ${ZSYNC_LIB:-/usr/lib/bashclub-zsync/schedule.sh} || exit 1
-types="orphan broken leftovers branch"
+types="orphan broken leftovers branch key"
 
 usage() {
     cat >&2 << EOF
@@ -94,6 +98,7 @@ function options_of() {
     case $1 in
         orphan|branch) echo "keep delete later" ;;
         broken) echo "rename delete later" ;;
+        key) echo "transfer rename later" ;;
         leftovers) echo "delete later" ;;
     esac
 }
@@ -116,13 +121,19 @@ function commands_of() {
     case $type:$option in
         orphan:keep|branch:keep) printf 'zfs\tset\tbashclub:zsync-orphan=keep\t%s\n' "$replica" ;;
         orphan:delete|broken:delete|branch:delete) printf 'zfs\tdestroy\t-r\t%s\n' "$replica" ;;
-        broken:rename)
+        broken:rename|key:rename)
             # an old chain like after a rollback: the next run replicates again and moves the children back below
-            # the new replica; the old one is a case of type branch (keep or delete)
+            # the new replica (children whose key changed stay in the old one); the old one is a case of type branch
+            # (keep or delete)
             new=$replica.zsync-branch-$(date +%Y-%m-%d-%H%M)
             printf 'zfs\trename\t%s\t%s\n' "$replica" "$new"
             printf 'zfs\tinherit\t-r\tbashclub:zsync-case\t%s\n' "$new"
-            printf 'zfs\tset\tbashclub:zsync-branch=%s;renamed in bashclub-zsync-maintenance\t%s\n' "$(date +%Y-%m-%d-%H%M)" "$new" ;;
+            printf 'zfs\tset\tbashclub:zsync-branch=%s;%srenamed in bashclub-zsync-maintenance\t%s\n' "$(date +%Y-%m-%d-%H%M)" \
+                "$([[ $type == key ]] && echo "key changed on the source, ")" "$new" ;;
+        key:transfer)
+            # the next run transfers it (also the datasets below, the marking is inherited) and removes the marking
+            printf 'zfs\tset\tbashclub:zsync-key-accept=1\t%s\n' "$replica"
+            printf 'zfs\tinherit\t-r\tbashclub:zsync-case\t%s\n' "$replica" ;;
         leftovers:delete)
             leftovers_of "$conf" "$replica" | while read -r snap; do printf 'zfs\tdestroy\t%s\n' "$snap"; done
             printf 'zfs\tinherit\tbashclub:zsync-case\t%s\n' "$replica" ;;

@@ -103,6 +103,14 @@ transfer_resume=0
 # keep 0 here for existing configs without this setting, new configs get 1
 broken_rename=0
 
+# key of an encrypted dataset changed on the source since the last transfer (zfs change-key): the next raw transfer
+# rewraps the replica, afterwards only the new key opens its snapshots, also the old ones (#168)
+#   transfer = transfer it, with a warning; block = do not transfer the dataset, CRIT, the admin decides with
+#   bashclub-zsync-maintenance; rename = keep the old replica with the old key as <replica>.zsync-branch-<date> and
+#   replicate the dataset again (full), if there is enough space on the target, otherwise like block
+# keep transfer here for existing configs without this setting, new configs get rename
+key_change=transfer
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
@@ -451,6 +459,7 @@ source_bookmark=1
 source_hold=1
 transfer_resume=1
 broken_rename=1
+key_change=rename
 monitor_engine=internal
 checkzfs_disabled=$checkzfs_disabled
 checkzfs_local=$checkzfs_local
@@ -860,7 +869,7 @@ zsync_sshport=-p$sshport
 config_log="[INFO] Configuration:"
 for setting in target source sshport tag snapshot_filter min_keep zfs_auto_snapshot_keep zfs_auto_snapshot_label \
                zfs_auto_snapshot_engine zfs_auto_snapshot_label_match \
-               bandwidth_limit source_bookmark source_hold transfer_resume broken_rename monitor_engine checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
+               bandwidth_limit source_bookmark source_hold transfer_resume broken_rename key_change monitor_engine checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
                checkzfs_spool checkzfs_spool_maxage trigger schedule run_as log_file; do
     config_log+="\n\t$setting=${!setting}"
 done
@@ -1134,6 +1143,11 @@ if [[ $zfs_auto_snapshot_label_match != "strict" ]] && [[ $zfs_auto_snapshot_lab
     log "[WARN] Unknown value zfs_auto_snapshot_label_match=$zfs_auto_snapshot_label_match, using legacy."
     zfs_auto_snapshot_label_match=legacy
 fi
+# an unknown value must not rewrap a replica: block, the monitoring shows it
+if ! [[ $key_change =~ ^(transfer|block|rename)$ ]]; then
+    log "[WARN] Unknown value key_change=$key_change (transfer, block or rename), using block."
+    key_change=block
+fi
 #### bookmark and hold tag on the source per backup host and target, e.g. pool/data#zsync_backup1_backup_pve1
 bookmark_name="zsync_$(hostname -s)_$(tr '/' '_' <<< "$target")"
 hold_tag=$bookmark_name
@@ -1206,7 +1220,8 @@ function label_leftovers() {
 
 # state of each dataset for the monitoring (written to <config>.datasets):
 # ok, branched, cleanup_blocked, failed, at_risk, diverged, broken, empty, no_snapshots, orphan_missing, orphan_unselected,
-# orphan_kept, branch (old chain after a rollback or a broken chain on the source), branch_kept
+# orphan_kept, branch (old chain after a rollback or a broken chain on the source), branch_kept, key_changed (not
+# transferred, key_change), key_transferred (transferred with a changed key, the replica opens only with the new key)
 declare -A ds_state ds_detail ds_leftovers renamed_broken space_note
 
 # fix for a target without a usable snapshot: keep the old replica under a new name, the next run replicates again
@@ -1290,22 +1305,29 @@ function rename_broken() {
     else
         cause="the replica has no snapshot"
     fi
+    rename_replica "$name" "$cause"
+}
+
+# keep the old replica complete as <replica>.zsync-branch-<date> (bashclub:zsync-branch=<date>;<cause>), the dataset is
+# replicated again in this run; without enough space on the target nothing changes (space_note). 1 if not renamed
+function rename_replica() {
+    local name=$1 cause=$2 replica=$target/$1 date branch needed avail
     needed=$(remote "zfs get -Hp -o value used $name")
     avail=$(zfs get -Hp -o value available "$target")
     if ! [[ $needed =~ ^[0-9]+$ && $avail =~ ^[0-9]+$ ]] || [ "$needed" -ge "$avail" ]; then
         log "[WARN] $name - $cause, but there is not enough space for a new replication (needs about $(size "$needed"), $(size "$avail") available on $target). $replica stays as it is, decide: bashclub-zsync-maintenance"
         space_note[$name]="not enough space for a new replication"
-        return 0
+        return 1
     fi
     date=$(date +%Y-%m-%d-%H%M)
     branch=$replica.zsync-branch-$date
     if zfs list "$branch" > /dev/null 2>&1; then
         log "[ERROR] $name - $branch exists already (an earlier attempt was not completed), check it and remove what is not needed."
-        return 0
+        return 1
     fi
     if ! zfs rename "$replica" "$branch"; then
         log "[ERROR] $name - renaming $replica to $branch failed, nothing was changed."
-        return 0
+        return 1
     fi
     zfs set "bashclub:zsync-branch=$date;$cause" "$branch" \
         || log "[WARN] $name - marking $branch failed (bashclub:zsync-branch)."
@@ -1315,11 +1337,60 @@ function rename_broken() {
     ds_detail[$name]="replicated again ($cause), old replica ${branch##*/}"
 }
 
+# key parameters of an encrypted dataset (sorted "property=value " list, empty if not encrypted); keyformat,
+# pbkdf2iters, pbkdf2salt: pbkdf2salt changes with every zfs change-key of a passphrase, the replica gets the new one
+# with the next raw transfer; a key file exchanged for another one (keyformat raw or hex, pbkdf2salt 0) is not seen
+function key_params() {
+    sort | awk -F'\t' '$1 == "keyformat" && $2 != "none" && $2 != "-" { enc = 1 } { list = list $1 "=" $2 " " }
+        END { if (enc) print list }'
+}
+# key_differs <dataset> <replica>: 0 if both are encrypted and the key of the source changed since the last transfer
+function key_differs() {
+    local source_key replica_key
+    replica_key=$(zfs get -Hp -o property,value keyformat,pbkdf2iters,pbkdf2salt "$2" 2>/dev/null | key_params)
+    [[ -n $replica_key ]] || return 1
+    source_key=$(remote "zfs get -Hp -o property,value keyformat,pbkdf2iters,pbkdf2salt $1" 2>/dev/null | key_params)
+    [[ -n $source_key && $source_key != "$replica_key" ]]
+}
+
+# key of an encrypted dataset changed on the source since the last transfer (zfs change-key, #168): a raw transfer
+# would rewrap the replica, afterwards only the new key opens its snapshots, also the old ones. key_change=transfer
+# transfers it with a warning, rename keeps the old replica with the old key (rename_replica, a new replication
+# follows), block or rename without space: the dataset is not transferred (0), the admin decides with
+# bashclub-zsync-maintenance (transfer: bashclub:zsync-key-accept=1 on the replica, or rename)
+function key_check() {
+    local name=$1 replica=$target/$1 cause="the key was changed on the source (zfs change-key)"
+    [[ -n ${replica_encrypted[$replica]} ]] && key_differs "$name" "$replica" || return 1
+    if [[ ${key_accept[$replica]} == "1" ]]; then
+        log "[INFO] $name - $cause, transferred as decided in bashclub-zsync-maintenance: afterwards only the new key opens $replica."
+        return 1
+    fi
+    case $key_change in
+        transfer)
+            log "[WARN] $name - $cause: this transfer rewraps $replica, afterwards only the new key opens its snapshots, also the old ones. To keep the old replica with the old key: key_change=rename or block in $conf"
+            ds_state[$name]=key_transferred
+            ds_detail[$name]="key changed on the source, the replica now opens only with the new key"
+            return 1 ;;
+        rename)
+            if rename_replica "$name" "the key was changed on the source"; then return 1; fi ;;
+    esac
+    ds_state[$name]=key_changed
+    ds_detail[$name]="key changed on the source, not transferred${space_note[$name]:+; ${space_note[$name]}}"
+    log "[ERROR] $name - $cause. Not transferred: the transfer would rewrap $replica, afterwards only the new key would open its snapshots, also the old ones. Decide: bashclub-zsync-maintenance (transfer: the change was intended, rename: keep the old replica with the old key and replicate again)"
+    rc=1
+    return 0
+}
+
 # after a new replication: the children of the old replica (replicas of their own, moved with it) back below the new
-# one, from the old replica of this run or one renamed by bashclub-zsync-maintenance (newest <replica>.zsync-branch-*)
+# one, from the old replica of this run or one renamed by bashclub-zsync-maintenance (newest <replica>.zsync-branch-*);
+# children whose key changed on the source stay in the old replica with the old key (key_change block or rename)
 function move_children() {
     local name=$1 replica=$target/$1 old=$2 child
     for child in $(zfs list -H -o name -d 1 -t filesystem,volume "$old" 2>/dev/null | tail -n +2); do
+        if [[ $key_change != "transfer" ]] && key_differs "$name/${child##*/}" "$child"; then
+            log "[INFO] $name - $child stays in the old replica: its key was changed on the source as well, it is replicated again."
+            continue
+        fi
         if ! zfs list "$replica/${child##*/}" > /dev/null 2>&1; then
             zfs rename "$child" "$replica/${child##*/}" || log "[ERROR] $name - moving $child below the new replica failed: zfs rename $child $replica/${child##*/}"
         fi
@@ -1328,6 +1399,30 @@ function move_children() {
 
 function rename_hint() {
     echo "bashclub-zsync-maintenance (rename: keeps the old replica, the next run replicates again), or broken_rename=1 in $conf"
+}
+
+# encrypted replicas (key_check) and the transfers decided in bashclub-zsync-maintenance (bashclub:zsync-key-accept=1,
+# also inherited from a parent; the marking set on a replica itself is removed after the run)
+declare -A replica_encrypted=() key_accept=() key_accept_local=()
+while IFS=$'\t' read -r n p v src; do
+    case $p in
+        keyformat) if [[ $v != "none" && $v != "-" ]]; then replica_encrypted[$n]=1; fi ;;
+        bashclub:zsync-key-accept)
+            key_accept[$n]=$v
+            if [[ $src == "local" ]]; then key_accept_local[$n]=1; fi ;;
+    esac
+done <<< "$(zfs get -H -o name,property,value,source -r -t filesystem,volume keyformat,bashclub:zsync-key-accept $target 2>/dev/null)"
+
+# end of a dataset: its state for the monitoring, failed datasets counted, rc of the run kept after a failure
+function finish_dataset() {
+    local name=$1
+    if [[ -z ${ds_state[$name]} ]] || { [[ ${ds_state[$name]} =~ ^(branched|cleanup_blocked|key_transferred)$ ]] && [ $rc -ne 0 ]; }; then
+        if [ $rc -ne 0 ]; then ds_state[$name]=failed; else ds_state[$name]=ok; fi
+    fi
+    if [ $rc -ne 0 ]; then ((datasets_failed++)); fi
+    if [ $rc_before -ne 0 ]; then rc=$rc_before; fi
+    save_source_props "$name"
+    log "[INFO] Replication of $name finished."
 }
 
 #### replication per dataset
@@ -1368,6 +1463,12 @@ for name in "${syncvols[@]}"; do
         fi
     fi
     if cut -f1 <<< "$source_snaps" | grep -qE "$snapshot_regex"; then
+        # key changed on the source: not transferred (block), or the old replica kept (rename), before a resumed
+        # transfer could rewrap it
+        if key_check "$name"; then
+            finish_dataset "$name"
+            continue
+        fi
         # transfer of an earlier run interrupted (receive -s): continue it, otherwise discard the partial state,
         # it would block every further receive (an interrupted initial replication is removed completely)
         token=$(zfs get -H -o value receive_resume_token $target/$name 2>/dev/null)
@@ -1651,13 +1752,13 @@ for name in "${syncvols[@]}"; do
         debug "$name - No snapshots found with filter $snapshot_filter"
         ds_state[$name]=no_snapshots
     fi
-    if [[ -z ${ds_state[$name]} ]] || { [[ ${ds_state[$name]} =~ ^(branched|cleanup_blocked)$ ]] && [ $rc -ne 0 ]; }; then
-        if [ $rc -ne 0 ]; then ds_state[$name]=failed; else ds_state[$name]=ok; fi
-    fi
-    if [ $rc -ne 0 ]; then ((datasets_failed++)); fi
-    if [ $rc_before -ne 0 ]; then rc=$rc_before; fi
-    save_source_props "$name"
-    log "[INFO] Replication of $name finished."
+    finish_dataset "$name"
+done
+
+# transfers decided in bashclub-zsync-maintenance are done: remove the marking (kept for a failed dataset)
+for replica in "${!key_accept_local[@]}"; do
+    n=${replica#$target/}
+    if [[ ${ds_state[$n]} != "failed" ]]; then zfs inherit bashclub:zsync-key-accept "$replica" 2>/dev/null; fi
 done
 
 #### datasets only on the target: deleted or renamed on the source, or no longer selected for replication
@@ -1683,6 +1784,8 @@ if [ ${#fstypes[@]} -gt 0 ]; then
         printf '%s\n' "${!branches[@]}"; } | awk 'NF && !seen[$0]++'); do
         src=${replica#$target/}
         if [[ $replica == "$target" ]] || [[ -n ${selected[$src]} ]]; then continue; fi
+        # inside an old chain (children whose key changed stay there): decided with it
+        if [[ $replica =~ \.zsync-branch-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{4}/ ]]; then continue; fi
         if [[ -n ${branches[$replica]} ]]; then
             ds_detail[$src]="old chain since ${branches[$replica]%%;*} (${branches[$replica]#*;}, ${used[$replica]})"
             if [[ -n ${kept[$replica]} ]]; then
@@ -1730,7 +1833,7 @@ if [[ -n $status_file ]]; then
     replicated_at=$(date +%s)
     for n in "${!ds_state[@]}"; do
         case ${ds_state[$n]} in
-            ok|branched|cleanup_blocked) printf '%s\t%s\n' "$n" "$replicated_at" ;;
+            ok|branched|cleanup_blocked|key_transferred) printf '%s\t%s\n' "$n" "$replicated_at" ;;
             excluded|orphan_*|branch|branch_kept) ;;
             *) if [[ -n ${replicated[$n]} ]]; then printf '%s\t%s\n' "$n" "${replicated[$n]}"; fi ;;
         esac
@@ -1750,6 +1853,7 @@ for n in "${!ds_state[@]}"; do
         orphan_missing|orphan_unselected) case_type=orphan ;;
         broken|empty) case_type=broken ;;
         branch) case_type=branch ;;
+        key_changed) case_type=key ;;
         *) if [[ -n ${ds_leftovers[$n]} ]]; then case_type=leftovers; else case_type=; fi ;;
     esac
     old=${case_now[$replica]}

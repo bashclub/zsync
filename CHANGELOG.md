@@ -12,6 +12,13 @@
 - license: GPL-3.0-or-later instead of MIT from 2.0.0 on (both packages, SPDX headers in all files, DEP-5 copyright file `/usr/share/doc/<package>/copyright` with the MIT notice of the versions up to 1.0.19); contributions with Developer Certificate of Origin (`Signed-off-by`, CONTRIBUTING.md) (#72)
 
 ### Added
+- Key change on the source (`zfs change-key`) no longer locks the backup, setting `key_change` (#168).
+  - **Why:** the next raw transfer rewraps the replica, afterwards only the new key opens it, with all its snapshots. An attacker with root on the source could lock the backup without deleting anything. A clone on the backup server does not help, it shares the encryption root.
+  - **Detection:** before each transfer of an encrypted dataset `keyformat`, `pbkdf2iters` and `pbkdf2salt` of source and replica are compared (one `zfs get` on the target per run, one per encrypted dataset on the source). A key file exchanged for another one (`keyformat` raw or hex) is not recognized.
+  - **`rename`** (new configurations): the old replica stays as `<replica>.zsync-branch-<date>` with the old key (a case of type `branch`), the dataset is replicated again in the same run with all snapshots of `snapshot_filter`; children that inherit the changed key stay in the old replica and are replicated again, children with an own unchanged key go back below the new one. Without enough space like `block`.
+  - **`block`:** the dataset is not transferred, CRIT, case `key` in `bashclub-zsync-maintenance` with the options `transfer` (marking `bashclub:zsync-key-accept=1`, the next run transfers and removes it) and `rename`.
+  - **`transfer`** (existing configurations without the setting): transferred as before, with a warning in the log and WARN in the Checkmk service until the next run. An unknown value counts as `block`.
+  - Datasets inside an old chain are no longer reported as replicas only on the target.
 - Built-in check of the snapshots per dataset, setting `monitor_engine=checkzfs|internal` (#63, #135).
   - **Same services:** `internal` writes the services `<checkzfs_prefix>:<source>:<port>#<dataset>` with the thresholds `checkzfs_max_age` and `checkzfs_max_snapshot_count`, so switching needs no new service discovery. One line per dataset with the worse state of source and replica (checkzfs wrote two lines under the same name).
   - **Only the replicated datasets** are read: their snapshots on the source (in blocks of 100, forms the job users may run) and the target. Age and rollback count only snapshots of `snapshot_filter` and the label of zsync, as in the replication; bookmarks do not disturb it (checkzfs 4.14 stops at bookmarks: `'NoneType' object has no attribute 'add_snapshot'`).

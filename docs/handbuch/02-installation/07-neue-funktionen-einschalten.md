@@ -14,6 +14,7 @@ Configs aus `bashclub-zsync-setup` haben sie an. Jede lässt sich einzeln einsch
 | `source_bookmark=1` | Replikation geht weiter, auch wenn die Quelle den letzten übertragenen Snapshot schon gelöscht hat | kein Platz, ein Bookmark je Dataset auf der Quelle |
 | `source_hold=1` | Snapshots, die gerade übertragen werden, kann niemand löschen | Snapshots bleiben bis zum Ende des Datasets |
 | `transfer_resume=1` | abgebrochene Übertragungen setzen im nächsten Lauf fort | der empfangene Teil belegt bis dahin Platz auf dem Backupserver |
+| `key_change=rename` | ein Schlüsselwechsel auf der Quelle sperrt das Backup nicht: altes Replikat bleibt mit dem alten Schlüssel, neu übertragen | eine Vollübertragung und Platz für beide, bis der Admin entscheidet |
 | `broken_rename=1` | gerissene Kette blockiert nicht: altes Replikat bleibt als alte Kette, neu übertragen | eine Vollübertragung und Platz für beide, bis der Admin entscheidet |
 | `snapshot_filter` mit Zahlen | der Backupserver behält eine feste Anzahl je Label, egal was die Quelle löscht | so viel Platz, wie die Snapshots belegen |
 
@@ -38,15 +39,15 @@ gilt nur noch für die Quelle. Ohne den Eintrag nimmt zsync checkzfs, wenn es in
 Prüfung. Rückweg: `monitor_engine=checkzfs`, vorher die Bookmarks ausschalten (unten).
 
 ## Bookmark, Hold, Resume und Neuübertragung
-Alle vier auf einmal einschalten; den Bookmark nur mit der eingebauten Prüfung (oben), checkzfs bricht an Bookmarks ab.
+Alle fünf auf einmal einschalten; den Bookmark nur mit der eingebauten Prüfung (oben), checkzfs bricht an Bookmarks ab.
 Die Config steht in der ersten Zeile; vorhandene Einträge werden ersetzt, fehlende angehängt:
 ```bash
 conf=/etc/bashclub/zsync.conf
-for kv in source_bookmark=1 source_hold=1 transfer_resume=1 broken_rename=1; do
+for kv in source_bookmark=1 source_hold=1 transfer_resume=1 broken_rename=1 key_change=rename; do
   k=${kv%%=*}
   if grep -q "^$k=" "$conf"; then sed -i "s|^$k=.*|$kv|" "$conf"; else echo "$kv" >> "$conf"; fi
 done
-grep -E '^(source_bookmark|source_hold|transfer_resume|broken_rename)=' "$conf"
+grep -E '^(source_bookmark|source_hold|transfer_resume|broken_rename|key_change)=' "$conf"
 ```
 Die Werte gelten ab dem nächsten Lauf. Läuft die Config ohne root, braucht der Benutzer auf der Quelle die Rechte
 `hold`, `release` und `bookmark`; `bashclub-zsync-job-user` vergibt sie.
@@ -57,7 +58,7 @@ enthält:
 ( . "$conf"; ssh -p "$sshport" "root@${source#*@}" zfs list -H -t bookmark -o name | grep "#zsync_$(hostname -s)_" | head )
 ```
 
-Rückweg: dieselben Zeilen mit `0`. Soll checkzfs wieder prüfen, danach die Bookmarks dieser Config auf der Quelle
+Rückweg: dieselben Zeilen mit `0` und `key_change=transfer`. Soll checkzfs wieder prüfen, danach die Bookmarks dieser Config auf der Quelle
 löschen, sonst bricht es weiter ab. Der Block meldet sich als root an der Quelle an und nimmt nur die Bookmarks dieses
 Backupservers und Targets:
 ```bash

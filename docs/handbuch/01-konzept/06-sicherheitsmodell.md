@@ -18,6 +18,7 @@ Nichts, was auf der Quelle passiert, löscht Backups auf dem Backupserver. Das g
 | Rollback auf einen alten Snapshot | Ab 2.0 bleibt die alte Kette als eigenes Dataset erhalten, die Replikation läuft auf einer neuen Kette weiter. |
 | Alle gemeinsamen Snapshots gelöscht (Kette gerissen) | zsync überträgt nicht neu über das alte Replikat, sondern meldet CRIT. |
 | Daten werden verschlüsselt (Ransomware) | Die neuen Snapshots kommen dazu, die alten bleiben nach den Regeln der Aufbewahrung. |
+| Der Schlüssel eines verschlüsselten Datasets wird gewechselt (`zfs change-key`) | Ab 2.0 mit `key_change=rename` (neue Configs) bleibt das alte Replikat mit dem alten Schlüssel erhalten, das Dataset wird neu übertragen; mit `block` überträgt zsync nicht und meldet CRIT. Ohne die Prüfung wäre das ganze Replikat danach nur noch mit dem neuen Schlüssel lesbar. |
 
 Was mit solchen Replikaten passiert, entscheidet der Admin auf dem Backupserver, nicht die Quelle und nicht zsync
 selbst.
@@ -31,6 +32,7 @@ Fälle sind:
 - Kette gerissen: altes Replikat umbenennen (behalten) oder löschen, danach überträgt der nächste Lauf neu
 - alte Kette nach einem Rollback: als Archiv behalten oder löschen
 - Snapshots mit dem Label in fremdem Namensschema: löschen
+- Schlüssel auf der Quelle gewechselt (`key_change=block`): übertragen oder altes Replikat umbenennen
 
 Alle Fälle können auch warten. Solange sie offen sind, warnt Checkmk.
 

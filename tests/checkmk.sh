@@ -134,6 +134,10 @@ reset; last 0 $((T - 1800)); history 3600 6; ds pool/x.zsync-branch-2026-10-17-1
 expect "alte Kette: WARN mit Hinweis auf das Wartungswerkzeug" 1 "old chain after a rollback or a broken chain on the source, keep or delete it: pool/x.zsync-branch-2026-10-17-1200.*bashclub-zsync-maintenance"
 reset; last 0 $((T - 1800)); history 3600 6; ds pool/x.zsync-branch-2026-10-17-1200 branch_kept $T "old chain"
 expect "alte Kette behalten: OK mit Hinweis" 0 "1 old chains kept"
+reset; last 0 $((T - 1800)); history 3600 6; ds pool/enc key_changed $((T - 3600)) "key changed on the source, not transferred"
+expect "Schlüssel gewechselt, nicht übertragen: CRIT mit Hinweis auf das Wartungswerkzeug" 2 "key changed on the source, not transferred .*: pool/enc \(since 1h 0m\).*bashclub-zsync-maintenance"
+reset; last 0 $((T - 1800)); history 3600 6; ds pool/enc key_transferred $T "key changed on the source, the replica now opens only with the new key"
+expect "Schlüssel gewechselt und übertragen: WARN" 1 "key changed on the source, the replica opens only with the new key now .*: pool/enc"
 reset; last 0 $((T - 1800)); history 3600 6; for x in a b c d e; do ds pool/$x broken $T "x"; done
 expect "lange Liste wird gekürzt" 2 "full replication needed for 5 datasets: pool/a \(x, since 0s\), pool/b \(x, since 0s\), pool/c \(x, since 0s\) \(\+2 more\)"
 
