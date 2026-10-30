@@ -11,7 +11,7 @@
 #                                                    rename (the next run replicates again, the old replica stays)
 #                                                    / delete (the next run replicates again) / later
 #   leftovers  snapshots of the label in another name scheme on the target (#3)            delete / later
-#   branch     old chain after a rollback or a broken chain on the source (#65), the replication continues on the new chain
+#   branch     old chain after a rollback, a broken chain or a key change on the source (#65), the replication continues on the new chain
 #                                                    keep (bashclub:zsync-orphan=keep) / delete / later
 #   key        key of an encrypted dataset changed on the source, not transferred (key_change, #168)
 #                                                    transfer (the change was intended: the replica opens only with the

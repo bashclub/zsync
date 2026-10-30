@@ -152,7 +152,7 @@ case_rollback() {
   equal "Zustand der neuen Kette" branched "$(state_of "$ZCI_POOL_SRC/data")"
   equal "Zustand des alten Zweigs" branch "$(state_of "${branch#$ZCI_POOL_DST/rollback/}")"
   check "kein Anfügen aus einem Bookmark nach Rollback" not grep -q 'continuing from the bookmark' "$log"
-  check "Checkmk: WARN zum alten Zweig" grep -qE '^1 "zsync rollback" .*old chain after a rollback or a broken chain on the source' <<< "$(check_output)"
+  check "Checkmk: WARN zum alten Zweig" grep -qE '^1 "zsync rollback" .*old chain after a rollback, a broken chain or a key change on the source' <<< "$(check_output)"
   # Entscheidung: alten Zweig löschen
   list=$(ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-maintenance --list --tsv)
   local case_id; case_id=$(awk -F'\t' -v r="$branch" '$3 == "branch" && $4 == r { print $1 }' <<< "$list")
@@ -1553,7 +1553,7 @@ case_cascade() {
   local branches; branches=$(zfs list -H -o name -r $B2 | grep zsync-branch)
   equal "Rollback: genau eine alte Kette auf Stufe 2 ($branches)" 1 "$(grep -c . <<< "$branches")"
   equal "Rollback: die alte Kette auf Stufe 2 ist ihre eigene" local "$(zfs get -H -o source bashclub:zsync-branch "$branches" 2>/dev/null)"
-  check "Rollback: alte Kette von backup1 nicht ausgewählt" grep -q "old chain after a rollback or a broken chain on the source)" <<< "$(last_log)"
+  check "Rollback: alte Kette von backup1 nicht ausgewählt" grep -q "old chain after a rollback, a broken chain or a key change on the source)" <<< "$(last_log)"
   # Rotation auf backup1, bevor Stufe 2 holt: der Bookmark auf backup1 hält die Kette
   local i; snap "$ZCI_POOL_SRC/data/vm" 06; snap "$ZCI_POOL_SRC/data/vm" 07; stage new $c1
   for i in 01 02 03 04 05 06; do zfs destroy "$ZCI_POOL_SRC/data/vm@zfs-auto-snap_daily-$i"; done
@@ -1722,6 +1722,9 @@ case_key_change() {
   check "rename: Kind mit eigenem Schlüssel inkrementell weiter" zfs list "$T/enc/own@zfs-auto-snap_daily-04"
   equal "rename: Zustand" branched "$(state_of "$S/enc")"
   zsync
+  list=$(ZSYNC_CONF_DIR=$CONF_DIR bashclub-zsync-maintenance --list --tsv)
+  check "rename: alte Kette als Fall in der Wartung ($list)" test -n "$(awk -F'\t' -v r="$old" '$3 == "branch" && $4 == r && $6 ~ /key was changed/' <<< "$list")"
+  check "rename: Checkmk WARN zur alten Kette" grep -q '^1 .*old chain after a rollback, a broken chain or a key change on the source' <<< "$(check_output)"
   check "rename: Kind der alten Kette kein verwaistes Replikat" not grep -q "^${old#$ZCI_POOL_DST/key_change/}/a"$'\t' "$(status_path datasets)"
   # rename ohne Platz: wie block; danach in der Wartung umbenennen
   zfs destroy -r "$old"

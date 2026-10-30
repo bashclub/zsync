@@ -202,7 +202,7 @@ Ab 2.0. Altlasten auf dem Replikat; im Modus `strict` löscht zsync sie nicht. L
 `bashclub-zsync-maintenance` (Fall `leftovers`).
 
 ## Abgleich am Ende
-**`[WARN] <replikat> is the old chain after a rollback or a broken chain on the source: …. Keep or delete it: bashclub-zsync-maintenance`**
+**`[WARN] <replikat> is the old chain after a rollback, a broken chain or a key change on the source: …. Keep or delete it: bashclub-zsync-maintenance`**
 Ab 2.0. Eine alte Kette wartet auf die Entscheidung.
 
 **`[WARN] <replikat> … and is not replicated anymore (…). Keep it: zfs set bashclub:zsync-orphan=keep … - check the deletion: zfs destroy -rnv …`**
