@@ -148,11 +148,28 @@ Ab 2.0, `broken_rename=1`. Kette gerissen oder Replikat ohne Snapshots: zsync be
 neu, im selben Lauf. Die alte Kette mit `bashclub-zsync-maintenance` behalten oder löschen.
 
 **`[WARN] <dataset> - <ursache>, but there is not enough space for a new replication (needs about …, … available on …). …`**
-Ab 2.0, `broken_rename=1`. Für die Neuübertragung reicht der Platz auf dem Backupserver nicht; zsync ändert nichts,
+Ab 2.0, `broken_rename=1` oder `key_change=rename`. Für die Neuübertragung reicht der Platz auf dem Backupserver nicht; zsync ändert nichts,
 Checkmk meldet CRIT. Platz schaffen (z. B. alte Ketten löschen) oder mit `bashclub-zsync-maintenance` entscheiden.
 
+**`[WARN] <dataset> - the key was changed on the source (zfs change-key): this transfer rewraps <replikat>, …`**
+Ab 2.0, `key_change=transfer`. Das Replikat öffnet nach diesem Lauf nur noch mit dem neuen Schlüssel, auch seine alten
+Snapshots. Gegen ungewollte Wechsel: `key_change=rename` oder `block`.
+
+**`[ERROR] <dataset> - the key was changed on the source (zfs change-key). Not transferred: …`**
+Ab 2.0, `key_change=block` oder `rename` ohne Platz. Entscheiden mit `bashclub-zsync-maintenance` (Fall `key`).
+
+**`[INFO] <dataset> - the key was changed on the source (zfs change-key), transferred as decided in bashclub-zsync-maintenance: …`**
+Ab 2.0. Der Admin hat `transfer` gewählt; das Replikat öffnet jetzt nur noch mit dem neuen Schlüssel.
+
+**`[INFO] <dataset> - … stays in the old replica: its key was changed on the source as well, it is replicated again.`**
+Ab 2.0, `key_change=rename`. Ein Kind erbt den gewechselten Schlüssel; es bleibt mit dem alten Schlüssel in der alten
+Kette und wird neu übertragen.
+
+**`[WARN] Unknown value key_change=…`**
+Ab 2.0. Tippfehler in der Config; zsync nimmt `block`.
+
 **`[ERROR] <dataset> - <replikat>.zsync-branch-<datum> exists already …`** und **`[ERROR] <dataset> - renaming … failed, nothing was changed.`**
-Ab 2.0, `broken_rename=1`. Das Umbenennen des alten Replikats ging nicht; ohne root fehlt evtl. das Recht `rename`.
+Ab 2.0, `broken_rename=1` oder `key_change=rename`. Das Umbenennen des alten Replikats ging nicht; ohne root fehlt evtl. das Recht `rename`.
 
 **`[ERROR] <dataset> - moving … below the new replica failed: …`**
 Ab 2.0. Ein Kind des alten Replikats ließ sich nicht unter das neue schieben; die Meldung nennt den Befehl.
@@ -185,7 +202,7 @@ Ab 2.0. Altlasten auf dem Replikat; im Modus `strict` löscht zsync sie nicht. L
 `bashclub-zsync-maintenance` (Fall `leftovers`).
 
 ## Abgleich am Ende
-**`[WARN] <replikat> is the old chain after a rollback or a broken chain on the source: …. Keep or delete it: bashclub-zsync-maintenance`**
+**`[WARN] <replikat> is the old chain after a rollback, a broken chain or a key change on the source: …. Keep or delete it: bashclub-zsync-maintenance`**
 Ab 2.0. Eine alte Kette wartet auf die Entscheidung.
 
 **`[WARN] <replikat> … and is not replicated anymore (…). Keep it: zfs set bashclub:zsync-orphan=keep … - check the deletion: zfs destroy -rnv …`**

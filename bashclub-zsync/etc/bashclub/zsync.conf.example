@@ -82,6 +82,18 @@ transfer_resume=1
 # existing configurations without this setting keep 0, new configurations get 1
 broken_rename=1
 
+# key of an encrypted dataset changed on the source since the last transfer (zfs change-key): the next raw transfer
+# rewraps the replica, afterwards only the new key opens its snapshots, also the old ones (e.g. a new passphrase
+# set by an attacker locks the backup)
+# rename = keep the old replica with the old key as <replica>.zsync-branch-<date> and replicate the dataset again
+#          (full: transfer time and space for both until the admin deletes the old one with
+#          bashclub-zsync-maintenance); without enough space on the target like block
+# block = do not transfer the dataset, CRIT, decide with bashclub-zsync-maintenance (transfer or rename)
+# transfer = transfer it, with a warning
+# recognized by keyformat, pbkdf2iters and pbkdf2salt; a key file exchanged for another one is not recognized
+# existing configurations without this setting keep transfer, new configurations get rename
+key_change=rename
+
 # check of the snapshots per dataset (services <checkzfs_prefix>:<source>#<dataset>): checkzfs (package
 # bashclub-checkzfs) or internal (built in, from the snapshot lists of the end of the run, same services and
 # thresholds checkzfs_*); empty = checkzfs if installed, otherwise internal; new configs get internal

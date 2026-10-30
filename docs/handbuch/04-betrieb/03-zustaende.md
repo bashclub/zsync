@@ -52,6 +52,20 @@ Ab 2.0 mit `broken_rename=1` (Default neuer Configs) wartet zsync nicht: Es beh�
 überträgt neu, und der Service meldet die alte Kette (WARN) zur Entscheidung. CRIT bleibt es nur, wenn der Platz für
 die Neuübertragung nicht reicht; der Service nennt das.
 
+**Schlüssel auf der Quelle gewechselt, nicht übertragen (CRIT)**
+Ab 2.0, `key_change=block` (oder `rename` ohne Platz). Auf der Quelle wurde der Schlüssel eines verschlüsselten Datasets
+gewechselt (`zfs change-key`). zsync überträgt es nicht, weil das Replikat danach nur noch mit dem neuen Schlüssel
+lesbar wäre, auch seine alten Snapshots. Erst klären, wer den Schlüssel gewechselt hat. Dann entscheiden mit
+[bashclub-zsync-maintenance](04-wartung.md): `transfer`, wenn der Wechsel gewollt war, sonst `rename` (das alte Replikat
+bleibt mit dem alten Schlüssel). Mit `key_change=rename` und genug Platz macht zsync das selbst; der Service meldet
+dann die alte Kette (WARN).
+
+**Schlüssel auf der Quelle gewechselt, übertragen (WARN)**
+`key_change=transfer` (Configs aus 1.0). Das Replikat öffnet ab jetzt nur noch mit dem neuen Schlüssel, auch seine alten
+Snapshots. Die Warnung verschwindet mit dem nächsten Lauf. War der Wechsel nicht gewollt, ist das alte Backup nur noch
+mit dem neuen Schlüssel lesbar; künftig schützt `key_change=rename` davor
+([Neue Funktionen einschalten](../02-installation/07-neue-funktionen-einschalten.md)).
+
 **Kette in Gefahr (WARN)**
 Die letzte Übertragung scheiterte, und ihre Basis ist der älteste Snapshot des Labels auf der Quelle. Scheitert auch
 der nächste Lauf und rotiert die Quelle dazwischen, reißt die Kette. Jetzt die Ursache der gescheiterten Übertragung

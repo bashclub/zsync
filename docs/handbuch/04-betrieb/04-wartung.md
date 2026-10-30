@@ -15,12 +15,17 @@ aus. Warum: [Sicherheitsmodell](../01-konzept/06-sicherheitsmodell.md).
 | `broken` | kein gemeinsamer Snapshot mit der Quelle, oder Replikat ohne Snapshots | `rename`, `delete`, `later` |
 | `leftovers` | Snapshots des Labels in fremdem Namensschema am Replikat | `delete`, `later` |
 | `branch` | alte Kette nach einem Rollback oder einer gerissenen Kette (`<replikat>.zsync-branch-<datum>`) | `keep`, `delete`, `later` |
+| `key` | Schlüssel eines verschlüsselten Datasets auf der Quelle gewechselt, nicht übertragen (`key_change`) | `transfer`, `rename`, `later` |
 
 - `keep`: behalten als Archiv, ohne weitere Warnung (`bashclub:zsync-orphan=keep`)
 - `delete`: das Replikat mit allen Snapshots und Kindern löschen (`zfs destroy -r`)
 - `rename`: das alte Replikat in `<replikat>.zsync-branch-<datum>` umbenennen; der nächste Lauf überträgt neu und schiebt
   die Kinder unter das neue Replikat zurück. Das umbenannte ist danach eine alte Kette (`branch`) und wird behalten oder
   gelöscht. Ab 2.0 macht zsync das mit `broken_rename=1` selbst, ohne auf die Entscheidung zu warten.
+- `transfer` (Fall `key`): der nächste Lauf überträgt das Dataset und die Datasets darunter; das Replikat öffnet danach
+  nur noch mit dem neuen Schlüssel, auch seine alten Snapshots (`bashclub:zsync-key-accept=1`, der Lauf entfernt es).
+  Beim Fall `key` behält `rename` das alte Replikat mit dem alten Schlüssel; Kinder, deren Schlüssel sich ebenfalls
+  geändert hat, bleiben darin und werden neu übertragen.
 - `later`: nichts tun, der Fall bleibt offen und Checkmk warnt weiter
 
 ## Geführt
