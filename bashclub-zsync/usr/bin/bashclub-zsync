@@ -522,8 +522,12 @@ function write_spool() {
     if ! spool_on_source; then
         mkdir -p $spooldir 2>/dev/null
         if [ -w $spooldir ]; then
-            spooltmp=$(mktemp $spooldir/.$spoolname.XXXXXX) && cat "$file" > $spooltmp && chmod 644 $spooltmp \
-                && mv -f $spooltmp $spooldir/$spoolname
+            # a spool file of another user cannot be replaced in the sticky spool folder: no leftover, say why
+            if spooltmp=$(mktemp $spooldir/.$spoolname.XXXXXX) && ! { cat "$file" > $spooltmp && chmod 644 $spooltmp \
+                && mv -f $spooltmp $spooldir/$spoolname; }; then
+                rm -f $spooltmp
+                log "[WARN] $spooldir/$spoolname cannot be replaced by $(id -un) (e.g. a file of another user, written by a run as root or another configuration with the same checkzfs_prefix), the monitoring keeps the old state."
+            fi
         else
             log "[WARN] $spooldir is not writable for $(id -un), $spoolname is not stored."
         fi
@@ -531,7 +535,10 @@ function write_spool() {
         # over the ssh connection of the run (no scp: works with the forced command bashclub-zsync-remote)
         spooltmp=$spooldir/$(basename "$file")
         remote "mkdir -p $spooldir"
-        remote "cat > $spooltmp" < "$file" && remote "mv $spooltmp $spooldir/$spoolname"
+        if ! { remote "cat > $spooltmp" < "$file" && remote "mv $spooltmp $spooldir/$spoolname"; }; then
+            remote "rm -f $spooltmp" > /dev/null 2>&1
+            log "[WARN] $spooldir/$spoolname on $source cannot be replaced (e.g. a file of another user, written by another backup server or configuration with the same checkzfs_prefix), the monitoring keeps the old state."
+        fi
     fi
     rm -f "$file"
 }
