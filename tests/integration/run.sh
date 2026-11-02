@@ -84,7 +84,7 @@ zfs_auto_snapshot_label_match=legacy'
   equal "zas: Exit-Code" 0 "$rc"
   check "zas: Snapshot übertragen" grep -q 'zfs-auto-snap_backup-' <<< "$(snaps "$d")"
   set_conf "$conf" zfs_auto_snapshot_engine internal; set_conf "$conf" zfs_auto_snapshot_label_match strict
-  sleep 61   # eigener Snapshot-Name pro Minute (remote-snapshot-manager)
+  minute_back "$ZCI_POOL_SRC" "$ZCI_POOL_DST"   # eigener Snapshot-Name pro Minute (remote-snapshot-manager)
   zsync
   equal "nach dem Wechsel: Exit-Code" 0 "$rc"
   equal "nach dem Wechsel: neuer Snapshot übertragen" "$(snaps "$ZCI_POOL_SRC/data" | awk '{ print $NF }')" "$(snaps "$d" | awk '{ print $NF }')"
@@ -376,7 +376,7 @@ transfer_resume=1"
     echo "===== $(date +%T) als $user" >> "$log"
     $run_as "bashclub-zsync -c $conf" >> "$log" 2>&1; rc=$?
     equal "Lauf $n als $user: Exit-Code" 0 "$rc"
-    [ $n -eq 1 ] && sleep 61   # eigener Snapshot-Name pro Minute (remote-snapshot-manager)
+    [ $n -eq 1 ] && minute_back "$ZCI_POOL_SRC" "$ZCI_POOL_DST"   # eigener Snapshot-Name pro Minute (remote-snapshot-manager)
   done
   for d in subvol-100-disk-0 vm-101-disk-0 enc; do
     equal "$d: zwei Snapshots repliziert" 2 "$(zfs list -H -o name -t snapshot "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC/$d" | wc -l)"
@@ -396,7 +396,7 @@ transfer_resume=1"
   check "keine Warnung zu Rechten im Log" not grep -q 'not writable\|cannot be used' "$log"
   # Rollback auf der Quelle ohne root: neue Kette per Klon mit den Rechten clone, promote, rename
   zfs rollback -r "$ZCI_POOL_SRC/subvol-100-disk-0@$(snaps "$ZCI_POOL_SRC/subvol-100-disk-0" | cut -d' ' -f1)"
-  sleep 61   # der Lauf legt einen neuen Snapshot mit eigenem Namen pro Minute an (remote-snapshot-manager)
+  minute_back "$ZCI_POOL_SRC" "$ZCI_POOL_DST"   # der Lauf legt einen neuen Snapshot mit eigenem Namen pro Minute an (remote-snapshot-manager)
   su - $user -c "bashclub-zsync -c $conf" >> "$log" 2>&1; rc=$?
   equal "ohne root nach Rollback: Exit-Code" 0 "$rc"
   check "ohne root: alter Zweig angelegt" test -n "$(zfs list -H -o name -d 1 "$ZCI_POOL_DST/unprivileged/$ZCI_POOL_SRC" | grep 'subvol-100-disk-0\.zsync-branch-')"
@@ -564,7 +564,7 @@ checkzfs_spool=1"
     echo "===== $(date +%T) als $user (command=)" >> "$log"
     su - $user -c "bashclub-zsync -c $conf" >> "$log" 2>&1; rc=$?
     equal "Lauf $n: Exit-Code" 0 "$rc"
-    [ $n -eq 1 ] && sleep 61   # eigener Snapshot-Name pro Minute (remote-snapshot-manager)
+    [ $n -eq 1 ] && minute_back "$ZCI_POOL_SRC" "$ZCI_POOL_DST"   # eigener Snapshot-Name pro Minute (remote-snapshot-manager)
   done
   check "nichts abgewiesen" not grep -q "command not allowed" "$log"
   for d in data vol; do
@@ -1547,7 +1547,7 @@ case_cascade() {
   snap "$ZCI_POOL_SRC/data/ct" 05; snap "$ZCI_POOL_SRC/data/vm" 05
   stage new $c1; equal "Rollback: backup1 rc" 0 "$rc"
   check "Rollback: alte Kette auf backup1" grep -q zsync-branch <<< "$(zfs list -H -o name -r $B1)"
-  sleep 61   # anderer Zeitstempel als die alte Kette von backup1
+  minute_back "$ZCI_POOL_SRC" "$ZCI_POOL_DST"   # anderer Zeitstempel als die alte Kette von backup1
   stage new $c2; equal "Rollback: Stufe 2 rc" 0 "$rc"
   check "Rollback: ct@05 auf Stufe 2" on_stage2 ct 05
   local branches; branches=$(zfs list -H -o name -r $B2 | grep zsync-branch)
@@ -1575,7 +1575,7 @@ case_cascade_local() {
   check "lokal: vm@03" on_stage2 vm 03
   zfs rollback -r "$ZCI_POOL_SRC/data/ct@zfs-auto-snap_daily-02"; write "$ZCI_POOL_SRC/data/ct"
   snap "$ZCI_POOL_SRC/data/ct" 04; snap "$ZCI_POOL_SRC/data/vm" 04
-  stage new $c1; sleep 61; stage new $c2
+  stage new $c1; minute_back "$ZCI_POOL_SRC" "$ZCI_POOL_DST"; stage new $c2
   equal "Rollback lokal: Stufe 2 rc" 0 "$rc"
   check "Rollback lokal: ct@04 auf Stufe 2" on_stage2 ct 04
   # ohne Bookmark: rotiert backup1 die Basis von Stufe 2 weg, reißt die Kette auf Stufe 2 (Fehler, nichts gelöscht)
@@ -1603,11 +1603,11 @@ case_cascade_upgrade() {
   zfs rollback -r "$ZCI_POOL_SRC/data/ct@zfs-auto-snap_daily-04"; write "$ZCI_POOL_SRC/data/ct"
   snap "$ZCI_POOL_SRC/data/ct" 06; snap "$ZCI_POOL_SRC/data/vm" 06
   stage new $c1; equal "beide 2.0: Rollback auf backup1 rc" 0 "$rc"
-  sleep 61; stage new $c2; equal "beide 2.0: Rollback auf Stufe 2 rc" 0 "$rc"
+  minute_back "$ZCI_POOL_SRC" "$ZCI_POOL_DST"; stage new $c2; equal "beide 2.0: Rollback auf Stufe 2 rc" 0 "$rc"
   check "beide 2.0: ct@06 auf Stufe 2" on_stage2 ct 06
   # falsche Reihenfolge (backup1 2.0, Stufe 2 noch 1.0.19): nach einem Rollback bricht Stufe 2 für das Dataset ab
   zfs rollback -r "$ZCI_POOL_SRC/data/ct@zfs-auto-snap_daily-04"; write "$ZCI_POOL_SRC/data/ct"; snap "$ZCI_POOL_SRC/data/ct" 07
-  stage new $c1; sleep 61; stage old $c2
+  stage new $c1; minute_back "$ZCI_POOL_SRC" "$ZCI_POOL_DST"; stage old $c2
   equal "backup1 vor Stufe 2 aktualisiert: 1.0.19 auf Stufe 2 bricht ab" 1 "$rc"
   check "backup1 vor Stufe 2 aktualisiert: ct@07 fehlt auf Stufe 2" not on_stage2 ct 07
 }
@@ -1759,8 +1759,10 @@ skipped_cases=()
 for c in "${cases[@]}"; do
   echo "### $c"
   case_failed=0; case_skipped=0
+  case_start=$(date +%s)
   reset_pools
   "case_$c"
+  echo "  Dauer: $(( $(date +%s) - case_start )) s"
   if [ $case_skipped -ne 0 ] && [ $case_failed -eq 0 ]; then skipped_cases+=("$c"); fi
   if [ $case_failed -ne 0 ]; then
     failed_cases+=("$c")

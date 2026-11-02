@@ -129,6 +129,25 @@ last_run_log() { awk '/^===== /{ buf = "" } { buf = buf $0 "\n" } END { printf "
 write() { dd if=/dev/urandom of="$(zfs get -H -o value mountpoint "$1")/${3:-file}" bs=1M count=${2:-1} status=none conv=fsync; }
 # eigene Sekunde je Snapshot (realistische Zeiten); Snapshots in derselben Sekunde prüft case_same_second
 snap() { sleep 1.05; zfs snapshot "$1@zfs-auto-snap_daily-$2"; }
+# Namen mit dem Zeitstempel der laufenden Minute (Snapshots <label>-JJJJ-MM-TT-HHMM von zsync und zfs-auto-snapshot,
+# alte Ketten <replikat>.zsync-branch-JJJJ-MM-TT-HHMM) auf eine frühere, in den Pools freie Minute umbenennen, auf Quelle
+# und Ziel gleich (die guid bleibt): der nächste Lauf legt sofort eigene Namen an, statt eine Minute zu warten.
+# Ortszeit und UTC: per ssh läuft remote-snapshot-manager ohne die Zeitzone der Login-Shell. minute_back <pool...>
+minute_back() {
+  local now stamp i names n
+  names=$(zfs list -H -o name -t all -r "$@" 2>/dev/null)
+  for now in $(printf '%s\n' "$(date +%Y-%m-%d-%H%M)" "$(date -u +%Y-%m-%d-%H%M)" | sort -u); do
+    grep -q -- "-$now" <<< "$names" || continue
+    for i in $(seq 1 120); do
+      stamp=$(date -d "$(sed -E 's/^([0-9-]{10})-([0-9]{2})([0-9]{2})$/\1 \2:\3/' <<< "$now") $i min ago" +%Y-%m-%d-%H%M)
+      grep -q -- "-$stamp" <<< "$names" || break
+    done
+    # alte Ketten zuerst, die tiefsten zuerst; danach die Snapshots neu lesen (umbenannte Datasets)
+    for n in $(grep -E -- "\.zsync-branch-$now\$" <<< "$names" | sort -r); do zfs rename "$n" "${n%$now}$stamp"; done
+    for n in $(zfs list -H -o name -t snapshot -r "$@" 2>/dev/null | grep -E -- "-$now\$"); do zfs rename "$n" "${n%$now}$stamp"; done
+    names=$(zfs list -H -o name -t all -r "$@" 2>/dev/null)
+  done
+}
 # Snapshots mit verschiedenen Namen in derselben Sekunde: zu Beginn einer neuen Sekunde ohne Pause anlegen.
 # ZFS legt Snapshots eines Datasets nie in derselben Transaktion an (zfs program: EAGAIN), es braucht also zwei
 # Transaktionen in einer Sekunde; unter Last gelingt das nicht immer -> erneut versuchen, sonst Rückgabe 1
