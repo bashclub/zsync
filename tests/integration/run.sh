@@ -1744,7 +1744,38 @@ case_key_change() {
   check "Wartung umbenannt: neue Kette mit neuem Schlüssel" opens "$T/enc" passwort-5
 }
 
-all_cases=(replication engine_internal engine_switch rotation nothing_selected refquota rollback broken_chain orphans local_mode monitor_internal bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_removable restore_server hooks result_busy cascade cascade_local cascade_upgrade broken_rename key_change)
+# sync_properties (#167): Benutzer-Eigenschaften der Quelle bei jedem Lauf auf dem Replikat, auch geerbte; entfernt,
+# wenn die Quelle keine hat; ungültige Namen und Eigenschaften von zsync werden abgewiesen
+case_sync_properties() {
+  local S=$ZCI_POOL_SRC T=$ZCI_POOL_DST/sync_properties/$ZCI_POOL_SRC
+  zfs create "$S/data"; zfs set bashclub:zsync=all "$S/data"; zfs create "$S/data/child"
+  zfs set com.example:key-id=k1 "$S/data"; zfs set com.example:owner=a "$S/data/child"
+  snap "$S/data" 01; snap "$S/data/child" 01
+  config sync_properties "sync_properties=com.example:key-id,com.example:owner,com.example:other,Bad,bashclub:zsync-case"
+  zsync
+  equal "Erstreplikation: Exit-Code" 0 "$rc"
+  check "ungültiger Name abgewiesen" grep -q "sync_properties: Bad is not a user property" <<< "$(last_run_log)"
+  check "Eigenschaft von zsync abgewiesen" grep -q "sync_properties: bashclub:zsync-case is not a user property" <<< "$(last_run_log)"
+  equal "Erstreplikation bringt den Wert" k1 "$(prop "$T/data" com.example:key-id)"
+  # geändert, neu gesetzt, auf der Quelle entfernt, auf der Quelle geerbt (vom nicht replizierten Pool)
+  zfs set com.example:key-id=k2 "$S/data"; zfs inherit com.example:owner "$S/data/child"
+  zfs set com.example:other=x "$S/data/child"; zfs set com.example:other=from-pool "$S"
+  snap "$S/data" 02; snap "$S/data/child" 02
+  zsync
+  equal "geändert: Exit-Code" 0 "$rc"
+  equal "geänderter Wert" k2 "$(prop "$T/data" com.example:key-id)"
+  equal "Kind erbt den neuen Wert wie auf der Quelle" k2 "$(prop "$T/data/child" com.example:key-id)"
+  equal "neu gesetzt" x "$(prop "$T/data/child" com.example:other)"
+  equal "auf der Quelle entfernt" - "$(prop "$T/data/child" com.example:owner)"
+  equal "auf der Quelle geerbt" from-pool "$(prop "$T/data" com.example:other)"
+  check "Werte nicht im Log" not grep -q "k2" <<< "$(last_run_log)"
+  check "Änderung im Log" grep -q "com.example:key-id of the source set on $T/data (sync_properties)" <<< "$(last_run_log)"
+  # unverändert: nichts geschrieben
+  zsync
+  check "unverändert: nichts gesetzt" not grep -q "(sync_properties)" <<< "$(last_run_log)"
+}
+
+all_cases=(replication engine_internal engine_switch rotation nothing_selected refquota rollback broken_chain orphans local_mode monitor_internal bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_removable restore_server hooks result_busy cascade cascade_local cascade_upgrade broken_rename key_change sync_properties)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten, Pools und die installierten Pakete): ein zweiter wartet;

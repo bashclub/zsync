@@ -111,6 +111,11 @@ broken_rename=0
 # keep transfer here for existing configs without this setting, new configs get rename
 key_change=transfer
 
+# user properties (name with a colon, e.g. com.example:key-id, comma separated) that every run copies from the source
+# to the replica: the value of the source (also inherited there), removed on the replica if the source has none. The
+# replication itself carries them only with the initial replication; empty = none
+sync_properties=
+
 # disable checkzfs with value > 0
 checkzfs_disabled=0
 
@@ -460,6 +465,7 @@ source_hold=1
 transfer_resume=1
 broken_rename=1
 key_change=rename
+sync_properties=
 monitor_engine=internal
 checkzfs_disabled=$checkzfs_disabled
 checkzfs_local=$checkzfs_local
@@ -869,7 +875,7 @@ zsync_sshport=-p$sshport
 config_log="[INFO] Configuration:"
 for setting in target source sshport tag snapshot_filter min_keep zfs_auto_snapshot_keep zfs_auto_snapshot_label \
                zfs_auto_snapshot_engine zfs_auto_snapshot_label_match \
-               bandwidth_limit source_bookmark source_hold transfer_resume broken_rename key_change monitor_engine checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
+               bandwidth_limit source_bookmark source_hold transfer_resume broken_rename key_change sync_properties monitor_engine checkzfs_disabled checkzfs_local checkzfs_prefix checkzfs_max_age checkzfs_max_snapshot_count \
                checkzfs_spool checkzfs_spool_maxage trigger schedule run_as log_file; do
     config_log+="\n\t$setting=${!setting}"
 done
@@ -1015,9 +1021,27 @@ done <<< "$(remote "zfs list -Hp -o name,type,refquota -t filesystem,volume")"
 # original values of the properties the replication changes or leaves out (mountpoint, canmount, auto-snapshot,
 # refquota, tag) and where they come from, saved on the replica for a restore (save_source_props):
 # bashclub:zsync-source.<property>=<local|inherited|default|received|->:<value>
-declare -A source_props source_replicas
+# sync_properties: only user properties, not those zsync manages itself
+sync_props=()
+IFS=',' read -ra entries <<< "${sync_properties// /}"
+for entry in "${entries[@]}"; do
+    if [[ -z $entry ]]; then continue; fi
+    if ! [[ $entry =~ ^[a-z0-9][a-z0-9_.-]*:[a-z0-9_.:-]+$ ]] || [[ $entry == bashclub:zsync* ]] || [[ $entry == "$tag" ]] \
+        || [[ $entry == com.sun:auto-snapshot ]]; then
+        log "[WARN] sync_properties: $entry is not a user property of the source that zsync may copy (lowercase name with a colon, not $tag, bashclub:zsync*, com.sun:auto-snapshot), left out."
+        continue
+    fi
+    sync_props+=("$entry")
+done
+declare -A source_props source_replicas sync_value
+sync_list=$(IFS=,; echo "${sync_props[*]}")
 while IFS=$'\t' read -r dataset property value property_source; do
     if [[ -z $dataset ]]; then continue; fi
+    # sync_properties: the value on the source, also inherited there ("-": none)
+    if [[ ,$sync_list, == *",$property,"* ]]; then
+        if [[ $property_source != "-" ]]; then sync_value["$dataset|$property"]=$value; fi
+        continue
+    fi
     # cascade: the source dataset is a replica of bashclub-zsync 2.0 or its target (mark of the target, inherited)
     if [[ $property == bashclub:zsync-target ]]; then
         if [[ $property_source == "local" ]] || [[ $property_source == inherited* ]]; then source_replicas[$dataset]=1; fi
@@ -1025,7 +1049,7 @@ while IFS=$'\t' read -r dataset property value property_source; do
     fi
     if [[ $property_source == inherited* ]]; then property_source=inherited; fi
     source_props[$dataset]+="bashclub:zsync-source.$property=$property_source:$value"$'\n'
-done <<< "$(remote "zfs get -H -o name,property,value,source -t filesystem,volume mountpoint,canmount,com.sun:auto-snapshot,refquota,$tag,bashclub:zsync-target 2>/dev/null")"
+done <<< "$(remote "zfs get -H -o name,property,value,source -t filesystem,volume mountpoint,canmount,com.sun:auto-snapshot,refquota,$tag,bashclub:zsync-target${sync_list:+,$sync_list} 2>/dev/null")"
 if [ $zfs_auto_snapshot_keep -gt 1 ] && [[ $zfs_auto_snapshot_engine == "internal" ]]; then
     cascade_count=0
     for n in "${syncvols[@]}"; do [[ -n ${source_replicas[$n]} ]] && cascade_count=$((cascade_count + 1)); done
@@ -1212,6 +1236,30 @@ function save_source_props() {
         zfs set "${changed[@]}" "$replica" \
             || log "[WARN] $name - saving the original properties of the source on $replica failed (bashclub:zsync-source.*)."
     fi
+}
+
+# sync_properties: the user properties of the source on the replica, the value of the source (also inherited there) or
+# none; only changes are written, values are not logged (they may be secrets)
+function sync_source_props() {
+    local name=$1 replica=$target/$1 property value property_source
+    if [ ${#sync_props[@]} -eq 0 ] || ! zfs list "$replica" > /dev/null 2>&1; then return 0; fi
+    while IFS=$'\t' read -r property value property_source; do
+        if [[ -z $property ]]; then continue; fi
+        if [[ -n ${sync_value["$name|$property"]+x} ]]; then
+            if [[ $value == "${sync_value["$name|$property"]}" && $property_source != "-" ]]; then continue; fi
+            if zfs set "$property=${sync_value["$name|$property"]}" "$replica"; then
+                log "[INFO] $name - $property of the source set on $replica (sync_properties)"
+            else
+                log "[WARN] $name - setting $property on $replica failed (sync_properties; without root the permission userprop is needed)."
+            fi
+        elif [[ $property_source == "local" || $property_source == "received" ]]; then
+            if zfs inherit "$property" "$replica"; then
+                log "[INFO] $name - $property removed on $replica, the source has none (sync_properties)"
+            else
+                log "[WARN] $name - removing $property on $replica failed (sync_properties)."
+            fi
+        fi
+    done <<< "$(zfs get -H -o property,value,source "$sync_list" "$replica" 2>/dev/null)"
 }
 
 function label_leftovers() {
@@ -1420,6 +1468,7 @@ function finish_dataset() {
         if [ $rc -ne 0 ]; then ds_state[$name]=failed; else ds_state[$name]=ok; fi
     fi
     if [ $rc -ne 0 ]; then ((datasets_failed++)); fi
+    if [ $rc -eq 0 ]; then sync_source_props "$name"; fi
     if [ $rc_before -ne 0 ]; then rc=$rc_before; fi
     save_source_props "$name"
     log "[INFO] Replication of $name finished."

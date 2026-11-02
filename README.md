@@ -208,6 +208,11 @@ broken_rename=1
 # existing configurations without this setting keep transfer, new configurations get rename
 key_change=rename
 
+# user properties copied from the source to the replica in every run (comma separated, e.g. com.example:key-id): the
+# value of the source, also inherited there, removed on the replica when the source has none; empty = none (the
+# replication carries user properties only with the initial replication)
+sync_properties=
+
 # check of the snapshots per dataset (services <checkzfs_prefix>:<source>#<dataset>): checkzfs (package
 # bashclub-checkzfs) or internal (built in, from the snapshots of the replicated datasets at the end of the run, same
 # services and thresholds checkzfs_*); empty = checkzfs if installed, otherwise internal; new configs get internal

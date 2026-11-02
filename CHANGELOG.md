@@ -12,6 +12,7 @@
 - license: GPL-3.0-or-later instead of MIT from 2.0.0 on (both packages, SPDX headers in all files, DEP-5 copyright file `/usr/share/doc/<package>/copyright` with the MIT notice of the versions up to 1.0.19); contributions with Developer Certificate of Origin (`Signed-off-by`, CONTRIBUTING.md) (#72)
 
 ### Added
+- Setting `sync_properties` (#167): user properties listed there (e.g. `com.example:key-id`) are copied from the source to the replica in every run, also when they are inherited on the source; removed on the replica when the source has none. Before, the replica kept the values of its initial replication. Only changes are written, values are not logged. Names without a colon, the tag, `bashclub:zsync*` and `com.sun:auto-snapshot` are left out with a warning.
 - Key change on the source (`zfs change-key`) no longer locks the backup, setting `key_change` (#168).
   - **Why:** the next raw transfer rewraps the replica, afterwards only the new key opens it, with all its snapshots. An attacker with root on the source could lock the backup without deleting anything. A clone on the backup server does not help, it shares the encryption root.
   - **Detection:** before each transfer of an encrypted dataset `keyformat`, `pbkdf2iters` and `pbkdf2salt` of source and replica are compared (one `zfs get` on the target per run, one per encrypted dataset on the source). A key file exchanged for another one (`keyformat` raw or hex) is not recognized.
