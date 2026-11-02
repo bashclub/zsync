@@ -63,6 +63,18 @@ Das Handbuch beschreibt 2.0 und alles danach. Eine Historie zu 1.0 gibt es nicht
 - Auf Tickets mit voller Adresse, nur wenn sie dem Leser weiterhelfen.
 
 ## Veröffentlichen
+Das Handbuch gehört zur Software: Eine Änderung, die Admins oder Anwender bemerken, ändert das Handbuch im selben PR.
+Nach dem Merge auf `main` veröffentlicht die CI (`.forgejo/workflows/handbuch.yml`) die Seiten, deren aufbereiteter
+Text sich gegenüber dem vorigen Stand geändert hat, auch den Link „Weiter“ eines Nachbarn und `_collection.md` als
+Beschreibung der Collection. Im PR zeigt sie nur, was sie veröffentlichen würde. Von Hand starten veröffentlicht
+alle Seiten. Die CI braucht das Secret `OUTLINE_API_KEY` (API-Schlüssel mit „Kann bearbeiten“ auf der Collection; die Startseite braucht „Verwalten“, sonst überspringt die CI sie mit Hinweis). Lokal,
+mit eigenem Schlüssel:
+```bash
+docs/handbuch/render.py publish --since HEAD~1 --dry-run
+```
+Neue Artikel legt die CI nicht an, verschiebt keine Seiten und bricht bei einem Artikel ohne `outline_id` ab: Neue
+Artikel zuerst wie unten anlegen und ihre Adresse eintragen.
+
 `render.py` bereitet eine Datei für Outline auf: Kopf entfernt, Links auf Outline-Adressen, am Ende ein Link
 „Weiter“ auf den nächsten Artikel in der Reihenfolge von `render.py list` (nach dem letzten Artikel eines Bereichs der
 nächste Bereich), der Hinweis auf die Quelle; davor der Ko-fi-Block (Tabelle mit einer zentrierten Spalte:

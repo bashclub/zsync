@@ -20,3 +20,5 @@ New files start with the license identifier:
   only with a setting (see the `CHANGELOG.md` entries).
 - Each change has a test: `tests/run.sh` (stubs, compare with `tests/compare.sh`), `tests/checkmk.sh`,
   `tests/remote.sh`, `tests/schedule.sh` and the ZFS integration tests in `tests/integration/`.
+- The handbook is part of the software: each change that a user or admin notices updates `docs/handbuch/` in the same
+  PR (conventions in `docs/handbuch/README.md`). After the merge the CI publishes the changed pages to Outline.

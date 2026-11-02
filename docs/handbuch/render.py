@@ -11,10 +11,20 @@
                                          order of list, if it is published), the source file and Ko-fi
   render.py blocks <file> [<n>]          the bash blocks of an article (numbered), or only block n, to run them
                                          word by word in a test container or on the test VM
+  render.py publish [--since <commit>] [--dry-run]
+                                         update the pages in Outline whose rendered text differs from the one at
+                                         <commit> (without: all pages), _collection.md as the description of the
+                                         collection; API key in OUTLINE_API_KEY, address in OUTLINE_URL (default
+                                         https://docs.bashclub.org). New articles are created by hand first (outline_id)
 """
+import json
 import os
 import re
+import subprocess
 import sys
+import tempfile
+import urllib.error
+import urllib.request
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 REPO_URL = "https://code.bashclub.org/bashclub/zsync/src/branch/main/docs/handbuch/"
@@ -134,6 +144,72 @@ def blocks(path):
     return re.findall(r"^```bash\n(.*?)^```", read(path)[1], re.S | re.M)
 
 
+NOTE = re.compile(r"\n---\n\n\*Quelle dieser Seite: .*\Z", re.S)
+
+
+def old_renders(since):
+    """the rendered text of every article at commit since, by path relative to ROOT (missing articles are absent)"""
+    result = {}
+    top = subprocess.run(["git", "-C", ROOT, "rev-parse", "--show-toplevel"], capture_output=True, text=True,
+                         check=True).stdout.strip()
+    prefix = os.path.relpath(ROOT, top)
+    with tempfile.TemporaryDirectory() as tmp:
+        archive = subprocess.run(["git", "-C", top, "archive", since, prefix], capture_output=True)
+        if archive.returncode:
+            sys.exit(f"git archive {since}: {archive.stderr.decode().strip()}")
+        subprocess.run(["tar", "-x", "-C", tmp], input=archive.stdout, check=True)
+        old_root = os.path.join(tmp, prefix)
+        for path in [p for p, _ in articles()] + [os.path.join(ROOT, "_collection.md")]:
+            old = os.path.join(old_root, rel(path))
+            if os.path.isfile(old):
+                out = subprocess.run([sys.executable, os.path.join(old_root, "render.py"), "render", old,
+                                      "--allow-missing"], capture_output=True, text=True)
+                if out.returncode == 0:
+                    result[rel(path)] = (read(old)[0].get("title"), out.stdout)
+    return result
+
+
+def api(method, data):
+    url = os.environ.get("OUTLINE_URL", "https://docs.bashclub.org").rstrip("/") + "/api/" + method
+    request = urllib.request.Request(url, data=json.dumps(data).encode(), method="POST", headers={
+        "Authorization": "Bearer " + os.environ["OUTLINE_API_KEY"], "Content-Type": "application/json",
+        "Accept": "application/json", "User-Agent": "bashclub-zsync-handbuch"})
+    with urllib.request.urlopen(request, timeout=60) as response:
+        return json.load(response)
+
+
+def publish(since, dry_run):
+    if not dry_run and not os.environ.get("OUTLINE_API_KEY"):
+        sys.exit("OUTLINE_API_KEY is not set")
+    old = old_renders(since) if since else {}
+    collection = os.path.join(ROOT, "_collection.md")
+    changed = 0
+    for path in [p for p, _ in articles()] + [collection]:
+        head = read(path)[0]
+        text = render(path, False)
+        if old.get(rel(path)) == (head["title"], text):
+            continue
+        if not head.get("outline_id"):
+            sys.exit(f"{rel(path)}: no outline_id, create the article in Outline first (README.md, Veröffentlichen)")
+        changed += 1
+        print(f"{'would update' if dry_run else 'update'}: {rel(path)} ({head['title']})")
+        if dry_run:
+            continue
+        if path == collection:
+            try:
+                api("collections.update", {"id": head["outline_id"], "name": head["title"],
+                                           "description": NOTE.sub("\n", text)})
+            except urllib.error.HTTPError as error:
+                # "Kann bearbeiten" reicht für die Seiten, die Startseite (Beschreibung) braucht "Verwalten"
+                if error.code != 403:
+                    raise
+                changed -= 1
+                print(f"skip: {rel(path)} (403: no manage right on the collection, update the start page by hand)")
+        else:
+            api("documents.update", {"id": head["outline_id"], "title": head["title"], "text": text})
+    print(f"{changed} page(s) {'to update' if dry_run else 'updated'}")
+
+
 def main():
     if len(sys.argv) >= 2 and sys.argv[1] == "list":
         collection = read(os.path.join(ROOT, "_collection.md"))[0].get("outline_id") or "-"
@@ -156,6 +232,10 @@ def main():
         else:
             for n, block in enumerate(found, 1):
                 print(f"### {n}\n{block}")
+    elif len(sys.argv) >= 2 and sys.argv[1] == "publish":
+        args = sys.argv[2:]
+        since = args[args.index("--since") + 1] if "--since" in args else None
+        publish(since, "--dry-run" in args)
     else:
         sys.exit(__doc__)
 
