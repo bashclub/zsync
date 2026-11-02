@@ -228,6 +228,14 @@ erneut.
 Ab 2.0. Der Benutzer des Laufs darf nicht in den Checkmk-Spool schreiben. Abhilfe auf dem betreffenden Host:
 `install -d -m 3775 -g bashclub-zsync /var/lib/check_mk_agent/spool`.
 
+**`[WARN] …/<maxage>_<prefix> cannot be replaced by … (e.g. a file of another user, …), the monitoring keeps the old state.`**
+Ab 2.0. Die Spool-Datei gehört einem anderen Benutzer; im Spool-Ordner (Sticky-Bit) darf der Benutzer des Laufs sie
+nicht ersetzen, Checkmk sieht bis dahin den alten Stand. Ursachen: ein Lauf als root mit demselben `checkzfs_prefix`,
+oder eine andere Config bzw. ein anderer Backupserver mit demselben Präfix (jede Replikation braucht ein eigenes).
+Bei einer Umstellung auf Betrieb ohne root: der Datei den neuen Besitzer geben, wie beim nächsten Eintrag. zsync lässt
+dabei keine temporäre Datei mehr im Spool zurück; ältere Versionen taten das (`.<maxage>_<prefix>.XXXXXX`), sie lassen
+sich löschen.
+
 **`mv: cannot move '…/.<maxage>_<prefix>.…' to '…': Operation not permitted`**
 Die Spool-Datei gehört einem anderen Benutzer, meist root nach der Umstellung auf Betrieb ohne root. Abhilfe: der Datei
 den Benutzer des Laufs geben, siehe [Betrieb ohne root](../02-installation/05-betrieb-ohne-root.md) Schritt 6.

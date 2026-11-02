@@ -419,6 +419,13 @@ transfer_resume=1"
   su - $user -c "bashclub-zsync -c $conf" >> "$log" 2>&1; rc=$?
   equal "Lauf als $user nach -s von root: Exit-Code" 0 "$rc"
   check "Lauf als $user ersetzt die Spool-Datei" not grep -q 'Operation not permitted' <(last_run_log)
+  # Spool-Datei eines anderen Benutzers (z. B. Lauf als root mit demselben Präfix): nicht ersetzbar, Warnung, kein Rest
+  echo "0 fremd - root" > "$spool"; chown root "$spool"
+  echo "===== $(date +%T) als $user, Spool-Datei gehört root" >> "$log"
+  su - $user -c "bashclub-zsync -c $conf" >> "$log" 2>&1
+  check "fremde Spool-Datei: Warnung" grep -q "87000_zsync cannot be replaced by $user" <(last_run_log)
+  equal "fremde Spool-Datei: kein Rest im Spool" "" "$(find "$(dirname "$spool")" -maxdepth 1 -name '.87000_zsync.*' -user $user -newer "$conf" 2>/dev/null)"
+  rm -f "$spool"
   set_conf "$conf" checkzfs_disabled 1; sed -i '/^run_as=/d' "$conf"
   # Sperre auf der Config: auch über Benutzer hinweg läuft nur ein Lauf
   su $user -c "flock $conf sleep 8" & sleep 1
