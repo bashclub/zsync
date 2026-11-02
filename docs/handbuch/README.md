@@ -67,7 +67,7 @@ Das Handbuch gehört zur Software: Eine Änderung, die Admins oder Anwender beme
 Nach dem Merge auf `main` veröffentlicht die CI (`.forgejo/workflows/handbuch.yml`) die Seiten, deren aufbereiteter
 Text sich gegenüber dem vorigen Stand geändert hat, auch den Link „Weiter“ eines Nachbarn und `_collection.md` als
 Beschreibung der Collection. Im PR zeigt sie nur, was sie veröffentlichen würde. Von Hand starten veröffentlicht
-alle Seiten. Die CI braucht das Secret `OUTLINE_API_KEY` (API-Schlüssel mit Schreibrecht auf die Collection). Lokal,
+alle Seiten. Die CI braucht das Secret `OUTLINE_API_KEY` (API-Schlüssel mit „Kann bearbeiten“ auf der Collection; die Startseite braucht „Verwalten“, sonst überspringt die CI sie mit Hinweis). Lokal,
 mit eigenem Schlüssel:
 ```bash
 docs/handbuch/render.py publish --since HEAD~1 --dry-run

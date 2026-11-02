@@ -23,6 +23,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import urllib.error
 import urllib.request
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -195,8 +196,15 @@ def publish(since, dry_run):
         if dry_run:
             continue
         if path == collection:
-            api("collections.update", {"id": head["outline_id"], "name": head["title"],
-                                       "description": NOTE.sub("\n", text)})
+            try:
+                api("collections.update", {"id": head["outline_id"], "name": head["title"],
+                                           "description": NOTE.sub("\n", text)})
+            except urllib.error.HTTPError as error:
+                # "Kann bearbeiten" reicht für die Seiten, die Startseite (Beschreibung) braucht "Verwalten"
+                if error.code != 403:
+                    raise
+                changed -= 1
+                print(f"skip: {rel(path)} (403: no manage right on the collection, update the start page by hand)")
         else:
             api("documents.update", {"id": head["outline_id"], "title": head["title"], "text": text})
     print(f"{changed} page(s) {'to update' if dry_run else 'updated'}")

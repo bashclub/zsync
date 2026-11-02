@@ -2,7 +2,8 @@ name: handbuch
 # Das Handbuch (docs/handbuch) gehört zur Software: jede Änderung auf main geht nach Outline (docs.bashclub.org).
 # Veröffentlicht werden nur Seiten, deren aufbereiteter Text sich gegenüber dem vorigen Stand ändert, auch der Link
 # „Weiter“ eines Nachbarn. Neue Artikel werden zuerst von Hand angelegt (docs/handbuch/README.md, Veröffentlichen).
-# Secret OUTLINE_API_KEY: API-Schlüssel eines Outline-Benutzers mit Schreibrecht auf die Collection bashclub-zsync.
+# Secret OUTLINE_API_KEY: API-Schlüssel (Bereich write) eines Outline-Benutzers mit „Kann bearbeiten“ auf der Collection
+# bashclub-zsync. Die Startseite (Beschreibung der Collection) braucht „Verwalten“, sonst wird sie übersprungen.
 on:
   push:
     branches: [main]
