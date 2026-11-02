@@ -1,0 +1,52 @@
+name: handbuch
+# Das Handbuch (docs/handbuch) gehört zur Software: jede Änderung auf main geht nach Outline (docs.bashclub.org).
+# Veröffentlicht werden nur Seiten, deren aufbereiteter Text sich gegenüber dem vorigen Stand ändert, auch der Link
+# „Weiter“ eines Nachbarn. Neue Artikel werden zuerst von Hand angelegt (docs/handbuch/README.md, Veröffentlichen).
+# Secret OUTLINE_API_KEY: API-Schlüssel eines Outline-Benutzers mit Schreibrecht auf die Collection bashclub-zsync.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/handbuch/**"
+      - "tests/handbuch.sh"
+  pull_request:
+    paths:
+      - "docs/handbuch/**"
+      - "tests/handbuch.sh"
+  # alle Seiten neu veröffentlichen (z. B. nach Änderungen direkt in Outline oder einem fehlgeschlagenen Lauf)
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: debian-13
+    steps:
+      - name: Werkzeuge
+        run: |
+          command -v git > /dev/null && command -v python3 > /dev/null || {
+            apt-get update -qq && apt-get install -y -qq ca-certificates git python3 > /dev/null; }
+      - name: Quellstand holen
+        run: |
+          rm -rf src && git init -q src && cd src
+          # volle Historie: der vorige Stand (github.event.before) wird zum Vergleich gebraucht
+          git fetch -q "${{ github.server_url }}/${{ github.repository }}" "${{ github.ref }}"
+          git checkout -q FETCH_HEAD
+          # im PR der Zielbranch, um den Stand vor dem PR zu kennen
+          [ -z "${{ github.base_ref }}" ] || git fetch -q "${{ github.server_url }}/${{ github.repository }}" "refs/heads/${{ github.base_ref }}:refs/base"
+          git log -1 --oneline
+      - name: Prüfen
+        run: cd src && tests/handbuch.sh
+      - name: Nach Outline
+        env:
+          OUTLINE_API_KEY: ${{ secrets.OUTLINE_API_KEY }}
+          BEFORE: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          cd src
+          if [ "$EVENT" = pull_request ]; then
+            # nur zeigen, was nach dem Merge veröffentlicht würde
+            docs/handbuch/render.py publish --since "$(git merge-base HEAD refs/base)" --dry-run
+          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            docs/handbuch/render.py publish --since "$BEFORE"
+          else
+            docs/handbuch/render.py publish
+          fi
