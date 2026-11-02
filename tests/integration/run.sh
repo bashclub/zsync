@@ -356,6 +356,9 @@ case_unprivileged() {
     chown $user: $home/.ssh/authorized_keys; chmod 600 $home/.ssh/authorized_keys
     su - $user -c 'ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new localhost true'
   fi
+  # Spool für die Gruppe beschreibbar, wie für Jobbenutzer vorgesehen (sonst hängt der Fall davon ab, ob ein früherer
+  # Fall oder Lauf es so angelegt hat; ein Lauf als root legt es nur für root an)
+  install -d -m 3775 -g bashclub-zsync /var/lib/check_mk_agent/spool
   zfs create -o acltype=posixacl -o xattr=sa -o refquota=1G "$ZCI_POOL_SRC/subvol-100-disk-0"
   zfs create -V 64M "$ZCI_POOL_SRC/vm-101-disk-0"
   echo "zsync-ci-passphrase" | zfs create -o encryption=on -o keyformat=passphrase "$ZCI_POOL_SRC/enc"
