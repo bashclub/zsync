@@ -40,6 +40,7 @@ oder `|` stehen in Anführungszeichen. Die Vorlage mit allen Parametern und Komm
 | `transfer_resume` | `0` | `1` | `1` | 2.0 |
 | `broken_rename` | `0` | `1` | `1` | 2.0 |
 | `key_change` | `transfer` | `rename` | `rename` | 2.0 |
+| `sync_properties` | leer | leer | leer | 2.0 |
 | `monitor_engine` | leer (`checkzfs`, wenn installiert, sonst `internal`) | `internal` | `internal` | 2.0 |
 | `checkzfs_disabled` | `0` | `0` | `0` | 1.0 |
 | `checkzfs_local` | `0` | `0` | `0` | 1.0 |
@@ -193,6 +194,17 @@ noch der neue Schlüssel seine Snapshots, auch die alten. Siehe [Verschlüsselte
 
 Erkannt wird der Wechsel an `keyformat`, `pbkdf2iters` und `pbkdf2salt` von Quelle und Replikat. Den Tausch einer
 Schlüsseldatei gegen eine andere (`keyformat=raw` oder `hex`) sieht zsync nicht. Ein unbekannter Wert gilt als `block`.
+
+### `sync_properties`
+Ab 2.0. Benutzer-Eigenschaften (Name mit Doppelpunkt), die jeder Lauf von der Quelle auf das Replikat überträgt, durch
+Komma getrennt, z. B. `sync_properties=com.example:key-id,com.example:owner`. Ohne dieses Setting kommen
+Benutzer-Eigenschaften nur mit der Erstreplikation an; spätere Änderungen auf der Quelle erreicht das Replikat nicht.
+- Das Replikat bekommt den Wert der Quelle, auch wenn er dort geerbt ist (z. B. von einem nicht replizierten
+  Elternteil). Hat die Quelle keinen Wert, entfernt zsync ihn am Replikat.
+- zsync schreibt nur Änderungen und nennt im Log nur den Namen, nie den Wert.
+- Nicht erlaubt sind Namen ohne Doppelpunkt, das Tag der Auswahl, `bashclub:zsync*` und `com.sun:auto-snapshot`;
+  zsync lässt sie mit Warnung weg.
+- Ohne root braucht der Benutzer auf dem Backupserver das Recht `userprop` am Target (`bashclub-zsync-setup` vergibt es).
 
 ## Monitoring
 
