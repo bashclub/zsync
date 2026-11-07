@@ -865,7 +865,7 @@ zfs_auto_snapshot_label_match=legacy"
 # und abgewiesen (zfs destroy -r löschte die Kinder mit), ignore lässt nur das Replikat selbst aus, die Kinder laufen
 # weiter; ein verwaistes Replikat (nicht mehr ausgewählt) mit ausgewählten Kindern ebenso ohne delete
 case_maintenance_children() {
-  local m=bashclub-zsync-maintenance T=$ZCI_POOL_DST/maintenance_children/$ZCI_POOL_SRC list id out c orphan
+  local m=bashclub-zsync-maintenance T=$ZCI_POOL_DST/maintenance_children/$ZCI_POOL_SRC list cid out c orphan
   for c in rpool rpool/ROOT rpool/data vm vm/disk; do zfs create "$ZCI_POOL_SRC/$c"; snap "$ZCI_POOL_SRC/$c" 01; done
   zfs set bashclub:zsync=all "$ZCI_POOL_SRC/rpool"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/vm"
   config maintenance_children
@@ -878,14 +878,14 @@ case_maintenance_children() {
   equal "Kind läuft weiter" ok "$(state_of "$ZCI_POOL_SRC/rpool/data")"
   equal "nicht mehr ausgewählt: verwaist" orphan_unselected "$(state_of "$ZCI_POOL_SRC/vm")"
   list=$(ZSYNC_CONF_DIR=$CONF_DIR $m --list --tsv)
-  id=$(awk -F'\t' -v r="$T/rpool" '$3 == "broken" && $4 == r { print $1 }' <<< "$list")
+  cid=$(awk -F'\t' -v r="$T/rpool" '$3 == "broken" && $4 == r { print $1 }' <<< "$list")
   orphan=$(awk -F'\t' -v r="$T/vm" '$3 == "orphan" && $4 == r { print $1 }' <<< "$list")
-  check "Fall broken" test -n "$id"
+  check "Fall broken" test -n "$cid"
   check "Fall orphan" test -n "$orphan"
   out=$(ZSYNC_CONF_DIR=$CONF_DIR $m --list)
-  check "Übersicht: broken ohne delete ($out)" grep -qE "^$id +broken +$T/rpool +rename,ignore,later " <<< "$out"
+  check "Übersicht: broken ohne delete ($out)" grep -qE "^$cid +broken +$T/rpool +rename,ignore,later " <<< "$out"
   check "Übersicht: orphan ohne delete" grep -qE "^$orphan +orphan +$T/vm +keep,later " <<< "$out"
-  out=$(ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$id" delete 2>&1); rc=$?; echo "$out" >> "$log"
+  out=$(ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$cid" delete 2>&1); rc=$?; echo "$out" >> "$log"
   equal "delete abgewiesen" 1 "$rc"
   check "delete: Kinder genannt" grep -q "$T/rpool/data" <<< "$out"
   check "delete: Kinder bleiben" exists "$T/rpool/data"
@@ -897,8 +897,8 @@ case_maintenance_children() {
   out=$(printf '3\n4\n\n' | ZSYNC_CONF_DIR=$CONF_DIR $m 2>&1); echo "$out" >> "$log"
   check "einzeln: Hinweis auf die Kinder" grep -q "replicas below are not part of this case" <<< "$out"
   check "einzeln: delete nicht angeboten" not grep -q ") delete" <<< "$out"
-  check "ignore: Probelauf" grep -q "zfs set bashclub:zsync-ignore=1 $T/rpool" <<< "$(ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$id" ignore --dry-run)"
-  check "ignore" env ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$id" ignore
+  check "ignore: Probelauf" grep -q "zfs set bashclub:zsync-ignore=1 $T/rpool" <<< "$(ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$cid" ignore --dry-run)"
+  check "ignore" env ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$cid" ignore
   equal "ignore: Markierung am Replikat" 1 "$(zfs get -H -o value -s local bashclub:zsync-ignore "$T/rpool")"
   equal "ignore: Fall erledigt" "" "$(zfs get -H -o value -s local bashclub:zsync-case "$T/rpool")"
   for c in rpool rpool/ROOT rpool/data; do snap "$ZCI_POOL_SRC/$c" 02; done
