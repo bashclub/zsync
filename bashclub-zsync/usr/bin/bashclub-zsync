@@ -598,6 +598,12 @@ function run_checkzfs() {
     fi
     debug "Command:\n$checkzfs $c_key $c_value --output checkmk --threshold $checkzfs_max_age --maxsnapshots $checkzfs_max_snapshot_count --prefix $checkzfs_prefix --replicafilter "^${target}" --filter \"$checkzfs_filter\""
     checkzfs_lines=$($checkzfs $c_key $c_value --output checkmk --threshold $checkzfs_max_age --maxsnapshots $checkzfs_max_snapshot_count --prefix $checkzfs_prefix --replicafilter "^${target}" --filter "$checkzfs_filter" | grep -v '^<<<')
+    # ignored replicas (bashclub:zsync-ignore=1): no service, checkzfs names it <prefix>:[<source>#]<dataset>
+    if [ ${#ignored_vols[@]} -gt 0 ]; then
+        checkzfs_lines=$(awk 'NR == FNR { ign[$0] = 1; next }
+            { s = $2; sub(/^[^#]*#/, "", s); if (s == $2) sub(/^[^:]*:/, "", s); if (!(s in ign)) print }' \
+            <(printf '%s\n' "${ignored_vols[@]}") - <<< "$checkzfs_lines")
+    fi
     if [[ -n $1 ]]; then printf '%s\n' "$checkzfs_lines" > "$1"; fi
     if [[ -n $checkzfs_lines ]] && [[ -d $status_lib_dir ]] && [[ -O $status_lib_dir ]]; then
         printf '%s\n' "$checkzfs_lines" > "$checkzfs_cache.tmp" && mv -f "$checkzfs_cache.tmp" "$checkzfs_cache"
@@ -1015,6 +1021,27 @@ for zvol in $tagged; do
     fi
 done
 if [[ -n $checkzfs_filter ]]; then checkzfs_filter=${checkzfs_filter::-1}; fi
+# replicas the admin ignores (bashclub:zsync-ignore=1, bashclub-zsync-maintenance, e.g. a container without snapshots
+# whose children are replicated): only the marking set on the replica itself counts, the dataset is not replicated,
+# its children are; the monitoring lists it
+ignored_vols=()
+declare -A ignore_mark=()
+while IFS=$'\t' read -r n v; do
+    if [[ -n $n ]] && [[ $v == "1" ]]; then ignore_mark[${n#$target/}]=1; fi
+done <<< "$(zfs get -H -o name,value -s local -r -t filesystem,volume bashclub:zsync-ignore $target 2>/dev/null)"
+if [ ${#ignore_mark[@]} -gt 0 ]; then
+    replicate_vols=()
+    for n in "${syncvols[@]}"; do
+        if [[ -n ${ignore_mark[$n]} ]]; then
+            ignored_vols+=("$n")
+            include_list=${include_list/"\t${n}\n"/}
+            exclude_list="${exclude_list}\t${n} (ignored: bashclub:zsync-ignore=1 on $target/$n)\n"
+        else
+            replicate_vols+=("$n")
+        fi
+    done
+    syncvols=("${replicate_vols[@]}")
+fi
 # warning only: the run itself is fine, the monitoring shows the empty selection (last run with 0 datasets)
 if [ ${#syncvols[@]} -eq 0 ]; then
     log "[WARN] no dataset on $source is selected for the replication, nothing is replicated. Select datasets on the source with the property $tag: all (the dataset and its children) or subvols (only its children)."
@@ -1276,7 +1303,8 @@ function label_leftovers() {
 # state of each dataset for the monitoring (written to <config>.datasets):
 # ok, branched, cleanup_blocked, failed, at_risk, diverged, broken, empty, no_snapshots, orphan_missing, orphan_unselected,
 # orphan_kept, branch (old chain after a rollback, a broken chain or a key change on the source), branch_kept, key_changed (not
-# transferred, key_change), key_transferred (transferred with a changed key, the replica opens only with the new key)
+# transferred, key_change), key_transferred (transferred with a changed key, the replica opens only with the new key),
+# ignored (bashclub:zsync-ignore=1 on the replica, not replicated)
 declare -A ds_state ds_detail ds_leftovers renamed_broken space_note
 
 # fix for a target without a usable snapshot: keep the old replica under a new name, the next run replicates again
@@ -1824,7 +1852,7 @@ done
 if [ ${#fstypes[@]} -gt 0 ]; then
     status orphans
     declare -A selected=() kept=() used=() branches=()
-    for n in "${syncvols[@]}"; do selected[$n]=1; done
+    for n in "${syncvols[@]}" "${ignored_vols[@]}"; do selected[$n]=1; done
     while IFS=$'\t' read -r n v; do
         if [[ -n $n ]] && [[ $v == "keep" ]]; then kept[$n]=1; fi
     done <<< "$(zfs get -H -o name,value -r -t filesystem,volume bashclub:zsync-orphan $target 2>/dev/null)"
@@ -1877,6 +1905,7 @@ if [[ -n $status_file ]]; then
     for n in "${excluded_vols[@]}"; do
         if [[ -z ${ds_state[$n]} ]]; then ds_state[$n]=excluded; fi
     done
+    for n in "${ignored_vols[@]}"; do ds_state[$n]=ignored; done
     for n in "${!ds_state[@]}"; do
         printf '%s\t%s\t%s\t%s\n' "$n" "${ds_state[$n]}" "${since["$n|${ds_state[$n]}"]:-$run_start}" "${ds_detail[$n]}"
     done | sort > "$status_lib.datasets.tmp" && mv -f "$status_lib.datasets.tmp" "$status_lib.datasets"
@@ -1890,7 +1919,7 @@ if [[ -n $status_file ]]; then
     for n in "${!ds_state[@]}"; do
         case ${ds_state[$n]} in
             ok|branched|cleanup_blocked|key_transferred) printf '%s\t%s\n' "$n" "$replicated_at" ;;
-            excluded|orphan_*|branch|branch_kept) ;;
+            excluded|ignored|orphan_*|branch|branch_kept) ;;
             *) if [[ -n ${replicated[$n]} ]]; then printf '%s\t%s\n' "$n" "${replicated[$n]}"; fi ;;
         esac
     done | sort > "$status_lib.replicated.tmp" && mv -f "$status_lib.replicated.tmp" "$status_lib.replicated"

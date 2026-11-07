@@ -52,6 +52,11 @@ Ab 2.0 mit `broken_rename=1` (Default neuer Configs) wartet zsync nicht: Es beh�
 überträgt neu, und der Service meldet die alte Kette (WARN) zur Entscheidung. CRIT bleibt es nur, wenn der Platz für
 die Neuübertragung nicht reicht; der Service nennt das.
 
+Ist das Replikat nur ein Container ohne eigene Snapshots und die Datasets darunter sind gesunde Replikate (z. B.
+`rpool` eines PVE-Hosts), ist `ignore` die passende Entscheidung: zsync repliziert dann nur den Container nicht mehr,
+der Service nennt ihn als Hinweis (`ignored on the backup server`). `delete` bietet das Werkzeug hier nicht an, es
+löschte die Kinder mit.
+
 **Schlüssel auf der Quelle gewechselt, nicht übertragen (CRIT)**
 Ab 2.0, `key_change=block` (oder `rename` ohne Platz). Auf der Quelle wurde der Schlüssel eines verschlüsselten Datasets
 gewechselt (`zfs change-key`). zsync überträgt es nicht, weil das Replikat danach nur noch mit dem neuen Schlüssel

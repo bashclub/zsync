@@ -9,7 +9,9 @@
 #   orphan     replica without source or no longer selected (#21)  keep (bashclub:zsync-orphan=keep) / delete / later
 #   broken     no common snapshot with the source or replica without snapshots (#21)
 #                                                    rename (the next run replicates again, the old replica stays)
-#                                                    / delete (the next run replicates again) / later
+#                                                    / ignore (bashclub:zsync-ignore=1: the dataset itself is not
+#                                                    replicated anymore, its children are) / delete (the next run
+#                                                    replicates again) / later
 #   leftovers  snapshots of the label in another name scheme on the target (#3)            delete / later
 #   branch     old chain after a rollback, a broken chain or a key change on the source (#65), the replication continues on the new chain
 #                                                    keep (bashclub:zsync-orphan=keep) / delete / later
@@ -17,6 +19,8 @@
 #                                                    transfer (the change was intended: the replica opens only with the
 #                                                    new key afterwards, also its old snapshots) / rename (the old
 #                                                    replica stays with the old key, the next run replicates again) / later
+# delete (zfs destroy -r) is not offered for an orphan or broken replica with replicas below it that are not part of
+# the case (e.g. a container without snapshots whose children are replicated as usual): they would be deleted with it
 
 PATH="/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin"
 prog=$(basename "$0")
@@ -94,13 +98,27 @@ function top_cases() {
         }' <<< "$1"
 }
 
+# options of a type; with replicas below that are not part of the case (2nd argument, see foreign_below) without delete
 function options_of() {
+    local options
     case $1 in
-        orphan|branch) echo "keep delete later" ;;
-        broken) echo "rename delete later" ;;
-        key) echo "transfer rename later" ;;
-        leftovers) echo "delete later" ;;
+        orphan|branch) options="keep delete later" ;;
+        broken) options="rename ignore delete later" ;;
+        key) options="transfer rename later" ;;
+        leftovers) options="delete later" ;;
     esac
+    [[ -n $2 ]] && options=${options/ delete/}
+    echo "$options"
+}
+
+# replicas below an orphan or broken replica that are not part of the case: datasets with snapshots that are not a case
+# of the same type (those go with it); 2nd argument: all cases (cases); snapshots are read only of this replica
+function foreign_below() {
+    local type=$1 replica=$2 all=$3
+    [[ $type == orphan || $type == broken ]] || return 0
+    zfs list -H -o name -t snapshot -r "$replica" 2> /dev/null | cut -d'@' -f1 | uniq \
+        | awk -F'\t' -v r="$replica" -v t="$type" 'NR == FNR { if ($3 == t) c[$4] = 1; next }
+            $0 != r && !($0 in c) { print }' <(printf '%s\n' "$all") -
 }
 
 # snapshots of a replica that contain the label of its configuration but are not in the name scheme of its engine
@@ -130,6 +148,10 @@ function commands_of() {
             printf 'zfs\tinherit\t-r\tbashclub:zsync-case\t%s\n' "$new"
             printf 'zfs\tset\tbashclub:zsync-branch=%s;%srenamed in bashclub-zsync-maintenance\t%s\n' "$(date +%Y-%m-%d-%H%M)" \
                 "$([[ $type == key ]] && echo "key changed on the source, ")" "$new" ;;
+        broken:ignore)
+            # the next runs skip the dataset itself (only the marking set on it counts, not inherited by its children)
+            printf 'zfs\tset\tbashclub:zsync-ignore=1\t%s\n' "$replica"
+            printf 'zfs\tinherit\tbashclub:zsync-case\t%s\n' "$replica" ;;
         key:transfer)
             # the next run transfers it (also the datasets below, the marking is inherited) and removes the marking
             printf 'zfs\tset\tbashclub:zsync-key-accept=1\t%s\n' "$replica"
@@ -145,11 +167,20 @@ function commands_of() {
 function size() { numfmt --to=iec-i --suffix=B "${1:-0}" 2> /dev/null || echo "$1 bytes"; }
 
 function show_case() {
-    local id=$1 conf=$2 type=$3 replica=$4 since=$5 detail=$6 used=$7 under=$8
+    local id=$1 conf=$2 type=$3 replica=$4 since=$5 detail=$6 used=$7 under=$8 foreign=$9
     echo "case $id: $type $replica ($(basename "$conf" .conf))${under:+$([ "$under" -gt 0 ] && echo " +$under datasets below")}"
     [[ -n $detail ]] && echo "    $detail"
     [[ -n $since ]] && echo "    since $(date -d "@$since" '+%Y-%m-%d %H:%M')"
     [[ -n $used ]] && echo "    used $(size "$used")"
+    foreign_note "$foreign"
+}
+
+# replicas below a case that are not part of it: delete would destroy them as well, it is not offered
+function foreign_note() {
+    [[ -n $1 ]] || return 0
+    echo "    $(grep -c . <<< "$1") replicas below are not part of this case, delete is not possible (it would destroy them):"
+    head -5 <<< "$1" | sed 's/^/        /'
+    [ "$(grep -c . <<< "$1")" -le 5 ] || echo "        ..."
 }
 
 # preview of the commands; for destroy also what zfs would delete
@@ -215,22 +246,29 @@ function cmd_list() {
     if [[ $1 == --tsv ]]; then [[ -n $all ]] && echo "$all"; return 0; fi
     if [[ -z $all ]]; then echo "no open cases"; unmarked_hint; return 0; fi
     top=$(top_cases "$all")
-    printf '%-9s %-10s %-50s %-20s %-10s %s\n' CASE TYPE DATASET OPTIONS USED CONFIG
+    printf '%-9s %-10s %-50s %-27s %-10s %s\n' CASE TYPE DATASET OPTIONS USED CONFIG
     while IFS=$'\t' read -r id conf type replica since detail used under; do
-        printf '%-9s %-10s %-50s %-20s %-10s %s\n' "$id" "$type" "$replica$([ "$under" -gt 0 ] && echo " +$under")" \
-            "$(options_of "$type" | tr ' ' ',')" "$(size "$used")" "$(basename "$conf" .conf)"
+        printf '%-9s %-10s %-50s %-27s %-10s %s\n' "$id" "$type" "$replica$([ "$under" -gt 0 ] && echo " +$under")" \
+            "$(options_of "$type" "$(foreign_below "$type" "$replica" "$all")" | tr ' ' ',')" "$(size "$used")" \
+            "$(basename "$conf" .conf)"
     done <<< "$top"
 }
 
 function cmd_decide() {
-    local case_id=$1 option=$2 dry=$3 line id conf type replica since detail used cmds
+    local case_id=$1 option=$2 dry=$3 all line id conf type replica since detail used cmds foreign
     [[ -n $case_id && -n $option ]] || usage
-    line=$(cases | awk -F'\t' -v c="$case_id" '$1 == c')
+    all=$(cases)
+    line=$(awk -F'\t' -v c="$case_id" '$1 == c' <<< "$all")
     [[ -n $line ]] || die "no open case $case_id (see $prog --list)"
     IFS=$'\t' read -r id conf type replica since detail used <<< "$line"
-    [[ " $(options_of "$type") " == *" $option "* ]] || die "option $option is not possible for $type (options: $(options_of "$type"))"
+    foreign=$(foreign_below "$type" "$replica" "$all")
+    if [[ $option == delete && -n $foreign ]]; then
+        show_case "$id" "$conf" "$type" "$replica" "$since" "$detail" "$used" "" "$foreign" >&2
+        die "case $id: delete is not possible, replicas below are not part of the case (options: $(options_of "$type" "$foreign"))"
+    fi
+    [[ " $(options_of "$type") " == *" $option "* ]] || die "option $option is not possible for $type (options: $(options_of "$type" "$foreign"))"
     cmds=$(commands_of "$conf" "$type" "$replica" "$option") || die "option $option is not possible for $type"
-    show_case "$id" "$conf" "$type" "$replica" "$since" "$detail" "$used"
+    show_case "$id" "$conf" "$type" "$replica" "$since" "$detail" "$used" "" "$foreign"
     echo "  $option:"; [[ -n $cmds ]] && preview <<< "$cmds" || echo "    nothing to do"
     [[ $dry == 1 ]] && return 0
     [[ $option == later ]] && return 0
@@ -238,13 +276,33 @@ function cmd_decide() {
 }
 
 # one decision for all cases of a type: preview of the whole group (commands, what destroy deletes, space), then
-# each case under the lock of its configuration; a failed case does not stop the group, it stays open
+# each case under the lock of its configuration; a failed case does not stop the group, it stays open; delete leaves
+# out the cases with replicas below that are not part of them (they stay open)
 function decide_group() {
-    local type=$1 option=$2 dry=$3 ask=$4 group id conf type_ replica since detail used under cmds total=0 n=0 failed=0 answer
-    group=$(awk -F'\t' -v t="$type" '$3 == t' <<< "$(top_cases "$(cases)")")
+    local type=$1 option=$2 dry=$3 ask=$4 all group id conf type_ replica since detail used under cmds total=0 n=0 failed=0 answer
+    local blocked=0 foreign keep=
+    all=$(cases)
+    group=$(awk -F'\t' -v t="$type" '$3 == t' <<< "$(top_cases "$all")")
     [[ -n $group ]] || { echo "no open cases of type $type"; return 0; }
     [[ " $(options_of "$type") " == *" $option "* ]] || die "option $option is not possible for $type (options: $(options_of "$type"))"
     [[ $option == later ]] && { echo "$type: later, nothing changed"; return 0; }
+    if [[ $option == delete ]]; then
+        while IFS=$'\t' read -r id conf type_ replica since detail used under; do
+            foreign=$(foreign_below "$type" "$replica" "$all")
+            if [[ -n $foreign ]]; then
+                echo "  case $id $replica ($(basename "$conf" .conf)): not deleted, stays open"
+                foreign_note "$foreign"
+                ((blocked++))
+            else
+                keep+=$id$'\t'$conf$'\t'$type_$'\t'$replica$'\t'$since$'\t'$detail$'\t'$used$'\t'$under$'\n'
+            fi
+        done <<< "$group"
+        if [ $blocked -gt 0 ]; then
+            echo "  decide these cases one by one ($(options_of "$type" x | tr ' ' '/'))"
+            group=${keep%$'\n'}
+            [[ -n $group ]] || return 1
+        fi
+    fi
     echo "$option for all $(grep -c . <<< "$group") cases of type $type:"
     while IFS=$'\t' read -r id conf type_ replica since detail used under; do
         cmds=$(commands_of "$conf" "$type" "$replica" "$option") || die "option $option is not possible for $type"
@@ -264,10 +322,11 @@ function decide_group() {
         ((n++))
     done <<< "$group"
     [ $failed -eq 0 ] || { echo "$failed of $n cases failed, they stay open"; return 1; }
+    [ $blocked -eq 0 ]
 }
 
 function cmd_interactive() {
-    local all top count n=0 id conf type replica since detail used under options option answer cmds i t choice
+    local all top count n=0 id conf type replica since detail used under options option answer cmds i t choice foreign
     all=$(cases)
     if [[ -z $all ]]; then echo "no open cases"; unmarked_hint; return 0; fi
     top=$(top_cases "$all")
@@ -309,8 +368,9 @@ function cmd_interactive() {
     while IFS=$'\t' read -r id conf type replica since detail used under <&3; do
         ((n++))
         echo; echo "[$n/$count]"
-        show_case "$id" "$conf" "$type" "$replica" "$since" "$detail" "$used" "$under"
-        read -ra options <<< "$(options_of "$type")"
+        foreign=$(foreign_below "$type" "$replica" "$all")
+        show_case "$id" "$conf" "$type" "$replica" "$since" "$detail" "$used" "$under" "$foreign"
+        read -ra options <<< "$(options_of "$type" "$foreign")"
         for i in "${!options[@]}"; do echo "    $((i + 1))) ${options[$i]}"; done
         read -r -p "choice [${#options[@]}]: " answer
         answer=${answer:-${#options[@]}}
