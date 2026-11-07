@@ -112,10 +112,13 @@ bashclub-zsync-maintenance --decide-type <type> <option> [--dry-run]
 | Typ | Fall | Optionen |
 |---|---|---|
 | `orphan` | Replikat ohne Dataset auf der Quelle oder nicht mehr ausgewählt | `keep` (`bashclub:zsync-orphan=keep`), `delete`, `later` |
-| `broken` | kein gemeinsamer Snapshot mit der Quelle, oder Replikat ohne Snapshots | `rename` (das alte bleibt, der nächste Lauf überträgt neu), `delete`, `later` |
+| `broken` | kein gemeinsamer Snapshot mit der Quelle, oder Replikat ohne Snapshots | `rename` (das alte bleibt, der nächste Lauf überträgt neu), `ignore` (`bashclub:zsync-ignore=1`: das Replikat selbst nicht mehr replizieren, die Kinder weiter), `delete`, `later` |
 | `leftovers` | Snapshots des Labels in fremdem Namensschema auf dem Replikat | `delete`, `later` |
 | `branch` | alte Kette nach einem Rollback oder einer gerissenen Kette (`<replikat>.zsync-branch-<datum>`) | `keep`, `delete`, `later` |
 | `key` | Schlüssel auf der Quelle gewechselt, nicht übertragen (`key_change`) | `transfer` (der nächste Lauf schlüsselt das Replikat um), `rename` (das alte bleibt mit dem alten Schlüssel, der nächste Lauf überträgt neu), `later` |
+
+`delete` (`zfs destroy -r`) gibt es nicht für ein `orphan`- oder `broken`-Replikat, unter dem Replikate liegen, die
+nicht zum Fall gehören; das Werkzeug nennt sie.
 
 Jede Aktion läuft unter der Sperre ihrer Config, nie während eines Laufs, und steht mit Zeit und Benutzer in
 `/var/log/bashclub-zsync/maintenance.log` und im Syslog. Fälle aus Läufen vor 2.0 erscheinen nach dem nächsten Lauf

@@ -861,6 +861,57 @@ zfs_auto_snapshot_label_match=legacy"
   equal "behaltenes Replikat: Markierung vom Lauf entfernt" "" "$(zfs get -H -o value -s local bashclub:zsync-case "$T/gone")"
   equal "Altlast: nach dem Lauf ohne Markierung" "" "$(zfs get -H -o value -s local bashclub:zsync-case "$T/data")"
 }
+# Replikat ohne Snapshots mit gesunden Replikaten darunter (wie rpool auf einem PVE-Host): delete wird nicht angeboten
+# und abgewiesen (zfs destroy -r löschte die Kinder mit), ignore lässt nur das Replikat selbst aus, die Kinder laufen
+# weiter; ein verwaistes Replikat (nicht mehr ausgewählt) mit ausgewählten Kindern ebenso ohne delete
+case_maintenance_children() {
+  local m=bashclub-zsync-maintenance T=$ZCI_POOL_DST/maintenance_children/$ZCI_POOL_SRC list cid out c orphan
+  for c in rpool rpool/ROOT rpool/data vm vm/disk; do zfs create "$ZCI_POOL_SRC/$c"; snap "$ZCI_POOL_SRC/$c" 01; done
+  zfs set bashclub:zsync=all "$ZCI_POOL_SRC/rpool"; zfs set bashclub:zsync=all "$ZCI_POOL_SRC/vm"
+  config maintenance_children
+  zsync
+  equal "Erstreplikation" 0 "$rc"
+  zfs destroy "$T/rpool@zfs-auto-snap_daily-01"
+  zfs set bashclub:zsync=subvols "$ZCI_POOL_SRC/vm"
+  zsync
+  equal "Replikat ohne Snapshot: broken" empty "$(state_of "$ZCI_POOL_SRC/rpool")"
+  equal "Kind läuft weiter" ok "$(state_of "$ZCI_POOL_SRC/rpool/data")"
+  equal "nicht mehr ausgewählt: verwaist" orphan_unselected "$(state_of "$ZCI_POOL_SRC/vm")"
+  list=$(ZSYNC_CONF_DIR=$CONF_DIR $m --list --tsv)
+  cid=$(awk -F'\t' -v r="$T/rpool" '$3 == "broken" && $4 == r { print $1 }' <<< "$list")
+  orphan=$(awk -F'\t' -v r="$T/vm" '$3 == "orphan" && $4 == r { print $1 }' <<< "$list")
+  check "Fall broken" test -n "$cid"
+  check "Fall orphan" test -n "$orphan"
+  out=$(ZSYNC_CONF_DIR=$CONF_DIR $m --list)
+  check "Übersicht: broken ohne delete ($out)" grep -qE "^$cid +broken +$T/rpool +rename,ignore,later " <<< "$out"
+  check "Übersicht: orphan ohne delete" grep -qE "^$orphan +orphan +$T/vm +keep,later " <<< "$out"
+  out=$(ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$cid" delete 2>&1); rc=$?; echo "$out" >> "$log"
+  equal "delete abgewiesen" 1 "$rc"
+  check "delete: Kinder genannt" grep -q "$T/rpool/data" <<< "$out"
+  check "delete: Kinder bleiben" exists "$T/rpool/data"
+  out=$(ZSYNC_CONF_DIR=$CONF_DIR $m --decide-type orphan delete 2>&1); rc=$?; echo "$out" >> "$log"
+  equal "je Typ: delete lässt den Fall aus" 1 "$rc"
+  check "je Typ: Hinweis" grep -q "not deleted, stays open" <<< "$out"
+  check "je Typ: Kind bleibt" exists "$T/vm/disk"
+  check "je Typ: Fall bleibt offen" grep -q "^$orphan" <<< "$(ZSYNC_CONF_DIR=$CONF_DIR $m --list --tsv)"
+  out=$(printf '3\n4\n\n' | ZSYNC_CONF_DIR=$CONF_DIR $m 2>&1); echo "$out" >> "$log"
+  check "einzeln: Hinweis auf die Kinder" grep -q "replicas below are not part of this case" <<< "$out"
+  check "einzeln: delete nicht angeboten" not grep -q ") delete" <<< "$out"
+  check "ignore: Probelauf" grep -q "zfs set bashclub:zsync-ignore=1 $T/rpool" <<< "$(ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$cid" ignore --dry-run)"
+  check "ignore" env ZSYNC_CONF_DIR=$CONF_DIR $m --decide "$cid" ignore
+  equal "ignore: Markierung am Replikat" 1 "$(zfs get -H -o value -s local bashclub:zsync-ignore "$T/rpool")"
+  equal "ignore: Fall erledigt" "" "$(zfs get -H -o value -s local bashclub:zsync-case "$T/rpool")"
+  for c in rpool rpool/ROOT rpool/data; do snap "$ZCI_POOL_SRC/$c" 02; done
+  zsync
+  equal "ignore: Lauf ohne Fehler" 0 "$rc"
+  equal "ignore: Zustand" ignored "$(state_of "$ZCI_POOL_SRC/rpool")"
+  equal "ignore: Kind repliziert" ok "$(state_of "$ZCI_POOL_SRC/rpool/data")"
+  check "ignore: neuer Snapshot am Kind" exists "$T/rpool/data@zfs-auto-snap_daily-02"
+  check "ignore: das Replikat selbst nicht" not exists "$T/rpool@zfs-auto-snap_daily-02"
+  check "ignore: im Log" grep -q "ignored: bashclub:zsync-ignore=1 on $T/rpool" <<< "$(last_run_log)"
+  equal "ignore: kein neuer Fall" "" "$(zfs get -H -o value -s local bashclub:zsync-case "$T/rpool")"
+  check "ignore: kein Fall in der Übersicht" not grep -q "$T/rpool" <<< "$(ZSYNC_CONF_DIR=$CONF_DIR $m --list --tsv)"
+}
 # Anzahl am Backupserver je Label (snapshot_filter="daily=3"): unabhängig davon, was die Quelle löscht; daily ohne Zahl
 # folgt der Quelle wie bisher
 case_keep_count() {
@@ -1785,7 +1836,7 @@ case_sync_properties() {
   check "unverändert: nichts gesetzt" not grep -q "(sync_properties)" <<< "$(last_run_log)"
 }
 
-all_cases=(replication engine_internal engine_switch rotation nothing_selected refquota rollback broken_chain orphans local_mode monitor_internal bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_removable restore_server hooks result_busy cascade cascade_local cascade_upgrade broken_rename key_change sync_properties)
+all_cases=(replication engine_internal engine_switch rotation nothing_selected refquota rollback broken_chain orphans local_mode monitor_internal bandwidth_lock bookmark hold deleted_during resume unprivileged timer same_second restricted job_user setup disk cleanup_blocked source_unreachable zas_missing maintenance keep_count permissions checkmk restore_access restore_dataset restore_reattach restore_pull_push restore_resume restore_mount restore_removable restore_server hooks result_busy cascade cascade_local cascade_upgrade broken_rename key_change sync_properties maintenance_children)
 cases=("${@:-${all_cases[@]}}")
 safety
 # ein Lauf zur Zeit (CI und remote.sh teilen sich Platten, Pools und die installierten Pakete): ein zweiter wartet;

@@ -56,7 +56,8 @@ gemeinsamen Snapshot ließ checkzfs aus, die eingebaute Prüfung meldet sie mit 
 :::
 
 Datasets, die unter einem ausgewählten Dataset abgewählt sind (z. B. `bashclub:zsync=false`), bekommen keinen
-Service; der Service der Config und `-s` nennen sie als `excluded`.
+Service; der Service der Config und `-s` nennen sie als `excluded`. Ebenso ohne Service: Replikate, die auf dem
+Backupserver ignoriert werden (`bashclub:zsync-ignore=1`, `ignore` in [bashclub-zsync-maintenance](../04-betrieb/04-wartung.md)).
 
 ## Zustände des Services der Config
 | Zustand | Erkennung | Status |
@@ -104,6 +105,7 @@ Die Namen erscheinen in `bashclub-zsync --result` als `state.<zustand>=<anzahl>`
 | `orphan_kept` | behalten (`bashclub:zsync-orphan=keep`) | OK, Hinweis |
 | `branch` | alte Kette nach Rollback | WARN |
 | `branch_kept` | alte Kette behalten | OK, Hinweis |
+| `ignored` | auf dem Backupserver ignoriert (`bashclub:zsync-ignore=1`), nicht repliziert | OK, Hinweis |
 
 ## Schwellwerte ändern
 In `/etc/bashclub/zsync-checkmk.conf` (Sekunden bzw. Anzahl), z. B.:

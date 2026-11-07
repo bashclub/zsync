@@ -126,6 +126,8 @@ ds pool/untagged orphan_unselected $((T - 90000)) "is not selected for replicati
 expect "verwaist seit 25 h: WARN" 1 "2 datasets only on the target: pool/gone \(does not exist on the source, since 1d 1h\), pool/untagged \(is not selected for replication anymore, since 1d 1h\)"
 reset; last 0 $((T - 1800)); history 3600 6; ds pool/kept orphan_kept $((T - 900000)) "does not exist on the source"; ds pool/m no_snapshots $T ""
 expect "quittiert und ohne Snapshots: OK mit Hinweis" 0 "1 kept replicas without source, 1 datasets without matching snapshots"
+reset; last 0 $((T - 1800)); history 3600 6; ds pool/rpool ignored $((T - 90000)) ""
+expect "ignoriert (bashclub:zsync-ignore): OK mit Hinweis" 0 "ignored on the backup server \(bashclub:zsync-ignore\): pool/rpool"
 reset; last 0 $((T - 1800)); history 3600 6; ds pool/b cleanup_blocked $((T - 7200)) "oldest source snapshot zfs-auto-snap_backup-2026-07-20-1051 missing on the target"
 expect "Rotation am Ziel blockiert: WARN, Lauf ok" 1 "rotation on the target blocked: pool/b \(oldest source snapshot zfs-auto-snap_backup-2026-07-20-1051 missing on the target, since 2h 0m\)"
 reset; last 0 $((T - 1800)); history 3600 6; ds pool/x branched $T "new chain from daily-02, old chain x.zsync-branch-2026-10-17-1200"

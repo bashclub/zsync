@@ -12,16 +12,21 @@ aus. Warum: [Sicherheitsmodell](../01-konzept/06-sicherheitsmodell.md).
 | Typ | Fall | Optionen |
 |---|---|---|
 | `orphan` | Replikat ohne Dataset auf der Quelle oder nicht mehr ausgewählt | `keep`, `delete`, `later` |
-| `broken` | kein gemeinsamer Snapshot mit der Quelle, oder Replikat ohne Snapshots | `rename`, `delete`, `later` |
+| `broken` | kein gemeinsamer Snapshot mit der Quelle, oder Replikat ohne Snapshots | `rename`, `ignore`, `delete`, `later` |
 | `leftovers` | Snapshots des Labels in fremdem Namensschema am Replikat | `delete`, `later` |
 | `branch` | alte Kette nach einem Rollback oder einer gerissenen Kette (`<replikat>.zsync-branch-<datum>`) | `keep`, `delete`, `later` |
 | `key` | Schlüssel eines verschlüsselten Datasets auf der Quelle gewechselt, nicht übertragen (`key_change`) | `transfer`, `rename`, `later` |
 
 - `keep`: behalten als Archiv, ohne weitere Warnung (`bashclub:zsync-orphan=keep`)
-- `delete`: das Replikat mit allen Snapshots und Kindern löschen (`zfs destroy -r`)
+- `delete`: das Replikat mit allen Snapshots und Kindern löschen (`zfs destroy -r`). Liegen darunter Replikate, die
+  nicht zum Fall gehören, bietet das Werkzeug `delete` nicht an und lehnt es ab; es nennt diese Replikate.
 - `rename`: das alte Replikat in `<replikat>.zsync-branch-<datum>` umbenennen; der nächste Lauf überträgt neu und schiebt
   die Kinder unter das neue Replikat zurück. Das umbenannte ist danach eine alte Kette (`branch`) und wird behalten oder
   gelöscht. Ab 2.0 macht zsync das mit `broken_rename=1` selbst, ohne auf die Entscheidung zu warten.
+- `ignore` (Fall `broken`): das Replikat selbst nicht mehr replizieren, die Datasets darunter weiter wie bisher
+  (`bashclub:zsync-ignore=1`, nur am Replikat selbst gesetzt, die Kinder erben es nicht). Für einen Container ohne
+  eigene Snapshots, dessen Kinder gesunde Replikate sind, z. B. `rpool` eines PVE-Hosts. Checkmk nennt es als Hinweis.
+  Wieder replizieren: `zfs inherit bashclub:zsync-ignore <replikat>`, dann meldet der nächste Lauf den Fall erneut.
 - `transfer` (Fall `key`): der nächste Lauf überträgt das Dataset und die Datasets darunter; das Replikat öffnet danach
   nur noch mit dem neuen Schlüssel, auch seine alten Snapshots (`bashclub:zsync-key-accept=1`, der Lauf entfernt es).
   Beim Fall `key` behält `rename` das alte Replikat mit dem alten Schlüssel; Kinder, deren Schlüssel sich ebenfalls
@@ -34,6 +39,8 @@ bashclub-zsync-maintenance
 ```
 1. Übersicht aller offenen Fälle aller Configs, mit belegtem Platz. Datasets unter einem Fall desselben Typs zählen zu
    ihm (`+3 datasets below`): `delete` und `rename` nehmen sie mit, `keep` erben sie.
+   Andere Replikate darunter (`replicas below are not part of this case`) schützen den Fall vor `delete`: die Option
+   fehlt, und bei **per case type** bleibt dieser Fall offen und wird einzeln entschieden.
 2. Auswahl:
    - **all: later** (Standard): nichts ändern
    - **per case type:** eine Option für alle Fälle eines Typs; vorher eine Vorschau der ganzen Gruppe (alle Befehle, was

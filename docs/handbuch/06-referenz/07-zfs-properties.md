@@ -24,6 +24,7 @@ zfs get -t filesystem,volume -o name,value,source bashclub:zsync
 | `bashclub:zsync-target=<target>` | Target | ab 2.0: Markierung des Targets, an alle Replikate vererbt. In einer [Kaskade](../03-szenarien/06-kaskade.md) erkennt die zweite Stufe daran, dass ihre Quelle ein Replikat ist, und legt dort keine Snapshots an |
 | `bashclub:zsync-source.<property>` | Replikat | ab 2.0: Wert einer Property auf der Quelle, die die Replikation ändert oder weglässt, als `<local\|inherited\|default\|received>:<wert>`; betrifft `mountpoint`, `canmount`, `com.sun:auto-snapshot`, `refquota`, das Tag und ohne root alle Properties, die der Benutzer nicht setzen darf |
 | `bashclub:zsync-orphan=keep` | Replikat | ab 2.0: Replikat ohne Quelle als Archiv behalten, ohne Warnung; gesetzt von `bashclub-zsync-maintenance` (`keep`) |
+| `bashclub:zsync-ignore=1` | Replikat | ab 2.0: das Replikat selbst nicht mehr replizieren, die Datasets darunter weiter (nur am Replikat selbst gesetzt zählt); gesetzt von `bashclub-zsync-maintenance` (`ignore`), entfernen mit `zfs inherit` |
 | `bashclub:zsync-branch` | alte Kette | ab 2.0: `<datum>;<grund>` an `<replikat>.zsync-branch-<datum>`, der alten Kette nach einem Rollback auf der Quelle |
 | `bashclub:zsync-case` | Replikat | ab 2.0: offener Fall für `bashclub-zsync-maintenance`, `<typ>;<seit>;<config>;<detail>`; zsync setzt und entfernt sie selbst |
 | `bashclub:zsync-restore-clone` | Klon | ab 2.0: Snapshot, aus dem `bashclub-zsync-restore mount` den Klon gemacht hat |
