@@ -36,6 +36,11 @@ jobs:
           git log -1 --oneline
       - name: Prüfen
         run: cd src && tests/handbuch.sh
+      - name: Netz (Diagnose)
+        run: |
+          cat /etc/resolv.conf; hostname; getent hosts docs.bashclub.org code.bashclub.org || true
+          python3 -c 'import socket; print(socket.getaddrinfo("docs.bashclub.org", 443)[0])' || true
+          echo "server_url=${{ github.server_url }}"
       - name: Nach Outline
         env:
           OUTLINE_API_KEY: ${{ secrets.OUTLINE_API_KEY }}
