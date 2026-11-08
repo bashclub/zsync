@@ -1,5 +1,7 @@
 name: handbuch
-# Das Handbuch (docs/handbuch) gehört zur Software: jede Änderung auf main geht nach Outline (docs.bashclub.org).
+# Das Handbuch (docs/handbuch) gehört zur Software und geht mit dem Release nach Outline (docs.bashclub.org):
+# mit Änderungen am Code veröffentlicht package.yml es, wenn die Pakete veröffentlicht sind (Job handbuch); dieser
+# Workflow prüft es in jedem PR und veröffentlicht Pushes, die nur die Doku ändern (docs/handbuch/ci.sh).
 # Veröffentlicht werden nur Seiten, deren aufbereiteter Text sich gegenüber dem vorigen Stand ändert, auch der Link
 # „Weiter“ eines Nachbarn. Neue Artikel werden zuerst von Hand angelegt (docs/handbuch/README.md, Veröffentlichen).
 # Secret OUTLINE_API_KEY: API-Schlüssel (Bereich write) eines Outline-Benutzers mit „Kann bearbeiten“ auf der Collection
@@ -34,25 +36,15 @@ jobs:
           # im PR der Zielbranch, um den Stand vor dem PR zu kennen
           [ -z "${{ github.base_ref }}" ] || git fetch -q "${{ github.server_url }}/${{ github.repository }}" "refs/heads/${{ github.base_ref }}:refs/base"
           git log -1 --oneline
-      - name: Prüfen
-        run: cd src && tests/handbuch.sh
-      - name: Netz (Diagnose)
-        run: |
-          cat /etc/resolv.conf; hostname; getent hosts docs.bashclub.org code.bashclub.org || true
-          python3 -c 'import socket; print(socket.getaddrinfo("docs.bashclub.org", 443)[0])' || true
-          echo "server_url=${{ github.server_url }}"
-      - name: Nach Outline
+      - name: Prüfen und nach Outline
         env:
           OUTLINE_API_KEY: ${{ secrets.OUTLINE_API_KEY }}
           BEFORE: ${{ github.event.before }}
           EVENT: ${{ github.event_name }}
         run: |
           cd src
-          if [ "$EVENT" = pull_request ]; then
-            # nur zeigen, was nach dem Merge veröffentlicht würde
-            docs/handbuch/render.py publish --since "$(git merge-base HEAD refs/base)" --dry-run
-          elif [ "$EVENT" = push ] && [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            docs/handbuch/render.py publish --since "$BEFORE"
-          else
-            docs/handbuch/render.py publish
-          fi
+          case $EVENT in
+            pull_request) docs/handbuch/ci.sh pull_request refs/base ;;
+            push) docs/handbuch/ci.sh docs "$BEFORE" ;;
+            *) docs/handbuch/ci.sh all ;;
+          esac

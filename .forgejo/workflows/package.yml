@@ -83,3 +83,25 @@ jobs:
           git log -1 --oneline
       - name: Paket bauen, installieren und testen
         run: cd src && tests/integration/ci.sh
+
+  # Handbuch nach Outline, wenn die Pakete veröffentlicht sind: es gehört zum Release (docs/handbuch/ci.sh; reine
+  # Doku-Änderungen veröffentlicht handbuch.yml)
+  handbuch:
+    needs: [package, integration]
+    if: github.event_name == 'push'
+    runs-on: debian-13
+    steps:
+      - name: Werkzeuge
+        run: |
+          command -v git > /dev/null && command -v python3 > /dev/null || {
+            apt-get update -qq && apt-get install -y -qq ca-certificates git python3 > /dev/null; }
+      - name: Quellstand holen
+        run: |
+          rm -rf src && git init -q src && cd src
+          git fetch -q "${{ github.server_url }}/${{ github.repository }}" "${{ github.ref }}"
+          git checkout -q FETCH_HEAD
+          git log -1 --oneline
+      - name: Nach Outline
+        env:
+          OUTLINE_API_KEY: ${{ secrets.OUTLINE_API_KEY }}
+        run: cd src && docs/handbuch/ci.sh release "${{ github.event.before }}"
