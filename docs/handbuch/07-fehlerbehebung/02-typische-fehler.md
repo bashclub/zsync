@@ -60,6 +60,10 @@ alte Replikat unter neuem Namen, der nächste Lauf überträgt vollständig neu;
 [Entscheidungen](../04-betrieb/04-wartung.md). Ab 2.0 macht zsync das mit `broken_rename=1` (Default neuer Configs)
 selbst, sofern der Platz reicht.
 
+Hat das Replikat gar keinen Snapshot und ist nur ein Container, dessen Kinder gesunde Replikate sind (z. B. `rpool`
+eines PVE-Hosts, dessen Kinder `ROOT`, `data` usw. laufen), ist `ignore` die passende Entscheidung: zsync repliziert
+dann nur den Container nicht mehr. `delete` bietet das Werkzeug hier nicht an, es löschte die Kinder mit.
+
 Vorbeugen: `source_bookmark=1` (der Bookmark hält die Kette, auch wenn die Snapshots weg sind) und genug Snapshots auf
 der Quelle für die längste Pause des Backupservers.
 

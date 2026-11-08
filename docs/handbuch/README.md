@@ -64,10 +64,16 @@ Das Handbuch beschreibt 2.0 und alles danach. Eine Historie zu 1.0 gibt es nicht
 
 ## Veröffentlichen
 Das Handbuch gehört zur Software: Eine Änderung, die Admins oder Anwender bemerken, ändert das Handbuch im selben PR.
-Nach dem Merge auf `main` veröffentlicht die CI (`.forgejo/workflows/handbuch.yml`) die Seiten, deren aufbereiteter
-Text sich gegenüber dem vorigen Stand geändert hat, auch den Link „Weiter“ eines Nachbarn und `_collection.md` als
-Beschreibung der Collection. Im PR zeigt sie nur, was sie veröffentlichen würde. Von Hand starten veröffentlicht
-alle Seiten. Die CI braucht das Secret `OUTLINE_API_KEY` (API-Schlüssel mit „Kann bearbeiten“ auf der Collection; die Startseite braucht „Verwalten“, sonst überspringt die CI sie mit Hinweis). Lokal,
+Das Handbuch geht mit dem Release nach Outline, die CI schreibt es (`docs/handbuch/ci.sh`):
+- Änderungen am Code: wenn die Pakete veröffentlicht sind (Job `handbuch` in `.forgejo/workflows/package.yml`, nach
+  dem Integrationstest). Ein Tag `v*` veröffentlicht alle Seiten.
+- Änderungen nur an der Doku: nach dem Merge auf `main` (`.forgejo/workflows/handbuch.yml`).
+
+Veröffentlicht werden die Seiten, deren aufbereiteter Text sich gegenüber dem vorigen Stand geändert hat, auch der
+Link „Weiter“ eines Nachbarn und `_collection.md` als Beschreibung der Collection. Im PR zeigt die CI nur, was sie
+veröffentlichen würde. `handbuch.yml` von Hand starten veröffentlicht alle Seiten, z. B. nach einem roten Lauf. Die CI
+braucht das Secret `OUTLINE_API_KEY` (API-Schlüssel mit „Kann bearbeiten“ auf der Collection; die Startseite braucht
+„Verwalten“, sonst überspringt die CI sie mit Hinweis). Lokal,
 mit eigenem Schlüssel:
 ```bash
 docs/handbuch/render.py publish --since HEAD~1 --dry-run

@@ -189,7 +189,10 @@ löschen; der nächste Lauf überträgt neu.
 
 **`[ERROR] No snapshot found on … to add incremental snapshots to. …`** zusammen mit
 **`[ERROR] <dataset> - the replica has no snapshot, decide: …`**
-Das Replikat hat keinen Snapshot. Wie oben mit `bashclub-zsync-maintenance` entscheiden.
+Das Replikat hat keinen Snapshot. Wie oben mit `bashclub-zsync-maintenance` entscheiden. Ist es nur ein Container,
+dessen Kinder gesunde Replikate sind (z. B. `rpool` eines PVE-Hosts), `ignore` wählen: zsync repliziert dann nur ihn
+nicht mehr. Den Rat der ersten Meldung, das Dataset mit allen Kindern zu löschen, nicht befolgen; `delete` bietet das
+Werkzeug in diesem Fall nicht an.
 
 ## Je Dataset: Rotation
 **`[WARN] <dataset> - the oldest source snapshot of interval … (…) does not exist on …, no snapshots of this interval are deleted on the target.`**
