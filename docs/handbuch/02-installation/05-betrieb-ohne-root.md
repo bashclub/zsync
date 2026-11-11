@@ -93,7 +93,7 @@ ssh -p "$sshport" "root@$source_host" "install -d -m 3775 -g bashclub-zsync /var
 Einen Lauf starten und das Journal ansehen. `bashclub-zsync -s` läuft als root für diese Config automatisch als ihr
 Benutzer:
 ```bash
-systemctl start "bashclub-zsync@$name.service"
+systemctl start --wait "bashclub-zsync@$name.service"
 journalctl -u "bashclub-zsync@$name" -n 30 --no-pager
 bashclub-zsync -c "$conf" -s
 ```

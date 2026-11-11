@@ -68,7 +68,7 @@ fi
 6. Einen Lauf starten und prüfen. Im Log steht eine inkrementelle Übertragung („Replicating delta“), keine
    Erstreplikation und keine neue Kette:
 ```bash
-if [[ $trigger == systemd ]]; then systemctl start "bashclub-zsync@$name.service"; journalctl -u "bashclub-zsync@$name" -n 40 --no-pager; else bashclub-zsync -c "$conf"; fi
+if [[ $trigger == systemd ]]; then systemctl start --wait "bashclub-zsync@$name.service"; journalctl -u "bashclub-zsync@$name" -n 40 --no-pager; else bashclub-zsync -c "$conf"; fi
 bashclub-zsync -c "$conf" -s
 ```
    Danach den Timer wieder einschalten (oder die Cron-Zeile):

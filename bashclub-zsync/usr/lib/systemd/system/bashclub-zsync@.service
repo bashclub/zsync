@@ -7,7 +7,9 @@ Wants=network-online.target
 ConditionPathExists=/etc/bashclub/%i.conf
 
 [Service]
-Type=oneshot
+# exec, not oneshot: a manual systemctl start returns once the run has started instead of waiting for its end;
+# systemctl start --wait waits (#179)
+Type=exec
 # output goes to the journal (journalctl -u bashclub-zsync@<name>); user (run_as) and log file (log_file) come from
 # the configuration, the generator bashclub-zsync-generator writes them as drop-in
 ExecStart=/usr/bin/bashclub-zsync -c /etc/bashclub/%i.conf
