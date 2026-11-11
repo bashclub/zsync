@@ -453,7 +453,7 @@ case_timer() {
   check "Timer aktiv" systemctl is-active --quiet $unit
   check "Zeitplan umgerechnet" grep -q 'OnCalendar=\*-\*-\* 03:00:00' <<< "$(systemctl show -p TimersCalendar --value $unit)"
   local since; since=$(date '+%Y-%m-%d %H:%M:%S')
-  systemctl start bashclub-zsync@$name.service
+  systemctl start --wait bashclub-zsync@$name.service
   equal "Dienst erfolgreich" success "$(systemctl show -p Result --value bashclub-zsync@$name.service)"
   equal "repliziert" "zfs-auto-snap_daily-01" "$(snaps "$ZCI_POOL_DST/timer/$ZCI_POOL_SRC/data")"
   check "Log im Journal" grep -q 'Reading configuration /etc/bashclub/zci-timer.conf' <<< "$(journalctl -u bashclub-zsync@$name.service --since "$since" --no-pager)"
@@ -508,7 +508,7 @@ case_timer() {
   check "Config: beide Zeitpläne" grep -qE "^schedule='(\*/15 6-22 \* \* 1-5;25 6 \* \* \*|25 6 \* \* \*;\*/15 6-22 \* \* 1-5)'$" "$tconf"
   check "Config: Logdatei" grep -qx 'log_file=/var/log/bashclub-zsync/zci-timer.log' "$tconf"
   equal "beide Zeitpläne im Timer" 2 "$(systemctl show -p TimersCalendar --value $unit | grep -o OnCalendar= | wc -l)"
-  systemctl start bashclub-zsync@$name.service
+  systemctl start --wait bashclub-zsync@$name.service
   check "Ausgabe in der übernommenen Logdatei" grep -q 'Reading configuration' /var/log/bashclub-zsync/zci-timer.log
   check "erneute Migration findet nichts mehr" grep -q 'no cron jobs' <<< "$(ZSYNC_CRON_DIRS="$crondir/cron.d $crondir/cron.daily" bashclub-zsync-timer migrate --dry-run $name)"
   # aufräumen: ohne Config verschwindet der Timer mit sync
@@ -646,7 +646,7 @@ case_setup() {
   check "Jobbenutzer auf der Quelle mit command=" grep -q 'command="/usr/bin/bashclub-zsync-remote[ "]' "/var/lib/bashclub-zsync-source/$sjob/.ssh/authorized_keys"
   check "Rechte nur auf dem Ziel" grep -q "user zsync-zci-setup " <<< "$(zfs allow "$ZCI_POOL_DST/setup")"
   check "Timer aktiv" systemctl is-active --quiet bashclub-zsync@$name.timer
-  systemctl start bashclub-zsync@$name.service
+  systemctl start --wait bashclub-zsync@$name.service
   equal "erster Lauf erfolgreich" success "$(systemctl show -p Result --value bashclub-zsync@$name.service)"
   equal "Lauf als Jobbenutzer" zsync-zci-setup "$(systemctl show -p User --value bashclub-zsync@$name.service)"
   equal "Setup: Ziel ohne mountpoint" none "$(prop "$ZCI_POOL_DST/setup" mountpoint)"

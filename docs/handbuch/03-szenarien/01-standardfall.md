@@ -94,7 +94,7 @@ Den ersten Lauf starten und verfolgen (Strg-C beendet nur die Anzeige). Die Erst
 je nach Datenmenge Stunden; die folgenden Läufe übertragen nur Änderungen. Danach läuft die Replikation alle
 15 Minuten per Timer.
 ```bash
-systemctl start --no-block bashclub-zsync@pve1.service
+systemctl start bashclub-zsync@pve1.service
 journalctl -u bashclub-zsync@pve1 -f
 ```
 Danach die Replikate und den Zustand:

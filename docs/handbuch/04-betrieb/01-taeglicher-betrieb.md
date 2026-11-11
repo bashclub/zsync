@@ -60,9 +60,12 @@ Läuft der Timer gerade, wird der Lauf von Hand übersprungen (`Another run … 
 
 ## Einen Lauf außer der Reihe
 ```bash
-systemctl start --no-block bashclub-zsync@pve1.service
+systemctl start bashclub-zsync@pve1.service
+journalctl -fu bashclub-zsync@pve1
 ```
-Der Timer läuft danach normal weiter.
+Ab 2.0 kehrt `systemctl start` sofort zurück, der Lauf geht im Hintergrund weiter; `journalctl -fu` zeigt ihn
+(beenden mit Strg+C, der Lauf bleibt davon unberührt). Auf das Ende warten: `systemctl start --wait`. Der Timer läuft
+danach normal weiter.
 
 ## Replikationen kurz anhalten
 Für Wartung an Quelle oder Backupserver, z. B. vor einem Neustart der Quelle. Der Timer startet keine neuen Läufe,
